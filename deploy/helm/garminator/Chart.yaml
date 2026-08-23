@@ -1,0 +1,18 @@
+apiVersion: v2
+name: garminator
+description: >-
+  Ingestion, stockage et visualisation des données Garmin d'un triathlète
+  (ingestion Python, PostgreSQL, Grafana) — déploiement homelab, accès local uniquement.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - garmin
+  - triathlon
+  - postgresql
+  - grafana
+home: https://github.com/TheElysium/garminator
+maintainers:
+  - name: garminator
+sources:
+  - https://github.com/TheElysium/garminator

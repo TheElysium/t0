@@ -1,0 +1,136 @@
+{{- /*
+CronJob de reconciliation PVC <-> raw.fit_file.
+
+Materialise le "scan" que le commentaire de table de migrations/002_raw.sql
+promet depuis le debut ("Un fichier orphelin est inoffensif et rattrapable par
+un scan") et qui n'existait pas. Lecture seule des deux cotes : ce Job ne
+supprime aucun fichier et ne modifie aucune ligne. Le rapport nomme les
+anomalies, l'operateur decide -- supprimer un "orphelin" sur la foi d'un scan
+est irreversible.
+
+Le PVC est monte en readOnly: true, ce qui n'est pas decoratif : c'est la
+garantie mecanique, au niveau du kubelet, que meme un bug de ce module ne peut
+pas toucher a l'archive. Meme subPath que le CronJob de sondage
+(scheduler-cronjob.yaml), sans quoi le scan lirait un repertoire vide et
+rapporterait TOUTES les lignes comme "fichier absent".
+
+Reutilise l'image d'ingestion (`.Values.ingest.image`) : `garminator.ops` fait
+partie du meme paquet Python, livre dans la meme image -- aucune image separee.
+
+Code de sortie : 1 uniquement sur anomalie GRAVE (ligne sans fichier). Un
+fichier orphelin laisse le Job en succes, deliberement -- un CronJob qui echoue
+pour un fichier inutilise finit par ne plus etre lu du tout.
+*/ -}}
+{{- if .Values.opsReconcile.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "garminator.fullname" . }}-ops-reconcile
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ops-reconcile
+spec:
+  schedule: {{ .Values.opsReconcile.schedule | quote }}
+  # Tous les CronJobs du chart partagent ce fuseau : sans ce champ le controleur
+  # applique UTC, et l'ordre quotidien annonce dans values.yaml ne serait plus
+  # celui reellement execute -- avec un decalage qui change deux fois par an.
+  timeZone: {{ .Values.ingest.config.timezone | quote }}
+  # Un scan qui deborde sur le suivant n'apporterait rien : le second lirait le
+  # meme etat. Forbid evite l'empilement, et surtout evite deux parcours
+  # concurrents du PVC (le mode --deep relit tout le volume).
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.opsReconcile.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.opsReconcile.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.opsReconcile.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # Aucun reessai : un diagnostic en lecture seule qui rapporte une anomalie
+      # rapportera exactement la meme au reessai. Le relancer n'ajoute que du
+      # bruit dans les logs.
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            {{- include "garminator.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: ops-reconcile
+        spec:
+          restartPolicy: Never
+          # Ce Job ne parle qu'a PostgreSQL et au PVC : aucun identifiant Garmin,
+          # aucun jeton de compte de service.
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.ingest.securityContext | nindent 12 }}
+          containers:
+            - name: ops-reconcile
+              image: "{{ .Values.ingest.image.repository }}:{{ include "garminator.ingest.imageTag" . }}"
+              imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.ingest.containerSecurityContext | nindent 16 }}
+                seccompProfile:
+                  type: RuntimeDefault
+              command:
+                - python
+                - -m
+                - garminator.ops
+                - reconcile
+                # Doit etre le chemin de MONTAGE ci-dessous, qui est aussi celui
+                # utilise a l'ecriture (ingest.config.fitArchivePath) : les lignes
+                # raw.fit_file portent des chemins absolus.
+                - --archive-root
+                - {{ .Values.ingest.config.fitArchivePath | quote }}
+                {{- if .Values.opsReconcile.deep }}
+                - --deep
+                {{- end }}
+              env:
+                # PGUSER/PGPASSWORD DOIVENT etre definis avant
+                # GARMINATOR_POSTGRES_DSN : Kubernetes ne resout $(VAR) que parmi
+                # les variables DEJA declarees plus haut dans la meme liste `env`.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: password
+                # DSN via variable d'environnement, JAMAIS via --dsn : un argument
+                # de commande est visible en clair dans la liste des processus,
+                # y compris via `kubectl describe pod`.
+                - name: GARMINATOR_POSTGRES_DSN
+                  value: >-
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                # Ce Job ne monte pas la ConfigMap d'ingestion (il n'a besoin
+                # d'aucun reglage Garmin) : la verbosite est reprise ici seule,
+                # depuis la meme valeur, pour qu'un unique reglage vaille partout.
+                - name: GARMINATOR_LOG_LEVEL
+                  value: {{ .Values.ingest.config.logLevel | quote }}
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONPYCACHEPREFIX
+                  value: /tmp/pycache
+              resources:
+                {{- toYaml .Values.opsReconcile.resources | nindent 16 }}
+              volumeMounts:
+                - name: fit-archive
+                  mountPath: {{ .Values.ingest.config.fitArchivePath }}
+                  subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
+                  # Garantie mecanique, pas une convention : ce Job ne peut pas
+                  # ecrire sur l'archive, quoi que fasse le code.
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: fit-archive
+              persistentVolumeClaim:
+                claimName: {{ include "garminator.fitArchive.pvcName" . }}
+                readOnly: true
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
+{{- end }}

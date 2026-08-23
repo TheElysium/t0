@@ -1,0 +1,24 @@
+{{- if .Values.grafana.enabled }}
+{{- if not .Values.grafana.dashboards.configMapName }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "garminator.grafana.dashboardsConfigMapName" . }}
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+  annotations:
+    # Lot L9 : les fichiers JSON sont lus dans dashboards/*.json, À L'INTÉRIEUR de ce
+    # chart (deploy/helm/garminator/dashboards/), et non dupliqués en YAML inline ici.
+    # .Files ne voit que ce qui est sous la racine du chart : un répertoire dashboards/
+    # au niveau de deploy/grafana/ ne serait pas accessible depuis ce template, d'où son
+    # emplacement sous le chart. .helmignore ne les exclut pas (seuls .DS_Store, .git/,
+    # *.tmp, *.orig, *.swp le sont).
+    garminator.io/note: "contenu du lot L9 : dashboards/*.json de ce chart"
+data:
+  {{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

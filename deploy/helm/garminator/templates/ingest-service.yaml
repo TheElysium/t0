@@ -1,0 +1,21 @@
+{{- if .Values.ingest.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "garminator.fullname" . }}-ingest
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+spec:
+  # ClusterIP uniquement : pas d'exposition externe. L'athlète atteint
+  # l'endpoint d'upload FIT (lot L7) via `kubectl port-forward`.
+{{- include "garminator.assertLocalOnlyService" (dict "key" "ingest.service.type" "type" .Values.ingest.service.type) }}
+  type: {{ .Values.ingest.service.type }}
+  selector:
+    {{- include "garminator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+  ports:
+    - name: http
+      port: {{ .Values.ingest.service.port }}
+      targetPort: http
+{{- end }}

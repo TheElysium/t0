@@ -1,0 +1,28 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "garminator.fullname" . }}-grafana-dashboards-provider
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  # Provisioning "provider" Grafana : indique où lire les fichiers JSON de
+  # dashboards. Le contenu des dashboards (lot L9) arrive via la ConfigMap
+  # `{{ include "garminator.grafana.dashboardsConfigMapName" . }}`, montée
+  # dans /var/lib/grafana/dashboards par le Deployment Grafana. Ce fichier
+  # n'a pas besoin d'être modifié quand L9 ajoute des dashboards.
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: garminator
+        orgId: 1
+        folder: "garminator"
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: false
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false
+{{- end }}

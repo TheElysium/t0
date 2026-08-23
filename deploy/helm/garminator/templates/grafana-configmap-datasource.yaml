@@ -1,0 +1,27 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "garminator.fullname" . }}-grafana-datasource
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: PostgreSQL
+        type: postgres
+        access: proxy
+        url: {{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}
+        database: {{ .Values.postgresql.auth.database }}
+        user: {{ .Values.postgresql.auth.username }}
+        isDefault: true
+        editable: false
+        secureJsonData:
+          password: $POSTGRESQL_PASSWORD
+        jsonData:
+          sslmode: disable
+          postgresVersion: 1600
+          timescaledb: false
+{{- end }}

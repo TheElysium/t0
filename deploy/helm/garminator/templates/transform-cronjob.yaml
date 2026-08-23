@@ -1,0 +1,133 @@
+{{- /*
+CronJob de transformation `raw.fit_file` -> `core.*`.
+
+C'est le maillon qui manquait : le sondage (scheduler) archive les fichiers et
+insere les lignes `raw.*`, `ops-refresh` rafraichit les vues `mart.*`, mais rien
+ne remplissait `core.*` entre les deux. Un rafraichissement sur des tables
+`core.*` vides REUSSIT -- il recopie du vide -- et les tableaux de bord restent
+blancs sans qu'aucun voyant ne s'allume. D'ou la place de ce Job dans la
+journee : APRES le sondage (05h00) et AVANT `ops-refresh` (05h30).
+
+Ce Job LIT l'archive des fichiers originaux (`storage_path` de `raw.fit_file`
+est un chemin absolu sous `ingest.config.fitArchivePath`) : le PVC doit donc
+etre monte au MEME point de montage que dans le CronJob de sondage, sinon les
+chemins enregistres en base ne resolvent nulle part. Il est monte en lecture
+seule, comme pour `ops-reconcile` : la transformation n'a aucune raison
+d'ecrire sur l'archive, et la garantie vaut mieux ecrite dans le manifest que
+supposee dans le code.
+
+Reutilise l'image d'ingestion (`.Values.ingest.image`) : `garminator.transform`
+fait partie du meme paquet Python, livre dans la meme image.
+*/ -}}
+{{- if .Values.transform.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "garminator.fullname" . }}-transform
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: transform
+spec:
+  schedule: {{ .Values.transform.schedule | quote }}
+  # Sans ce champ, le controleur applique UTC alors que le CronJob de sondage
+  # tourne en heure locale : la fenetre reelle entre les deux Jobs ne serait plus
+  # celle qu'annonce values.yaml, et changerait deux fois par an.
+  timeZone: {{ .Values.ingest.config.timezone | quote }}
+  # Deux passages simultanes ne corrompraient rien (l'ecriture est idempotente
+  # et `parsed_at` sort le fichier de la file), mais ils se disputeraient les
+  # memes lignes pour refaire le meme travail. Forbid evite l'empilement.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.transform.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.transform.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.transform.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # Un fichier fautif est isole par le code (parse_error) et ne fait pas
+      # echouer le passage : un code de sortie 1 signale donc un incident deja
+      # consigne, que rejouer a l'identique ne corrigera pas. Deux tentatives
+      # au plus, pour couvrir la seule cause vraiment transitoire (base
+      # indisponible au demarrage du pod).
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "garminator.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: transform
+        spec:
+          restartPolicy: OnFailure
+          # Ce Job ne parle qu'a PostgreSQL et au PVC : aucun identifiant
+          # Garmin, aucun jeton de compte de service.
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.ingest.securityContext | nindent 12 }}
+          containers:
+            - name: transform
+              image: "{{ .Values.ingest.image.repository }}:{{ include "garminator.ingest.imageTag" . }}"
+              imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.ingest.containerSecurityContext | nindent 16 }}
+                seccompProfile:
+                  type: RuntimeDefault
+              command: ["python", "-m", "garminator.transform"]
+              args:
+                - "--limit"
+                - {{ .Values.transform.batchLimit | quote }}
+              env:
+                # PGUSER/PGPASSWORD DOIVENT etre definis avant
+                # GARMINATOR_POSTGRES_DSN ci-dessous : Kubernetes ne resout
+                # $(VAR) que parmi les variables DEJA declarees plus haut dans
+                # la meme liste `env` (ordre du tableau, pas ordre alphabetique).
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: password
+                # DSN fourni via variable d'environnement, JAMAIS via un
+                # argument --dsn : un argument de commande est visible en clair
+                # dans la liste des processus, y compris via
+                # `kubectl describe pod` (spec.containers[].command).
+                - name: GARMINATOR_POSTGRES_DSN
+                  value: >-
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                # Ce Job ne monte pas la ConfigMap d'ingestion (il n'a besoin
+                # d'aucun reglage Garmin) : la verbosite est reprise ici seule,
+                # depuis la meme valeur, pour qu'un unique reglage vaille partout.
+                - name: GARMINATOR_LOG_LEVEL
+                  value: {{ .Values.ingest.config.logLevel | quote }}
+                # Racine en lecture seule : tout ce que le runtime Python ecrit
+                # par defaut sous $HOME ou dans les caches doit aller dans /tmp.
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONPYCACHEPREFIX
+                  value: /tmp/pycache
+              resources:
+                {{- toYaml .Values.transform.resources | nindent 16 }}
+              volumeMounts:
+                # MEME mountPath que le CronJob de sondage : `storage_path` est
+                # un chemin absolu enregistre en base a l'archivage.
+                - name: fit-archive
+                  mountPath: {{ .Values.ingest.config.fitArchivePath }}
+                  subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
+                  # Garantie mecanique, pas une convention : ce Job ne peut pas
+                  # ecrire sur l'archive, quoi que fasse le code.
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: fit-archive
+              persistentVolumeClaim:
+                claimName: {{ include "garminator.fitArchive.pvcName" . }}
+                readOnly: true
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
+{{- end }}

@@ -1,0 +1,140 @@
+{{- /*
+CronJob de sondage planifie -- le poller quotidien proprement dit.
+
+Execute `python -m garminator.scheduler`, qui : lit l'etat persiste des fenetres
+(raw.poll_window), sonde aupres de Garmin UNIQUEMENT les jours dus, enregistre les
+payloads bruts, puis archive sur le PVC les fichiers originaux (.FIT/.TCX) des
+activites du jour -- seule source des donnees seconde-par-seconde, que l'API JSON
+ne fournit pas.
+
+Ce Job REMPLACE fonctionnellement l'ancienne intention d'une boucle interne au
+Deployment ingest (values `ingest.config.pollIntervalMinutes`, sans effet) : un
+CronJob redemarre proprement apres panne, ne consomme rien entre deux runs, et son
+etat d'avancement vit en base plutot qu'en memoire de processus.
+
+`concurrencyPolicy: Forbid` n'est PAS un detail de confort : deux runs simultanes
+authentifieraient deux sessions Garmin en parallele sur le meme compte, et une salve
+d'authentifications est precisement ce qui fait bloquer un compte Garmin Connect.
+Le token store est monte depuis le PVC pour la meme raison : sans persistance, chaque
+run refait un SSO complet.
+
+Le rattrapage historique n'a pas de Job distinct : le scheduler comble lui-meme les
+fenetres manquantes depuis `historyStart`, au rythme de `--max-windows-per-endpoint`
+par run et par endpoint. `ops-backfill-status` en publie l'avancement.
+*/ -}}
+{{- if .Values.scheduler.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "garminator.fullname" . }}-scheduler
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  schedule: {{ .Values.scheduler.schedule | quote }}
+  timeZone: {{ .Values.ingest.config.timezone | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.scheduler.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.scheduler.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.scheduler.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # Aucun reessai automatique : une fenetre en echec est deja marquee 'failed' en
+      # base et rejouee au run suivant. Relancer immediatement le Job entier ne ferait
+      # que repeter un appel qui vient d'echouer -- et, si la cause est une
+      # authentification refusee, accelererait le blocage du compte.
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            {{- include "garminator.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: scheduler
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.ingest.securityContext | nindent 12 }}
+          containers:
+            - name: scheduler
+              image: "{{ .Values.ingest.image.repository }}:{{ include "garminator.ingest.imageTag" . }}"
+              imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.ingest.containerSecurityContext | nindent 16 }}
+                seccompProfile:
+                  type: RuntimeDefault
+              command:
+                - python
+                - -m
+                - garminator.scheduler
+                - --max-windows-per-endpoint
+                - {{ .Values.scheduler.maxWindowsPerEndpoint | quote }}
+                {{- if not .Values.scheduler.activityFiles }}
+                - --no-activity-files
+                {{- end }}
+                {{- range .Values.scheduler.endpoints }}
+                - --endpoint
+                - {{ . | quote }}
+                {{- end }}
+              envFrom:
+                - configMapRef:
+                    name: {{ include "garminator.fullname" . }}-ingest
+              env:
+                - name: GARMINATOR_GARMIN_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.garminSecret.name }}
+                      key: {{ .Values.garminSecret.usernameKey }}
+                - name: GARMINATOR_GARMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.garminSecret.name }}
+                      key: {{ .Values.garminSecret.passwordKey }}
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: password
+                - name: GARMINATOR_POSTGRES_DSN
+                  value: >-
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                # Racine en lecture seule : tout ce que le runtime Python ecrit par
+                # defaut sous $HOME ou dans les caches doit aller dans /tmp.
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+                - name: XDG_CACHE_HOME
+                  value: /tmp/cache
+                - name: XDG_CONFIG_HOME
+                  value: /tmp/config
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONPYCACHEPREFIX
+                  value: /tmp/pycache
+              resources:
+                {{- toYaml .Values.scheduler.resources | nindent 16 }}
+              volumeMounts:
+                # Archive des fichiers originaux : ecrits ET fsyncs avant l'insertion
+                # en base (principe ELT, lot L3).
+                - name: fit-archive
+                  mountPath: {{ .Values.ingest.config.fitArchivePath }}
+                  subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
+                # Token store Garmin -- persistant, voir l'entete de ce fichier.
+                - name: fit-archive
+                  mountPath: {{ .Values.ingest.config.garminTokensPath }}
+                  subPath: {{ .Values.fitArchive.subPaths.garminTokens }}
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: fit-archive
+              persistentVolumeClaim:
+                claimName: {{ include "garminator.fitArchive.pvcName" . }}
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
+{{- end }}

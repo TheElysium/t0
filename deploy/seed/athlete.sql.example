@@ -1,0 +1,79 @@
+-- GABARIT d'amorçage de `core.athlete` et `core.threshold`.
+--
+-- POURQUOI CE N'EST PAS UNE MIGRATION. Les valeurs ci-dessous sont des données
+-- personnelles : poids, fréquences cardiaques, seuils physiologiques. Une migration est
+-- committée, poussée sur GitHub et rejouée à l'identique partout ; ce gabarit reste un
+-- gabarit, on le copie hors du dépôt avant de le remplir. C'est le même raisonnement
+-- que pour les fichiers .FIT originaux, qui portent des traces GPS : le dépôt contient
+-- la PROCÉDURE, jamais la donnée.
+--
+--   cp deploy/seed/athlete.sql.example ~/garminator-seed.sql   # HORS du dépôt
+--   $EDITOR ~/garminator-seed.sql
+--   psql "$GARMINATOR_POSTGRES_DSN" -f ~/garminator-seed.sql
+--
+-- POURQUOI C'EST OBLIGATOIRE. `python -m garminator.transform` refuse de deviner
+-- l'athlète : sur une `core.athlete` vide il s'arrête en code 2 sans rien écrire. Et
+-- sans ligne de `core.threshold`, aucun TSS n'est jamais calculé -- les activités
+-- seraient bien enregistrées, mais toute la charge d'entraînement resterait NULL.
+--
+-- Le fichier est enveloppé dans une transaction : en cas d'erreur en cours de route,
+-- rien n'est inséré et il peut être relancé tel quel après correction.
+
+BEGIN;
+
+-- `sex` n'est pas cosmétique : il sélectionne le coefficient du TRIMP de Banister
+-- (0.64/1.92 homme, 0.86/1.67 femme). `birth_date` peut rester NULL, aucun calcul ne
+-- le lit aujourd'hui.
+INSERT INTO core.athlete (display_name, sex, home_timezone)
+VALUES ('<prénom>', '<male|female>', 'Europe/Paris');
+
+-- Les quatre lignes ci-dessous supposent que l'INSERT précédent a produit
+-- `athlete_id = 1`, ce qui est le cas sur une base neuve. Après un échec partiel, la
+-- séquence IDENTITY a pu avancer : vérifier avec `SELECT athlete_id FROM core.athlete;`
+-- et ajuster.
+--
+-- `validity` est un intervalle semi-ouvert [début, fin). La borne haute absente désigne
+-- le seuil COURANT ; `<début>` est typiquement la date de début d'historique
+-- (`ingest.config.backfillStartDate` du chart Helm).
+--
+-- RÈGLE ABSOLUE POUR LA SUITE : ne JAMAIS corriger un seuil par UPDATE. Fermer la
+-- période en cours et en ouvrir une nouvelle. Un UPDATE réécrirait rétroactivement tout
+-- l'historique de CTL sans qu'aucune contrainte ne proteste. La contrainte d'exclusion
+-- GiST garantit seulement l'absence de recouvrement entre deux périodes.
+
+-- VÉLO. `ftp_watts` = puissance mécanique mesurée. `rftp_watts` et `css_m_s` sont
+-- interdits ici par contrainte CHECK : les échelles de puissance vélo et course ne sont
+-- pas comparables. `power_source` documente l'origine de la mesure (`garmin_native`,
+-- `stryd`, `powermeter_<modèle>`, `home_trainer`) ; en changer DOIT clore la période.
+INSERT INTO core.threshold
+  (athlete_id, discipline, validity, ftp_watts, power_source, source, note)
+VALUES
+  (1, 'bike', '[<début>,)', <ftp_watts>, '<power_source>', 'manual', NULL);
+
+-- COURSE. `ftp_pace_s_per_km` = allure seuil en SECONDES par kilomètre (4:30/km = 270).
+-- `rftp_watts` est la puissance course modélisée par Garmin : la laisser NULL tant
+-- qu'elle n'a pas été réellement testée. NULL signifie « inconnu » et fait basculer le
+-- calcul sur l'allure ; une valeur inventée produirait des TSS faux mais crédibles.
+INSERT INTO core.threshold
+  (athlete_id, discipline, validity, ftp_pace_s_per_km, rftp_watts, power_source, source, note)
+VALUES
+  (1, 'run', '[<début>,)', <allure_seuil_s_par_km>, NULL, '<power_source>', 'manual', NULL);
+
+-- NATATION. `css_m_s` = vitesse critique en MÈTRES PAR SECONDE (1:50/100 m = 0.909091).
+-- Mettre `css_estimated = true` si la valeur vient du repli « 1000 m CLM x 0.97 » et non
+-- d'un vrai double test 200/400 m : Grafana distingue les deux, un sTSS bâti sur une CSS
+-- estimée n'a pas le même statut.
+INSERT INTO core.threshold
+  (athlete_id, discipline, validity, css_m_s, css_estimated, source, note)
+VALUES
+  (1, 'swim', '[<début>,)', <css_m_s>, <true|false>, 'manual', NULL);
+
+-- COMMUN À TOUTES LES DISCIPLINES. C'est cette ligne, et elle seule, que le calcul de
+-- hrTSS et de TRIMP consulte pour les fréquences cardiaques : sans elle, aucune charge
+-- de repli n'est calculable pour les séances sans puissance.
+INSERT INTO core.threshold
+  (athlete_id, discipline, validity, lthr_bpm, hr_max_bpm, hr_rest_bpm, weight_kg, source)
+VALUES
+  (1, 'all', '[<début>,)', <lthr>, <fc_max>, <fc_repos>, <poids_kg>, 'manual');
+
+COMMIT;

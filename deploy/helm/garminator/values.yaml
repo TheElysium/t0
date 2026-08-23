@@ -1,0 +1,456 @@
+# values.yaml — garminator
+#
+# Chart pensé pour un accès STRICTEMENT LOCAL : aucun Ingress, aucun TLS.
+# L'athlète accede aux services via `kubectl port-forward`. Voir le README
+# du chart pour les commandes exactes, dont la creation manuelle du Secret
+# Garmin (jamais cree par ce chart).
+
+# -----------------------------------------------------------------------
+# Espace de noms logique / etiquetage commun
+# -----------------------------------------------------------------------
+nameOverride: ""
+fullnameOverride: ""
+
+commonLabels: {}
+
+# -----------------------------------------------------------------------
+# Secret Garmin — REFERENCE, JAMAIS CREE PAR CE CHART.
+#
+# Le compte Garmin de l'athlete n'a pas de 2FA : ce Secret vaut l'acces
+# complet au compte. Il doit etre cree a la main par l'athlete AVANT
+# `helm install`, avec au minimum les cles `username` et `password`.
+# Voir README.md pour la commande `kubectl create secret generic` exacte.
+# Un Secret Kubernetes est encode en base64, PAS chiffre : quiconque a
+# acces a l'API server ou a etcd non chiffre peut le lire en clair.
+# -----------------------------------------------------------------------
+garminSecret:
+  # Nom du Secret existant a referencer (ne sera PAS cree par ce chart).
+  name: garminator-garmin-credentials
+  usernameKey: username
+  passwordKey: password
+
+# -----------------------------------------------------------------------
+# PostgreSQL
+# -----------------------------------------------------------------------
+postgresql:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
+  # Identifiants applicatifs PostgreSQL (compte de service DB, distinct
+  # du compte Garmin). Crees par ce chart dans un Secret dedie, car ce
+  # ne sont pas des identifiants Garmin — pas de risque de blocage de
+  # compte associe.
+  auth:
+    database: garminator
+    username: garminator
+    # OBLIGATOIRE si `existingSecret` est vide. AUCUNE generation aleatoire :
+    # le mot de passe reel de PostgreSQL est fige par `initdb` a la creation
+    # du volume de donnees et n'est plus jamais relu depuis POSTGRES_PASSWORD.
+    # Un mot de passe regenere a chaque `helm upgrade` produirait un Secret
+    # desynchronise du volume : l'application se verrait refuser
+    # l'authentification sur une base qui fonctionnait la veille.
+    # Le generer une fois puis le conserver dans un fichier de valeurs local
+    # (hors depot git) :
+    #     openssl rand -base64 32 | tr -d '/+=' | cut -c1-32
+    password: ""
+    # Alternative : Secret Kubernetes preexistant portant les cles `username`
+    # et `password`. Quand il est renseigne, le chart ne cree aucun Secret
+    # PostgreSQL et `password` ci-dessus est ignore.
+    existingSecret: ""
+
+  service:
+    port: 5432
+
+  # fsGroup du volume de donnees. L'image `postgres:*-alpine` utilise
+  # l'utilisateur postgres uid/gid 70 (et non 999 comme la variante Debian).
+  podSecurityContext:
+    fsGroup: 70
+
+  persistence:
+    enabled: true
+    storageClassName: ""
+    size: 10Gi
+    accessModes:
+      - ReadWriteOnce
+    # Sous-repertoire du volume monte utilise comme PGDATA. Ne jamais
+    # pointer PGDATA a la racine du point de montage (fichiers caches
+    # `lost+found` de certains provisioners).
+    pgdataSubPath: pgdata
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # Sondes basees sur pg_isready.
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# -----------------------------------------------------------------------
+# garminator-ingest — poll Garmin, parsing FIT, calculs, endpoint d'upload
+# -----------------------------------------------------------------------
+ingest:
+  replicaCount: 1
+
+  image:
+    # Image publiee par la CI sur GHCR (.github/workflows/publish-image.yml, qui
+    # utilise ghcr.io/${{ github.repository }}). En minuscules : GHCR n'accepte
+    # pas de majuscule dans un nom d'image, alors que le depot s'ecrit TheElysium.
+    repository: ghcr.io/theelysium/garminator
+    tag: ""            # defaut : .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8080
+
+  # Variables d'environnement non sensibles (ConfigMap). Les identifiants
+  # Garmin et le mot de passe PostgreSQL arrivent via Secret (secretKeyRef),
+  # jamais via cette ConfigMap.
+  config:
+    # Verbosite du journal applicatif. Rendue dans la ConfigMap sous le nom
+    # GARMINATOR_LOG_LEVEL et reprise a l'identique par les CronJobs ops, qui
+    # ne montent pas cette ConfigMap. Valeurs : DEBUG, INFO, WARNING, ERROR.
+    # Une valeur inconnue ne fait PAS echouer le pod : repli sur INFO, signale
+    # par un avertissement dans le journal lui-meme.
+    logLevel: INFO
+    # Chemin du token store Garmin (session persistante). SANS cette
+    # variable, chaque redemarrage du pod referait une authentification
+    # SSO complete, ce qui expose le compte (sans 2FA) au blocage.
+    garminTokensPath: /data/garmin-tokens
+    fitArchivePath: /data/fit-archive
+    # NOTE : plus aucun reglage de cadence ici. Le sondage est un CronJob
+    # (`scheduler.schedule`), pas une boucle interne au Deployment.
+    # Date de debut du backfill (lot L10) — debut reel de l'historique.
+    backfillStartDate: "2025-04-03"
+    # Fuseau horaire de l'athlete, utilise pour les bornes de journee.
+    timezone: "Europe/Paris"
+
+  # Variables d'environnement supplementaires libres (liste [{name, value}]
+  # ou [{name, valueFrom}]), fusionnees apres celles generees par le chart.
+  extraEnv: []
+
+  # Taille maximale de l'emptyDir monte sur /tmp (racine en lecture seule).
+  # Borne l'usage de stockage ephemere du noeud par les telechargements FIT.
+  tmpDirSizeLimit: 1Gi
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# -----------------------------------------------------------------------
+# Archive des fichiers FIT — PVC partage entre l'ingestion et le CronJob
+# de sauvegarde. Contient aussi le token store Garmin (sous-repertoire)
+# et les dumps PostgreSQL (sous-repertoire), pour rester a TROIS PVC.
+# -----------------------------------------------------------------------
+fitArchive:
+  persistence:
+    storageClassName: ""
+    size: 20Gi
+    accessModes:
+      - ReadWriteOnce
+  # Sous-repertoires (subPath) dans ce PVC unique.
+  subPaths:
+    fitFiles: fit-files
+    garminTokens: garmin-tokens
+    postgresBackups: postgres-backups
+
+# -----------------------------------------------------------------------
+# Grafana
+# -----------------------------------------------------------------------
+grafana:
+  enabled: true
+  image:
+    repository: grafana/grafana
+    tag: "11.1.0"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  persistence:
+    enabled: true
+    storageClassName: ""
+    size: 2Gi
+    accessModes:
+      - ReadWriteOnce
+
+  # Identifiant admin local (acces par port-forward, pas d'Ingress).
+  # `password` est OBLIGATOIRE si `existingSecret` est vide : aucune
+  # generation aleatoire, pour qu'un `helm upgrade` ne fasse jamais deriver
+  # le contenu du Secret par rapport a ce que l'athlete a note.
+  admin:
+    user: admin
+    password: ""
+    # Secret preexistant portant les cles `admin-user` et `admin-password`.
+    existingSecret: ""
+
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Emplacement de provisionnement des tableaux de bord (lot L9).
+  # Ce chart cree la ConfigMap et le mecanisme de montage ; le CONTENU
+  # (fichiers JSON de dashboards) est volontairement laisse vide et sera
+  # rempli par le lot L9. Pour ajouter des dashboards sans modifier le
+  # chart, il est aussi possible de fournir dashboardsConfigMapName.
+  dashboards:
+    # Si vide, une ConfigMap vide `<fullname>-grafana-dashboards` est creee
+    # et montee — prete a recevoir des cles `*.json` (L9).
+    configMapName: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -----------------------------------------------------------------------
+# Sauvegarde PostgreSQL — CronJob hebdomadaire pg_dump
+# -----------------------------------------------------------------------
+backup:
+  enabled: true
+  schedule: "0 3 * * 0"    # dimanche 03h00
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  # Nombre de dumps conserves (rotation simple par purge des plus anciens).
+  retention: 8
+  # Delai au-dela duquel un declenchement manque (noeud eteint, cluster
+  # arrete) n'est PAS rattrape. Sans cette borne, un CronJob dont plus de
+  # 100 declenchements ont ete manques cesse definitivement de tourner.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -----------------------------------------------------------------------
+# Exploitation (lot L10) — CronJobs `python -m garminator.ops ...`.
+# Reutilisent l'image d'ingestion : `garminator.ops` fait partie du meme
+# paquet Python, il n'y a pas de seconde image a construire.
+# -----------------------------------------------------------------------
+
+# Rafraichissement des vues materialisees mart.* — a programmer APRES le
+# sondage quotidien : rafraichir avant lui recopierait simplement l'etat de
+# la veille. Le module bascule tout seul en mode NON concurrent pour une vue
+# jamais peuplee (REFRESH ... CONCURRENTLY la refuse), puis repasse en
+# concurrent aux runs suivants.
+# Transformation raw.fit_file -> core.* — le maillon qui alimente les vues.
+# Voir templates/transform-cronjob.yaml. Programme ENTRE le sondage (05h00) et
+# ops-refresh (05h30) : rafraichir des tables core.* vides REUSSIT et laisse
+# les tableaux de bord blancs sans qu'aucun voyant ne s'allume.
+transform:
+  enabled: true
+  schedule: "15 5 * * *"   # tous les jours 05h15, entre sondage et refresh
+  # Nombre maximal de fichiers traites par passage. Plusieurs passages courts
+  # valent mieux qu'un long qu'une eviction de pod ramenerait a zero : chaque
+  # fichier transforme est commite individuellement, un passage interrompu ne
+  # perd donc que le fichier en cours. Le backfill initial (historique depuis
+  # ingest.config.backfillStartDate) se resorbe ainsi sur plusieurs nuits ;
+  # augmenter ponctuellement cette valeur, ou declencher un Job manuel avec
+  # `kubectl create job --from=cronjob/...`, pour l'accelerer.
+  batchLimit: 200
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      # Le decodage FIT et le calcul des series sont faits en memoire, un
+      # fichier a la fois : la pointe suit la duree de la seance la plus
+      # longue, pas la taille du lot.
+      cpu: "1"
+      memory: 1Gi
+
+opsRefresh:
+  enabled: true
+  schedule: "30 5 * * *"   # tous les jours 05h30
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# Reconciliation PVC <-> raw.fit_file (lecture seule). Voir
+# templates/ops-reconcile-cronjob.yaml. Planifie APRES ops-refresh et le
+# sondage : un scan lance pendant un archivage verrait un etat transitoire
+# (fichier ecrit, ligne pas encore inseree) et crierait a l'orphelin.
+opsReconcile:
+  enabled: true
+  schedule: "0 7 * * *"   # tous les jours 07h00, apres sondage (05h00) et refresh (05h30)
+  # Recalcule le sha256 de CHAQUE fichier au lieu de comparer les tailles.
+  # Relit l'integralite du volume : a n'activer que sur soupcon de corruption
+  # silencieuse, ou ponctuellement via `kubectl create job --from=...`.
+  deep: false
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Sondage planifie -- le poller quotidien. Voir
+# templates/scheduler-cronjob.yaml pour le detail des choix (concurrencyPolicy,
+# backoffLimit, persistance du token store).
+scheduler:
+  enabled: true
+  # Une fois par jour, tot le matin : les donnees de la nuit (sommeil, HRV) sont
+  # alors consolidees cote Garmin. `refreshLookbackDays` (cote code, defaut 3)
+  # resonde de toute facon les jours recents, donc une consolidation tardive
+  # n'est jamais perdue.
+  schedule: "0 5 * * *"
+  # Borne de fenetres traitees par endpoint et par run. Elle etale le rattrapage
+  # initial sur plusieurs jours au lieu d'envoyer une salve de centaines
+  # d'appels au premier run -- ce qui est aussi ce qui protege le compte.
+  maxWindowsPerEndpoint: 60
+  # Telecharger les fichiers originaux (.FIT/.TCX) des activites sondees. Seule
+  # source des donnees seconde-par-seconde ; a ne desactiver que pour un run de
+  # rattrapage purement JSON.
+  activityFiles: true
+  # DOIT rester identique a `opsBackfill.endpoints` ci-dessus.
+  endpoints:
+    - get_sleep_data
+    - get_hrv_data
+    - get_rhr_day
+    - get_stress_data
+    - get_body_battery
+    - get_training_readiness
+    - get_training_status
+    - get_body_composition
+    - get_max_metrics
+    - get_activities_by_date
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# Bilan de rattrapage historique — job de SURVEILLANCE en lecture seule : il
+# imprime les fenetres encore dues, il n'en sonde aucune (le rattrapage est
+# fait par le sondage lui-meme, qui traite les plus vieilles fenetres
+# d'abord).
+#
+# L'adaptateur WindowFetcher -> GarminClient etant desormais cable (le CronJob
+# `scheduler` ci-dessous sonde reellement), ce bilan a de nouveau du sens : il
+# rapporte un retard qui se resorbe run apres run, et non plus un retard
+# integral permanent. Activable en meme temps que `scheduler.enabled`.
+opsBackfill:
+  enabled: true
+  schedule: "0 6 * * *"    # tous les jours 06h00, apres le refresh
+  # Doit rester ALIGNEE sur la date de debut d'historique du sondage : un
+  # ecart ferait porter le bilan sur une periode que personne ne sonde.
+  # Valeur identique a garminator.ops.backfill.DEFAULT_HISTORY_START_ISO.
+  historyStart: "2025-04-03"
+  # DOIT rester identique a `scheduler.endpoints` ci-dessous : le bilan compare
+  # les fenetres attendues aux fenetres sondees, donc un endpoint present ici et
+  # absent la-bas serait rapporte comme un retard eternel, et l'inverse masquerait
+  # un vrai trou. Copie de `garminator.scheduler.catalog.DEFAULT_ENDPOINTS`.
+  endpoints:
+    - get_sleep_data
+    - get_hrv_data
+    - get_rhr_day
+    - get_stress_data
+    - get_body_battery
+    - get_training_readiness
+    - get_training_status
+    - get_body_composition
+    - get_max_metrics
+    - get_activities_by_date
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -----------------------------------------------------------------------
+# NetworkPolicy — desactivee par defaut (homelab, reseau deja de confiance).
+# Quand activee : n'autorise que le trafic entre les composants du chart
+# et le trafic sortant DNS + HTTPS (necessaire a l'API Garmin) pour ingest.
+# -----------------------------------------------------------------------
+networkPolicy:
+  enabled: false

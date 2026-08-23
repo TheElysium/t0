@@ -1,0 +1,90 @@
+{{- if .Values.networkPolicy.enabled }}
+---
+# PostgreSQL : n'accepte que le trafic entrant de l'ingestion, de Grafana
+# et du CronJob de sauvegarde (mêmes labels de release).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "garminator.fullname" . }}-postgresql
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "garminator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgresql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "garminator.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# Ingestion : sortie autorisée vers PostgreSQL, DNS, et HTTPS (API Garmin).
+# Aucune entrée requise sauf si le port d'upload FIT est utilisé depuis un
+# autre pod du même Release (port-forward n'est pas concerné par les
+# NetworkPolicy : il parle directement au kubelet/pod).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "garminator.fullname" . }}-ingest
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "garminator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ingest
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "garminator.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Grafana : sortie autorisée uniquement vers PostgreSQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "garminator.fullname" . }}-grafana
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "garminator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: grafana
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "garminator.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+{{- end }}

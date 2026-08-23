@@ -1,0 +1,55 @@
+garminator {{ .Chart.Version }} deploye dans le namespace {{ .Release.Namespace }}.
+
+ACCES STRICTEMENT LOCAL : aucun Ingress, aucun TLS. Tout passe par port-forward.
+
+  # Grafana
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "garminator.fullname" . }}-grafana {{ .Values.grafana.service.port }}:{{ .Values.grafana.service.port }}
+{{- if .Values.ingest.service.enabled }}
+
+  # Endpoint d'upload manuel de fichiers .FIT
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "garminator.fullname" . }}-ingest {{ .Values.ingest.service.port }}:{{ .Values.ingest.service.port }}
+{{- end }}
+
+  # PostgreSQL
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "garminator.postgresql.serviceName" . }} {{ .Values.postgresql.service.port }}:{{ .Values.postgresql.service.port }}
+
+SONDAGE GARMIN
+
+{{- if .Values.scheduler.enabled }}
+  Le CronJob `{{ include "garminator.fullname" . }}-scheduler` sonde Garmin selon
+  la cadence `{{ .Values.scheduler.schedule }}` et rattrape l'historique depuis
+  {{ .Values.ingest.config.backfillStartDate }}, passage apres passage.
+{{- if not .Values.scheduler.activityFiles }}
+  ATTENTION : `scheduler.activityFiles=false` -- les fichiers .FIT/.TCX ne sont PAS
+  telecharges. Les donnees seconde-par-seconde n'arriveront pas tant que ce drapeau
+  reste a false.
+{{- end }}
+
+  Pour un premier passage immediat, sans attendre la cadence planifiee :
+
+    kubectl create job -n {{ .Release.Namespace }} --from=cronjob/{{ include "garminator.fullname" . }}-scheduler premier-sondage
+{{- else }}
+  ATTENTION : le CronJob de sondage est DESACTIVE (scheduler.enabled=false).
+  Rien dans ce deploiement n'interroge Garmin : la base restera vide.
+{{- end }}
+
+RAPPELS DE SECURITE
+
+  1. Le Secret Garmin `{{ .Values.garminSecret.name }}` n'est PAS cree par ce chart.
+     S'il n'existe pas dans ce namespace, le pod d'ingestion restera bloque en
+     CreateContainerConfigError. Verifier :
+
+       kubectl get secret -n {{ .Release.Namespace }} {{ .Values.garminSecret.name }}
+
+  2. Un Secret Kubernetes est encode en base64, PAS chiffre. Le compte Garmin
+     n'ayant pas de 2FA, ce Secret vaut l'acces complet au compte.
+
+  3. Le mot de passe PostgreSQL est celui que VOUS avez fourni
+     ({{ if .Values.postgresql.auth.existingSecret }}Secret preexistant `{{ .Values.postgresql.auth.existingSecret }}`{{ else }}`postgresql.auth.password`{{ end }}).
+     Il n'est jamais regenere par le chart. Conservez-le : il est fige dans le
+     volume de donnees PostgreSQL des le premier demarrage, et le changer dans
+     les valeurs ne le change PAS dans la base (il faut un ALTER USER).
+{{- if not .Values.backup.enabled }}
+
+  4. ATTENTION : le CronJob de sauvegarde est DESACTIVE (backup.enabled=false).
+{{- end }}

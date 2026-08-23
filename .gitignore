@@ -1,0 +1,37 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.egg-info/
+.pytest_cache/
+secrets/
+*.secret.yaml
+
+# Données personnelles Garmin — jamais committées
+/Activities.csv
+/metrics&wellness_1year/
+/data/
+*.fit
+!tests/fixtures/fit/*.fit
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Garmin exporte en .FIT majuscule et les motifs git sont sensibles a la casse
+*.FIT
+*.Fit
+!tests/fixtures/fit/*.FIT
+
+# Les exports TCX (import manuel) ne sont pas couverts par les motifs *.fit
+*.tcx
+*.TCX
+!tests/fixtures/tcx/*.tcx
+
+# Amorçage de l'athlète : le GABARIT est versionné, jamais le fichier rempli.
+# Il contient poids, fréquences cardiaques et seuils physiologiques — même
+# raisonnement que pour les .FIT et leurs traces GPS.
+deploy/seed/*.sql
+!deploy/seed/*.sql.example

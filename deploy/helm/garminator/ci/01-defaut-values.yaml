@@ -1,0 +1,9 @@
+# Jeu de valeurs 1 — configuration par defaut, avec les seuls secrets
+# obligatoires. Sert a la validation hors ligne (`helm lint` / `helm template`).
+# Les mots de passe ci-dessous sont des valeurs de TEST, jamais deployees.
+postgresql:
+  auth:
+    password: "motdepasse-de-test-postgres"
+grafana:
+  admin:
+    password: "motdepasse-de-test-grafana"

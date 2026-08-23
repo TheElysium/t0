@@ -1,0 +1,114 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "garminator.fullname" . }}-grafana
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "garminator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: grafana
+  template:
+    metadata:
+      labels:
+        {{- include "garminator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: grafana
+      annotations:
+        checksum/datasource: {{ include (print $.Template.BasePath "/grafana-configmap-datasource.yaml") . | sha256sum }}
+        checksum/dashboards-provider: {{ include (print $.Template.BasePath "/grafana-configmap-dashboards-provider.yaml") . | sha256sum }}
+        {{- if not .Values.postgresql.auth.existingSecret }}
+        checksum/postgresql-secret: {{ include (print $.Template.BasePath "/postgresql-secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "garminator.grafana.secretName" . }}
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "garminator.grafana.secretName" . }}
+                  key: admin-password
+            # Consommé par le provisioning de datasource via $POSTGRESQL_PASSWORD.
+            - name: POSTGRESQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "garminator.postgresql.secretName" . }}
+                  key: password
+            # Grafana en accès local uniquement : pas de domaine public.
+            - name: GF_SERVER_ROOT_URL
+              value: "%(protocol)s://%(domain)s:%(http_port)s/"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            {{- toYaml .Values.grafana.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            {{- toYaml .Values.grafana.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.grafana.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: datasource-provisioning
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+      volumes:
+        - name: data
+          {{- if .Values.grafana.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "garminator.fullname" . }}-grafana
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: datasource-provisioning
+          configMap:
+            name: {{ include "garminator.fullname" . }}-grafana-datasource
+        - name: dashboards-provider
+          configMap:
+            name: {{ include "garminator.fullname" . }}-grafana-dashboards-provider
+        - name: dashboards
+          configMap:
+            name: {{ include "garminator.grafana.dashboardsConfigMapName" . }}
+{{- end }}

@@ -1,0 +1,98 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "garminator"
+version = "0.1.0"
+description = "Pipeline auto-hébergé d'ingestion et de visualisation des données Garmin Connect."
+readme = "README.md"
+# Borne haute assumée : la CI, mypy (`python_version`), la cible ruff et l'image Docker
+# sont tous en 3.12. Élargir la borne sans élargir la matrice de CI reviendrait à
+# promettre un support non testé.
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Lukas" }]
+
+dependencies = [
+    "garminconnect==0.3.2",
+    "garmin-fit-sdk==21.213.0",
+    "psycopg[binary]==3.2.3",
+    "apscheduler==3.10.4",
+    "fastapi==0.115.5",
+    # Exigé À L'EXÉCUTION par les paramètres File()/UploadFile de l'endpoint d'upload
+    # (garminator.api.upload) : FastAPI ne le tire pas lui-même, et son absence ne se
+    # manifeste qu'au premier envoi réel, pas à l'import.
+    "python-multipart==0.0.20",
+    "uvicorn[standard]==0.32.1",
+    "pydantic==2.10.2",
+    "pydantic-settings==2.6.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-cov==6.0.0",
+    "ruff==0.8.1",
+    "mypy==1.13.0",
+    # Requis par starlette.testclient.TestClient : sans lui, TOUTE la couche HTTP de
+    # l'endpoint d'upload est sautée en silence par pytest.
+    "httpx==0.28.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/garminator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=garminator --cov-report=term-missing"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle erreurs
+    "W",    # pycodestyle avertissements
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "N",    # pep8-naming
+    "RUF",  # règles ruff
+    "S",    # flake8-bandit
+    "A",    # flake8-builtins
+    "PL",   # pylint
+    "TCH",  # flake8-type-checking
+]
+ignore = [
+    "PLR0913", # trop d'arguments : les signatures d'ingestion en ont légitimement beaucoup
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLR2004"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["garminator"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+explicit_package_bases = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_reexport = true
+
+[[tool.mypy.overrides]]
+module = ["garminconnect.*", "garmin_fit_sdk.*", "apscheduler.*"]
+ignore_missing_imports = true

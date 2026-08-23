@@ -1,0 +1,106 @@
+{{- /*
+CronJob de rafraichissement des vues materialisees mart.* (lot L10).
+
+Pilote par le bloc `opsRefresh` de values.yaml (integre depuis ; l'entete
+precedente affirmait a tort que ces cles manquaient encore). Il rafraichit
+les vues materialisees mart.* que Grafana interroge : sans lui, les tableaux
+de bord restent figes sur le dernier REFRESH manuel.
+
+Reutilise volontairement l'image d'ingestion (`.Values.ingest.image`) : le
+module `garminator.ops` fait partie du meme paquet Python que l'ingestion,
+livre dans la meme image de conteneur -- aucune image separee a construire ou
+a maintenir pour ce lot.
+*/ -}}
+{{- if .Values.opsRefresh.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "garminator.fullname" . }}-ops-refresh
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ops-refresh
+spec:
+  schedule: {{ .Values.opsRefresh.schedule | quote }}
+  # Sans ce champ, le controleur applique UTC alors que le CronJob de sondage
+  # tourne en heure locale : la fenetre reelle entre les deux Jobs ne serait plus
+  # celle qu'annonce values.yaml, et changerait deux fois par an.
+  timeZone: {{ .Values.ingest.config.timezone | quote }}
+  # Un rafraichissement encore en cours ne doit jamais en croiser un second :
+  # REFRESH MATERIALIZED VIEW CONCURRENTLY prend un verrou d'ecriture sur la
+  # vue le temps de l'operation : un deuxieme run se contenterait d'attendre
+  # (ou d'echouer sur timeout), sans jamais rien corrompre, mais Forbid evite
+  # l'empilement inutile de Jobs bloques.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.opsRefresh.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.opsRefresh.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.opsRefresh.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "garminator.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: ops-refresh
+        spec:
+          restartPolicy: OnFailure
+          # Ce Job ne parle qu'a PostgreSQL : aucun identifiant Garmin, aucun
+          # jeton de compte de service.
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.ingest.securityContext | nindent 12 }}
+          containers:
+            - name: ops-refresh
+              image: "{{ .Values.ingest.image.repository }}:{{ include "garminator.ingest.imageTag" . }}"
+              imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.ingest.containerSecurityContext | nindent 16 }}
+                seccompProfile:
+                  type: RuntimeDefault
+              command: ["python", "-m", "garminator.ops", "refresh"]
+              env:
+                # PGUSER/PGPASSWORD DOIVENT etre definis avant
+                # GARMINATOR_POSTGRES_DSN ci-dessous : Kubernetes ne resout
+                # $(VAR) que parmi les variables DEJA declarees plus haut
+                # dans la meme liste `env` (ordre du tableau, pas ordre
+                # alphabetique).
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: password
+                # DSN fourni via variable d'environnement, JAMAIS via un
+                # argument --dsn : un argument de commande est visible en
+                # clair dans la liste des processus du conteneur, y compris
+                # via `kubectl describe pod` (spec.containers[].command).
+                - name: GARMINATOR_POSTGRES_DSN
+                  value: >-
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                # Ce Job ne monte pas la ConfigMap d'ingestion (il n'a besoin
+                # d'aucun reglage Garmin) : la verbosite est reprise ici seule,
+                # depuis la meme valeur, pour qu'un unique reglage vaille partout.
+                - name: GARMINATOR_LOG_LEVEL
+                  value: {{ .Values.ingest.config.logLevel | quote }}
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONPYCACHEPREFIX
+                  value: /tmp/pycache
+              resources:
+                {{- toYaml .Values.opsRefresh.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
+{{- end }}

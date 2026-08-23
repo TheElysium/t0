@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "garminator.fullname" . }}-ingest
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+data:
+  # Les noms doivent porter le prefixe GARMINATOR_ : `garminator.settings.Settings`
+  # est un BaseSettings avec `env_prefix="GARMINATOR_"`. Une cle sans prefixe est
+  # simplement ignoree (extra="ignore"), et le pod echoue au demarrage sur un champ
+  # requis manquant -- panne visible seulement en production.
+  # SEULE EXCEPTION : GARMINTOKENS, lu tel quel par garminconnect 0.3.2 lui-meme
+  # (`os.getenv("GARMINTOKENS")`), d'ou le `validation_alias` explicite cote Python.
+  GARMINTOKENS: {{ .Values.ingest.config.garminTokensPath | quote }}
+  GARMINATOR_FIT_ARCHIVE_PATH: {{ .Values.ingest.config.fitArchivePath | quote }}
+  GARMINATOR_HISTORY_START: {{ .Values.ingest.config.backfillStartDate | quote }}
+  # DEFAUT REEL CORRIGE : cette cle s'appelait `LOG_LEVEL`, sans le prefixe --
+  # exactement le cas que le commentaire ci-dessus decrit. Aucun code ne l'a
+  # jamais lue, donc regler `ingest.config.logLevel` n'avait aucun effet.
+  # Lue par garminator.logging_setup.configure_logging (et non par Settings :
+  # un outil d'exploitation en lecture seule doit pouvoir regler sa verbosite
+  # sans avoir a fournir un identifiant Garmin).
+  GARMINATOR_LOG_LEVEL: {{ .Values.ingest.config.logLevel | quote }}
+  TZ: {{ .Values.ingest.config.timezone | quote }}
+  PGHOST: {{ include "garminator.postgresql.serviceName" . | quote }}
+  PGPORT: {{ .Values.postgresql.service.port | quote }}
+  PGDATABASE: {{ .Values.postgresql.auth.database | quote }}

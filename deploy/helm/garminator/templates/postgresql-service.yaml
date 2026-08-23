@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "garminator.postgresql.serviceName" . }}
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  clusterIP: None
+  # Service headless (accès local uniquement) : découverte DNS interne au
+  # cluster, aucun LoadBalancer, aucun Ingress.
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "garminator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+  ports:
+    - name: postgresql
+      port: {{ .Values.postgresql.service.port }}
+      targetPort: postgresql

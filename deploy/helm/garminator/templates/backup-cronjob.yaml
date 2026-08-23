@@ -1,0 +1,135 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "garminator.fullname" . }}-postgresql-backup
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  # Tous les CronJobs du chart partagent ce fuseau : sans ce champ le controleur
+  # applique UTC, et l'ordre quotidien annonce dans values.yaml ne serait plus
+  # celui reellement execute -- avec un decalage qui change deux fois par an.
+  timeZone: {{ .Values.ingest.config.timezone | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.backup.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "garminator.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            # fsGroup ALIGNE sur celui du pod d'ingestion : les deux pods
+            # montent le MEME PVC (fit-archive). Deux fsGroup differents se
+            # ecrasent mutuellement a chaque montage (le kubelet applique
+            # fsGroup recursivement au volume), et l'ingestion perdrait le
+            # droit d'ecrire son archive FIT et son token store apres le
+            # premier passage de la sauvegarde.
+            fsGroup: {{ .Values.ingest.securityContext.fsGroup }}
+          containers:
+            - name: pg-dump
+              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}"
+              imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
+              env:
+                - name: PGHOST
+                  value: {{ include "garminator.postgresql.serviceName" . | quote }}
+                - name: PGPORT
+                  value: {{ .Values.postgresql.service.port | quote }}
+                - name: PGDATABASE
+                  value: {{ .Values.postgresql.auth.database | quote }}
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: password
+                - name: BACKUP_DIR
+                  value: /backups
+                - name: PGCONNECT_TIMEOUT
+                  value: "30"
+                - name: RETENTION
+                  value: {{ .Values.backup.retention | quote }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+                  dumpfile="${BACKUP_DIR}/garminator-${timestamp}.dump"
+                  partial="${dumpfile}.part"
+
+                  # Un dump interrompu ne doit jamais rester sous le nom
+                  # definitif : il serait compte par la rotation et pourrait
+                  # etre choisi pour une restauration.
+                  trap 'rm -f "${partial}"' EXIT
+
+                  echo "Sauvegarde vers ${dumpfile}"
+                  # pg_dump n'est PAS place dans un tube : son code de retour
+                  # remonte directement, et `set -e` fait echouer le Job. Une
+                  # sauvegarde qui echoue en silence est pire que pas de
+                  # sauvegarde.
+                  if ! pg_dump --format=custom --no-password --file="${partial}"; then
+                    echo "ECHEC : pg_dump a retourne un code non nul, aucune sauvegarde produite." >&2
+                    exit 1
+                  fi
+                  if [ ! -s "${partial}" ]; then
+                    echo "ECHEC : le dump produit est vide." >&2
+                    exit 1
+                  fi
+                  mv "${partial}" "${dumpfile}"
+                  trap - EXIT
+                  echo "Dump termine : $(wc -c < "${dumpfile}") octets."
+
+                  # --- Rotation ---
+                  # Volontairement sans `ls -1t | tail | xargs -r` : `xargs -r`
+                  # est une extension GNU dont la presence n'est pas garantie
+                  # dans le busybox d'une image alpine, et l'analyse de la
+                  # sortie de `ls` est fragile. Les noms portent un horodatage
+                  # UTC de largeur fixe, donc l'ordre lexicographique du glob
+                  # (du plus ancien au plus recent) EST l'ordre chronologique.
+                  echo "Retention : conservation des ${RETENTION} dumps les plus recents"
+                  total=0
+                  for f in "${BACKUP_DIR}"/garminator-*.dump; do
+                    [ -f "${f}" ] || continue
+                    total=$((total + 1))
+                  done
+                  surplus=$((total - RETENTION))
+                  if [ "${surplus}" -gt 0 ]; then
+                    n=0
+                    for f in "${BACKUP_DIR}"/garminator-*.dump; do
+                      [ -f "${f}" ] || continue
+                      n=$((n + 1))
+                      [ "${n}" -le "${surplus}" ] || break
+                      echo "Purge du dump ancien : ${f}"
+                      rm -f "${f}"
+                    done
+                  fi
+                  echo "Sauvegarde terminee (${total} dump(s) avant purge)."
+              volumeMounts:
+                - name: fit-archive
+                  mountPath: /backups
+                  subPath: {{ .Values.fitArchive.subPaths.postgresBackups }}
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+          volumes:
+            - name: fit-archive
+              persistentVolumeClaim:
+                claimName: {{ include "garminator.fitArchive.pvcName" . }}
+{{- end }}

@@ -1,0 +1,104 @@
+{{- /*
+CronJob de suivi du rattrapage historique (lot L10).
+
+IMPORTANT -- perimetre reel de ce Job : il n'execute PAS de rattrapage reseau.
+Il appelle uniquement `python -m garminator.ops backfill-status`, qui est un
+RAPPORT lecture seule ("combien de fenetres restent, depuis quand"), lu dans
+`raw.poll_window`. Le sondage effectif, lui, est fait par le CronJob
+`scheduler-cronjob.yaml` (`python -m garminator.scheduler`), qui repasse de
+lui-meme sur les fenetres restees `pending`/`failed` : il n'existe donc aucune
+commande de "rattrapage" separee a invoquer ici, et ce Job n'a pas vocation a
+en gagner une.
+
+Le `--history-start` passe ici doit rester aligne avec
+`GARMINATOR_HISTORY_START` (ConfigMap d'ingestion) : sinon ce rapport compare
+un perimetre different de celui reellement collecte et signale des trous qui
+n'en sont pas. `tests/test_config_coherence.py` verifie cet accord.
+*/ -}}
+{{- if .Values.opsBackfill.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "garminator.fullname" . }}-ops-backfill-status
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ops-backfill-status
+spec:
+  schedule: {{ .Values.opsBackfill.schedule | quote }}
+  # Tous les CronJobs du chart partagent ce fuseau : sans ce champ le controleur
+  # applique UTC, et l'ordre quotidien annonce dans values.yaml ne serait plus
+  # celui reellement execute -- avec un decalage qui change deux fois par an.
+  timeZone: {{ .Values.ingest.config.timezone | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.opsBackfill.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.opsBackfill.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.opsBackfill.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "garminator.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: ops-backfill-status
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.ingest.securityContext | nindent 12 }}
+          containers:
+            - name: ops-backfill-status
+              image: "{{ .Values.ingest.image.repository }}:{{ include "garminator.ingest.imageTag" . }}"
+              imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.ingest.containerSecurityContext | nindent 16 }}
+                seccompProfile:
+                  type: RuntimeDefault
+              command:
+                - python
+                - -m
+                - garminator.ops
+                - backfill-status
+                - --history-start
+                - {{ .Values.opsBackfill.historyStart | quote }}
+                {{- range .Values.opsBackfill.endpoints }}
+                - --endpoint
+                - {{ . | quote }}
+                {{- end }}
+              env:
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "garminator.postgresql.secretName" . }}
+                      key: password
+                - name: GARMINATOR_POSTGRES_DSN
+                  value: >-
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                # Ce Job ne monte pas la ConfigMap d'ingestion (il n'a besoin
+                # d'aucun reglage Garmin) : la verbosite est reprise ici seule,
+                # depuis la meme valeur, pour qu'un unique reglage vaille partout.
+                - name: GARMINATOR_LOG_LEVEL
+                  value: {{ .Values.ingest.config.logLevel | quote }}
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONPYCACHEPREFIX
+                  value: /tmp/pycache
+              resources:
+                {{- toYaml .Values.opsBackfill.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
+{{- end }}

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Activities>
+    <Activity Sport="Biking">
+      <Id>2026-08-01T06:00:00Z</Id>
+      <Lap StartTime="2026-08-01T06:00:00Z">
+        <TotalTimeSeconds>3</TotalTimeSeconds>
+        <DistanceMeters>0</DistanceMeters>
+        <Track>
+          <Trackpoint>
+            <Time>2026-08-01T06:00:00Z</Time>
+            <Extensions>
+              <TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+                <Watts>150</Watts>
+                <Cadence>80</Cadence>
+              </TPX>
+            </Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-08-01T06:00:01Z</Time>
+            <Extensions>
+              <TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+                <Watts>160</Watts>
+                <Cadence>82</Cadence>
+              </TPX>
+            </Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-08-01T06:00:02Z</Time>
+            <Extensions>
+              <TPX xmlns="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+                <Watts>145</Watts>
+                <Cadence>79</Cadence>
+              </TPX>
+            </Extensions>
+          </Trackpoint>
+        </Track>
+      </Lap>
+      <Notes>Seance fictive synthetique, generee pour les tests du lot L3. Aucune donnee reelle.</Notes>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

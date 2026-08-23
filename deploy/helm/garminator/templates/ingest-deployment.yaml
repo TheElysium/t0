@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "garminator.fullname" . }}-ingest
+  labels:
+    {{- include "garminator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+spec:
+  # Une seule réplique : la session Garmin (SSO, GARMINTOKENS) et le poll
+  # ne doivent pas être dupliqués — deux pollers concurrents sur le même
+  # compte sans 2FA augmentent le risque de blocage.
+  replicas: {{ .Values.ingest.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "garminator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ingest
+  template:
+    metadata:
+      labels:
+        {{- include "garminator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ingest
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/ingest-configmap.yaml") . | sha256sum }}
+        {{- if not .Values.postgresql.auth.existingSecret }}
+        # Les identifiants PostgreSQL sont injectes par `env.valueFrom`, qui
+        # n'est relu qu'au demarrage du conteneur : sans ce checksum, une
+        # rotation du mot de passe laisserait le pod avec l'ancienne valeur.
+        checksum/postgresql-secret: {{ include (print $.Template.BasePath "/postgresql-secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      # Ce pod n'appelle jamais l'API Kubernetes. Il detient en revanche les
+      # identifiants Garmin (compte sans 2FA) : aucun jeton de compte de
+      # service n'y est monte.
+      automountServiceAccountToken: false
+      {{- if .Values.ingest.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.ingest.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.ingest.securityContext | nindent 8 }}
+      containers:
+        - name: ingest
+          image: "{{ .Values.ingest.image.repository }}:{{ include "garminator.ingest.imageTag" . }}"
+          imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.ingest.containerSecurityContext | nindent 12 }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- if .Values.ingest.service.enabled }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ingest.service.port }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "garminator.fullname" . }}-ingest
+          env:
+            # Identifiants Garmin — SECRET REFERENCE UNIQUEMENT, jamais créé
+            # par ce chart. Voir README.md pour la commande de création.
+            - name: GARMINATOR_GARMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.garminSecret.name }}
+                  key: {{ .Values.garminSecret.usernameKey }}
+            - name: GARMINATOR_GARMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.garminSecret.name }}
+                  key: {{ .Values.garminSecret.passwordKey }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "garminator.postgresql.secretName" . }}
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "garminator.postgresql.secretName" . }}
+                  key: password
+            # Compose comme dans les CronJobs : `Settings.postgres_dsn` est requis et
+            # n'a aucun defaut ; PGHOST/PGDATABASE seuls ne suffisent pas.
+            - name: GARMINATOR_POSTGRES_DSN
+              value: >-
+                postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+            # --- Chemins d'ecriture compatibles readOnlyRootFilesystem ---
+            # La racine du conteneur est en lecture seule. Tout ce que le
+            # runtime Python ecrit par defaut sous $HOME ou dans les caches
+            # doit etre redirige vers /tmp (emptyDir), faute de quoi le
+            # plantage ne se manifeste qu'a l'execution en production.
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/cache
+            - name: XDG_CONFIG_HOME
+              value: /tmp/config
+            # Aucun .pyc ecrit a cote des sources (site-packages est en
+            # lecture seule) ; si un cache est malgre tout produit, il va
+            # dans /tmp.
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONPYCACHEPREFIX
+              value: /tmp/pycache
+            {{- with .Values.ingest.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.ingest.service.enabled }}
+          livenessProbe:
+            {{- toYaml .Values.ingest.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.ingest.readinessProbe | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.ingest.resources | nindent 12 }}
+          volumeMounts:
+            # Archive des fichiers FIT (écriture avant insertion en base —
+            # voir principe ELT du lot L3).
+            - name: fit-archive
+              mountPath: {{ .Values.ingest.config.fitArchivePath }}
+              subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
+            # Token store Garmin — persistant, sinon SSO complet à chaque
+            # redémarrage (risque de blocage de compte, cf. GARMINTOKENS).
+            - name: fit-archive
+              mountPath: {{ .Values.ingest.config.garminTokensPath }}
+              subPath: {{ .Values.fitArchive.subPaths.garminTokens }}
+            # Système de fichiers racine en lecture seule : /tmp inscriptible
+            # via emptyDir dédié.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: fit-archive
+          persistentVolumeClaim:
+            claimName: {{ include "garminator.fitArchive.pvcName" . }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
