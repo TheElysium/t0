@@ -1,4 +1,4 @@
-"""hrTSS from HR histogram x zone table (04-formules-charge.md §5.2).
+"""hrTSS from HR histogram x zone table (04-load-formulas.md §5.2).
 
 ``DEFAULT_HR_ZONE_COEFFICIENTS`` exactly mirrors seed rows of ``core.hr_tss_coefficient``
 (migrations/003_core_ref.sql). Dedicated test (tests/load/test_hrtss.py) reparses

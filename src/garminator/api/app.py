@@ -1,9 +1,9 @@
-"""Fabrique de l'application FastAPI du lot L7.
+"""FastAPI application factory.
 
-Fonction plutôt qu'instance de module au niveau global, même convention que
-:func:`garminator.settings.get_settings` : chaque appelant (dont les tests) contrôle
-explicitement le moment de construction, sans import-time side effect qui lirait déjà
-l'environnement au chargement du module.
+A function rather than a module-level instance, same convention as
+:func:`garminator.settings.get_settings`: every caller (tests included) controls when
+construction happens, with no import-time side effect that would read the environment
+as soon as the module loads.
 """
 
 from __future__ import annotations
@@ -14,16 +14,15 @@ from garminator.api.upload import router as upload_router
 
 
 def create_app() -> FastAPI:
-    """Construit l'application FastAPI, montée uniquement du routeur d'envoi manuel.
+    """Build the FastAPI application, mounting only the manual upload router.
 
-    Accès prévu LOCAL uniquement (pas d'Ingress, pas de TLS, pas d'authentification) —
-    voir le rapport de fin de lot pour ce qu'il faudrait ajouter avant toute exposition.
+    Intended for LOCAL access only (no Ingress, no TLS, no authentication).
     """
     app = FastAPI(
-        title="garminator — envoi manuel",
+        title="garminator — manual upload",
         description=(
-            "Endpoint local d'envoi manuel d'un fichier FIT, TCX, ou archive ZIP "
-            "Garmin « originale »."
+            "Local endpoint for manually uploading a FIT file, a TCX file, or an "
+            '"original" Garmin ZIP archive.'
         ),
     )
     app.include_router(upload_router)

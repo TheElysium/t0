@@ -52,11 +52,11 @@ def resolve_log_level(raw: str | None) -> int:
     return level if level is not None else logging.INFO
 
 
-def _est_valeur_incomprise(raw: str | None) -> bool:
-    """Distinguish "INFO explicitly requested" from "unrecognized value, fell back to INFO".
+def _is_unrecognized_value(raw: str | None) -> bool:
+    """Distinguish "INFO explicitly requested" from "unrecognized value, fell back".
 
-    resolve_log_level returns logging.INFO in both cases; only the raw text
-    separates them. The operator needs to see this distinction in logs.
+    resolve_log_level returns logging.INFO in both cases; only raw text separates them.
+    Operator needs to see this distinction in logs.
     """
     if raw is None or not raw.strip():
         return False
@@ -81,9 +81,9 @@ def configure_logging(level: str | None = None) -> None:
         stream=sys.stdout,
         force=True,
     )
-    if _est_valeur_incomprise(raw):
+    if _is_unrecognized_value(raw):
         # Fallback reported after basicConfig to be visible: without this,
         # "DEBUG produces nothing" looks like a logging bug rather than a typo.
         logging.getLogger(__name__).warning(
-            "Niveau de journal %r non reconnu : repli sur %s.", raw, DEFAULT_LOG_LEVEL
+            "Unrecognized log level %r: falling back to %s.", raw, DEFAULT_LOG_LEVEL
         )

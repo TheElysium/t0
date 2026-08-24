@@ -1,9 +1,9 @@
-"""Intervalle minimal entre requêtes vers Garmin Connect.
+"""Minimum interval between requests to Garmin Connect.
 
-Séparé du backoff (:mod:`garminator.garmin.retry`) : ceci borne le débit en régime
-normal (aucune erreur), le backoff ne s'active qu'en réaction à une erreur transitoire.
-Les deux se cumulent — un ``fetch`` attend d'abord son tour via le limiteur, puis
-peut en plus reculer si Garmin répond 429.
+Kept separate from the backoff (:mod:`garminator.garmin.retry`): this bounds the rate in
+normal operation (no error), while the backoff only kicks in as a reaction to a transient
+error. The two add up — a ``fetch`` first waits for its turn through the limiter, then
+may additionally back off if Garmin answers 429.
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True)
 class RateLimiter:
-    """Impose un intervalle minimal entre deux appels consécutifs.
+    """Enforce a minimum interval between two consecutive calls.
 
-    ``clock`` et ``sleep`` sont injectables pour que les tests s'exécutent instantanément
-    (pas d'attente réelle) tout en exerçant la même logique qu'en production.
+    ``clock`` and ``sleep`` are injectable so that tests run instantly (no real waiting)
+    while exercising the same logic as production.
     """
 
     min_interval_s: float
@@ -30,7 +30,7 @@ class RateLimiter:
     _last_call: float | None = field(default=None, init=False, repr=False)
 
     def wait(self) -> None:
-        """Bloque si nécessaire pour respecter ``min_interval_s`` depuis le dernier appel."""
+        """Block if needed to honour ``min_interval_s`` since the last call."""
         now = self.clock()
         if self._last_call is not None:
             remaining = self.min_interval_s - (now - self._last_call)

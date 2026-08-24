@@ -1,30 +1,28 @@
-"""Runner de migrations SQL pour garminator (lot L1).
+"""SQL migration runner for garminator (L1 batch).
 
-Principes qui tiennent ce module :
+Principles that govern this module:
 
-1. **Autonome vis-à-vis de :mod:`garminator.settings`.** Le DSN PostgreSQL est lu
-   indépendamment (variable d'environnement dédiée ou argument explicite), sans jamais
-   construire l'objet :class:`~garminator.settings.Settings` complet — celui-ci exige des
-   identifiants Garmin qu'une tâche de migration (ou un ``CronJob`` Kubernetes qui ne fait
-   que migrer le schéma) n'a aucune raison de posséder.
-2. **Avancer seulement.** Aucun rollback automatique n'est inventé : une migration appliquée
-   ne peut pas être annulée par ce module. Un incident se corrige par une migration corrective
-   *suivante*, jamais par une réécriture de l'historique.
-3. **Une migration = une transaction.** Le fichier entier est envoyé en une seule requête
-   (protocole simple de psycopg, actif tant qu'aucun paramètre n'est lié — cf. la
-   documentation « Differences from psycopg2 »), donc toutes les instructions qu'il contient
-   réussissent ou échouent ensemble.
-4. **Refus sur dérive.** Si l'empreinte (SHA-256) d'une migration déjà appliquée a changé
-   depuis son application, ou si son fichier a disparu du répertoire de migrations, le runner
-   refuse de démarrer — avant même de tenter d'appliquer une migration en attente.
-5. **Un seul runner à la fois.** Un verrou d'avis PostgreSQL de session
-   (:data:`ADVISORY_LOCK_KEY`) est pris avant toute lecture d'état. Sans lui, deux runners
-   concurrents (deux ``CronJob``, ou un déploiement pendant une migration manuelle) lisent le
-   même état « en attente » et tentent d'appliquer la même migration : la seconde échoue au
-   milieu du DDL, sur une violation de clé primaire de ``public.schema_migration`` ou sur un
-   ``CREATE TABLE`` en doublon, dans un état partiellement appliqué. Le verrou est pris en mode
-   *try* (non bloquant) : un second runner échoue immédiatement et proprement plutôt que
-   d'attendre indéfiniment dans un conteneur.
+1. **Independent of :mod:`garminator.settings`.** PostgreSQL DSN is read independently
+   (dedicated environment variable or explicit argument), never constructing the full
+   :class:`~garminator.settings.Settings` object — that requires Garmin credentials that
+   a migration task (or a Kubernetes ``CronJob`` that only migrates schema) has no reason
+   to possess.
+2. **Forward only.** No automatic rollback is invented: an applied migration cannot be
+   undone by this module. An incident is fixed by a corrective migration *next*, never by
+   rewriting history.
+3. **One migration = one transaction.** The entire file is sent in one request (psycopg
+   simple protocol, active while no parameters are bound — see "Differences from
+   psycopg2" docs), so all instructions succeed or fail together.
+4. **Refuse on drift.** If the SHA-256 checksum of an already-applied migration has
+   changed since application, or its file vanished from the migrations directory, the
+   runner refuses to start — before even attempting to apply a pending migration.
+5. **Only one runner at a time.** A PostgreSQL session advisory lock (:data:`ADVISORY_LOCK_KEY`)
+   is acquired before any state read. Without it, two concurrent runners (two ``CronJob``s,
+   or a deployment during manual migration) read the same "pending" state and attempt the
+   same migration: the second fails mid-DDL with a ``public.schema_migration`` primary key
+   violation or duplicate ``CREATE TABLE``, in a partially-applied state. The lock is
+   taken in *try* mode (non-blocking): a second runner fails immediately and cleanly
+   rather than blocking indefinitely in a container.
 """
 
 from __future__ import annotations
@@ -42,21 +40,21 @@ import psycopg
 if TYPE_CHECKING:
     from datetime import datetime
 
-#: Journal du module. Ne consigne JAMAIS le DSN : celui-ci porte le mot de passe PostgreSQL.
+#: Module logger. NEVER logs the DSN: it bears the PostgreSQL password.
 logger = logging.getLogger(__name__)
 
-#: Nom de la variable d'environnement portant le DSN PostgreSQL utilisé par ce runner.
-#: Choisi identique au nom de variable que lit ``garminator.settings.Settings`` (préfixe
-#: ``GARMINATOR_``) pour qu'un opérateur n'ait qu'une seule valeur à définir, mais ce module
-#: la lit lui-même, sans jamais importer ni construire ``Settings``.
+#: Name of the environment variable bearing the PostgreSQL DSN used by this runner.
+#: Chosen identical to the variable name read by ``garminator.settings.Settings``
+#: (``GARMINATOR_`` prefix) so an operator has only one value to set, but this module
+#: reads it itself, without ever importing or constructing ``Settings``.
 DSN_ENV_VAR = "GARMINATOR_POSTGRES_DSN"
 
-#: Répertoire de migrations par défaut : ``<racine du dépôt>/migrations``.
+#: Default migrations directory: ``<repository root>/migrations``.
 DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
 
-#: Table de suivi des migrations appliquées. Volontairement dans ``public`` (schéma toujours
-#: présent, y compris avant que la migration 001 ne crée ``raw``/``core``/``mart``) plutôt que
-#: dans l'un des schémas applicatifs.
+#: Table tracking applied migrations. Deliberately in ``public`` (schema always present,
+#: even before migration 001 creates ``raw``/``core``/``mart``) rather than in one of
+#: the application schemas.
 _TRACKING_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS public.schema_migration (
     version     integer      PRIMARY KEY,
@@ -68,38 +66,37 @@ CREATE TABLE IF NOT EXISTS public.schema_migration (
 
 _FILENAME_RE = re.compile(r"^(?P<version>\d+)_(?P<name>.+)\.sql$")
 
-#: Clé du verrou d'avis PostgreSQL protégeant l'ensemble de la séquence de migration.
-#: Valeur arbitraire mais STABLE : deux processus ne se coordonnent que s'ils emploient la même.
-#: Portée session (``pg_advisory_lock`` et non ``pg_advisory_xact_lock``) car le runner
-#: enchaîne plusieurs transactions — une par migration — et le verrou doit couvrir la séquence
-#: entière, pas chaque transaction isolément.
+#: PostgreSQL advisory lock key protecting the entire migration sequence. Arbitrary but
+#: STABLE value: two processes coordinate only if they use the same one. Session-scoped
+#: (``pg_advisory_lock``, not ``pg_advisory_xact_lock``) because the runner chains
+#: multiple transactions — one per migration — and the lock must cover the entire
+#: sequence, not each transaction in isolation.
 ADVISORY_LOCK_KEY = 4_071_128_301_055_216_401
 
 
 class MigrationError(RuntimeError):
-    """Erreur générique du runner de migrations."""
+    """Generic migration runner error."""
 
 
 class MigrationDriftError(MigrationError):
-    """Une migration déjà appliquée a une empreinte différente du fichier sur disque.
+    """An already-applied migration has a different checksum than the file on disk.
 
-    Levée *avant* toute tentative d'appliquer une migration en attente : le runner refuse
-    de démarrer tant que la dérive n'est pas résolue par un humain (fichier corrigé,
-    ou incident documenté).
+    Raised *before* attempting to apply any pending migration: the runner refuses to
+    start until drift is resolved by a human (file corrected, or incident documented).
     """
 
 
 class MigrationLockError(MigrationError):
-    """Un autre runner de migrations détient déjà le verrou d'avis.
+    """Another migration runner already holds the advisory lock.
 
-    Levée immédiatement, sans attente : un second processus ne doit ni appliquer les mêmes
-    migrations en parallèle, ni rester bloqué indéfiniment dans un conteneur.
+    Raised immediately without waiting: a second process must neither apply the same
+    migrations in parallel nor block indefinitely in a container.
     """
 
 
 @dataclass(frozen=True, slots=True)
 class Migration:
-    """Une migration versionnée telle que trouvée sur disque."""
+    """A versioned migration as found on disk."""
 
     version: int
     name: str
@@ -108,13 +105,13 @@ class Migration:
 
     @property
     def sql(self) -> str:
-        """Contenu SQL complet du fichier, lu à chaque accès (pas de cache en mémoire)."""
+        """Full SQL content of the file, read on each access (no in-memory cache)."""
         return self.path.read_text(encoding="utf-8")
 
 
 @dataclass(frozen=True, slots=True)
 class AppliedMigration:
-    """Une ligne de ``public.schema_migration``."""
+    """A row from ``public.schema_migration``."""
 
     version: int
     name: str
@@ -123,19 +120,19 @@ class AppliedMigration:
 
 
 def compute_checksum(path: Path) -> str:
-    """Empreinte SHA-256 (hex) des octets bruts du fichier."""
+    """SHA-256 checksum (hex) of raw file bytes."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def discover_migrations(migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> list[Migration]:
-    """Liste les migrations du répertoire, triées par numéro de version.
+    """List migrations from directory, sorted by version number.
 
-    Les fichiers doivent suivre le motif ``NNN_nom.sql`` (``NNN`` numérique, zéro-préfixé
-    ou non). Tout fichier ``.sql`` qui ne suit pas ce motif est ignoré silencieusement (il
-    n'appartient pas à la chaîne de migrations : par exemple un fixture de test).
+    Files must follow the pattern ``NNN_name.sql`` (``NNN`` numeric, zero-padded or not).
+    Any ``.sql`` file not matching this pattern is silently ignored (it's not part of
+    the migration chain: e.g., a test fixture).
 
     Raises:
-        MigrationError: si deux fichiers déclarent le même numéro de version.
+        MigrationError: if two files declare the same version number.
     """
     migrations: dict[int, Migration] = {}
     for path in sorted(migrations_dir.glob("*.sql")):
@@ -145,8 +142,8 @@ def discover_migrations(migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> list[M
         version = int(match.group("version"))
         if version in migrations:
             raise MigrationError(
-                f"Version de migration {version} présente deux fois : "
-                f"{migrations[version].path.name} et {path.name}."
+                f"Migration version {version} present twice: "
+                f"{migrations[version].path.name} and {path.name}."
             )
         migrations[version] = Migration(
             version=version,
@@ -158,12 +155,12 @@ def discover_migrations(migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> list[M
 
 
 def detect_drift(migrations: list[Migration], applied: list[AppliedMigration]) -> list[str]:
-    """Compare les migrations appliquées en base aux fichiers présents sur disque.
+    """Compare applied migrations in database to files on disk.
 
-    Retourne la liste des messages de dérive (vide si tout concorde). Une dérive couvre
-    deux cas : l'empreinte a changé, ou le fichier d'une migration appliquée a disparu du
-    répertoire — dans les deux cas on ne peut plus garantir que ce qui a été appliqué
-    correspond à ce que le dépôt affirme aujourd'hui.
+    Returns list of drift messages (empty if all match). Drift covers two cases: checksum
+    changed, or an applied migration's file vanished from the directory — in both cases
+    we can no longer guarantee that what was applied matches what the repository claims
+    today.
     """
     by_version = {m.version: m for m in migrations}
     issues: list[str] = []
@@ -171,54 +168,51 @@ def detect_drift(migrations: list[Migration], applied: list[AppliedMigration]) -
         current = by_version.get(row.version)
         if current is None:
             issues.append(
-                f"Migration {row.version} ({row.name}) appliquée en base le "
-                f"{row.applied_at.isoformat()} mais son fichier a disparu du répertoire "
-                "de migrations."
+                f"Migration {row.version} ({row.name}) applied to database on "
+                f"{row.applied_at.isoformat()} but its file vanished from the migrations "
+                "directory."
             )
         elif current.checksum != row.checksum:
             issues.append(
-                f"Migration {row.version} ({row.name}) : empreinte modifiée depuis son "
-                f"application ({row.checksum[:12]}… en base, {current.checksum[:12]}… sur "
-                f"disque). Une migration appliquée ne doit plus être modifiée : corrigez "
-                "par une nouvelle migration."
+                f"Migration {row.version} ({row.name}): checksum changed since application "
+                f"({row.checksum[:12]}… in database, {current.checksum[:12]}… on disk). An "
+                "applied migration must not be modified: fix by writing a new migration."
             )
     return issues
 
 
 def plan_pending(migrations: list[Migration], applied_versions: set[int]) -> list[Migration]:
-    """Migrations non encore appliquées, dans l'ordre où elles doivent l'être."""
+    """Migrations not yet applied, in the order they should be applied."""
     return [m for m in migrations if m.version not in applied_versions]
 
 
 def resolve_dsn(dsn: str | None) -> str:
-    """Résout le DSN à utiliser : argument explicite, sinon variable d'environnement.
+    """Resolve the DSN to use: explicit argument, otherwise environment variable.
 
-    Ne lit jamais ``garminator.settings`` : ce module doit pouvoir fonctionner sur une
-    machine où seul PostgreSQL est configuré (pas d'identifiants Garmin).
+    Never reads ``garminator.settings``: this module must work on a machine where only
+    PostgreSQL is configured (no Garmin credentials).
 
     Raises:
-        MigrationError: si aucun DSN n'est disponible par aucune des deux voies.
+        MigrationError: if no DSN is available from either source.
     """
     if dsn:
         return dsn
     value = os.environ.get(DSN_ENV_VAR)
     if not value:
-        raise MigrationError(
-            f"Aucun DSN PostgreSQL fourni : passez --dsn, ou définissez {DSN_ENV_VAR}."
-        )
+        raise MigrationError(f"No PostgreSQL DSN provided: pass --dsn, or set {DSN_ENV_VAR}.")
     return value
 
 
 def connect(dsn: str) -> psycopg.Connection[tuple[Any, ...]]:
-    """Ouvre une connexion psycopg 3 en mode transactionnel explicite (autocommit=False)."""
+    """Open a psycopg 3 connection in explicit transactional mode (autocommit=False)."""
     return psycopg.connect(dsn, autocommit=False)
 
 
 def acquire_lock(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
-    """Prend le verrou d'avis de session, ou échoue immédiatement s'il est déjà détenu.
+    """Acquire session advisory lock, or fail immediately if already held.
 
     Raises:
-        MigrationLockError: si un autre runner détient le verrou.
+        MigrationLockError: if another runner holds the lock.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT pg_try_advisory_lock(%s);", (ADVISORY_LOCK_KEY,))
@@ -226,19 +220,18 @@ def acquire_lock(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
     conn.commit()
     if row is None or not row[0]:
         raise MigrationLockError(
-            "Un autre runner de migrations détient déjà le verrou d'avis "
-            f"{ADVISORY_LOCK_KEY} sur cette base. Aucune migration n'a été appliquée."
+            "Another migration runner already holds advisory lock "
+            f"{ADVISORY_LOCK_KEY} on this database. No migrations were applied."
         )
 
 
 def release_lock(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
-    """Relâche le verrou d'avis. Sans effet si le verrou n'est pas détenu.
+    """Release the advisory lock. No effect if lock is not held.
 
-    Appelée depuis un ``finally`` : elle ne doit jamais masquer l'exception d'origine. La
-    transaction courante est d'abord annulée (après une migration en échec, la connexion peut
-    être en état « transaction avortée », où toute commande échouerait), et un échec de
-    déverrouillage est ignoré — la fermeture de la connexion relâche de toute façon le verrou
-    de session côté serveur.
+    Called from ``finally``: must never mask the original exception. Current transaction
+    is first rolled back (after a failed migration, the connection may be in "aborted
+    transaction" state where any command fails), and unlock failure is ignored — closing
+    the connection releases the session lock on the server side anyway.
     """
     try:
         conn.rollback()
@@ -247,21 +240,20 @@ def release_lock(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
         conn.commit()
     except psycopg.Error:
         logger.warning(
-            "Déverrouillage du verrou d'avis %s impossible ; il sera relâché à la fermeture "
-            "de la connexion.",
+            "Cannot unlock advisory lock %s; it will be released when connection closes.",
             ADVISORY_LOCK_KEY,
         )
 
 
 def ensure_tracking_table(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
-    """Crée ``public.schema_migration`` si elle n'existe pas, dans sa propre transaction."""
+    """Create ``public.schema_migration`` if it doesn't exist, in its own transaction."""
     with conn.cursor() as cur:
         cur.execute(_TRACKING_TABLE_DDL)
     conn.commit()
 
 
 def fetch_applied(conn: psycopg.Connection[tuple[Any, ...]]) -> list[AppliedMigration]:
-    """Lit l'état actuel de ``public.schema_migration``, trié par version."""
+    """Read current state of ``public.schema_migration``, sorted by version."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT version, name, checksum, applied_at FROM public.schema_migration "
@@ -272,12 +264,12 @@ def fetch_applied(conn: psycopg.Connection[tuple[Any, ...]]) -> list[AppliedMigr
 
 
 def apply_migration(conn: psycopg.Connection[tuple[Any, ...]], migration: Migration) -> None:
-    """Applique une migration dans sa propre transaction (BEGIN implicite / COMMIT / ROLLBACK).
+    """Apply a migration in its own transaction (implicit BEGIN / COMMIT / ROLLBACK).
 
-    Le fichier entier est envoyé sans paramètres liés : psycopg 3 utilise alors le protocole
-    simple et exécute toutes les instructions du fichier, séparées par ``;``, comme un seul
-    lot — c'est ce qui donne « une migration = une transaction » sans découpage manuel des
-    instructions.
+    The entire file is sent without bound parameters: psycopg 3 then uses the simple
+    protocol and executes all instructions from the file, separated by ``;``, as a single
+    batch — this is what gives us "one migration = one transaction" without manual
+    statement splitting.
     """
     try:
         with conn.cursor() as cur:
@@ -297,17 +289,17 @@ def apply_migration(conn: psycopg.Connection[tuple[Any, ...]], migration: Migrat
 def migrate(
     dsn: str | None = None, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR
 ) -> list[Migration]:
-    """Applique toutes les migrations en attente, dans l'ordre, après vérification de dérive.
+    """Apply all pending migrations, in order, after drift check.
 
     Returns:
-        La liste des migrations effectivement appliquées lors de cet appel (vide si la base
-        était déjà à jour — c'est ce qui rend une ré-exécution « zéro changement »).
+        List of migrations actually applied in this call (empty if database was already
+        up to date — this makes re-running "zero change").
 
     Raises:
-        MigrationLockError: si un autre runner détient déjà le verrou d'avis. Rien n'est
-            appliqué : le second processus échoue immédiatement au lieu d'attendre.
-        MigrationDriftError: si une migration déjà appliquée ne correspond plus au fichier
-            sur disque. Rien n'est appliqué dans ce cas : le refus est total, pas partiel.
+        MigrationLockError: if another runner already holds the advisory lock. Nothing
+            is applied: the second process fails immediately without waiting.
+        MigrationDriftError: if an already-applied migration no longer matches the file
+            on disk. Nothing is applied in this case: refusal is total, not partial.
     """
     resolved_dsn = resolve_dsn(dsn)
     migrations = discover_migrations(migrations_dir)
@@ -319,7 +311,7 @@ def migrate(
             applied = fetch_applied(conn)
             drift = detect_drift(migrations, applied)
             if drift:
-                raise MigrationDriftError("Le runner refuse de démarrer : " + " | ".join(drift))
+                raise MigrationDriftError("Runner refuses to start: " + " | ".join(drift))
             applied_versions = {row.version for row in applied}
             pending = plan_pending(migrations, applied_versions)
             for migration in pending:
@@ -333,7 +325,7 @@ def migrate(
 
 @dataclass(frozen=True, slots=True)
 class Status:
-    """État courant des migrations, pour la commande ``status``."""
+    """Current migration state, for the ``status`` command."""
 
     applied: list[AppliedMigration]
     pending: list[Migration]
@@ -341,7 +333,7 @@ class Status:
 
 
 def status(dsn: str | None = None, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> Status:
-    """Rapporte l'état courant sans rien appliquer ni modifier."""
+    """Report current state without applying or modifying anything."""
     resolved_dsn = resolve_dsn(dsn)
     migrations = discover_migrations(migrations_dir)
     conn = connect(resolved_dsn)
@@ -357,21 +349,21 @@ def status(dsn: str | None = None, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR
 
 
 def format_status(report: Status) -> str:
-    """Rendu texte simple de :class:`Status`, utilisé par la CLI."""
-    lines = ["Migrations appliquées :"]
+    """Plain text rendering of :class:`Status`, used by the CLI."""
+    lines = ["Applied migrations:"]
     if report.applied:
         for row in report.applied:
             lines.append(f"  [{row.version:03d}] {row.name} — {row.applied_at.isoformat()}")
     else:
-        lines.append("  (aucune)")
-    lines.append("Migrations en attente :")
+        lines.append("  (none)")
+    lines.append("Pending migrations:")
     if report.pending:
         for m in report.pending:
             lines.append(f"  [{m.version:03d}] {m.name}")
     else:
-        lines.append("  (aucune)")
+        lines.append("  (none)")
     if report.drift:
-        lines.append("Dérives détectées :")
+        lines.append("Drift detected:")
         for issue in report.drift:
             lines.append(f"  ! {issue}")
     return "\n".join(lines)

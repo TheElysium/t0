@@ -1,6 +1,6 @@
-"""Tests de :mod:`garminator.scheduler.service` -- orchestration de bout en bout contre
-:class:`tests.scheduler.fakes.FakePollDB`, sans PostgreSQL ni réseau. ``fetch_window``
-est une fausse fonction pilotée par le test (aucun appel à ``GarminClient``)."""
+"""Tests for :mod:`garminator.scheduler.service` -- end-to-end orchestration against
+:class:`tests.scheduler.fakes.FakePollDB`, no PostgreSQL or network. ``fetch_window``
+is a fake function driven by the test (no calls to ``GarminClient``)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from garminator.scheduler.store import load_window_states
 from tests.scheduler.fakes import FakePollDB
 
 
-def test_un_run_complet_marque_toutes_les_fenetres_done() -> None:
+def test_full_run_marks_all_windows_done() -> None:
     db = FakePollDB()
     calls: list[tuple[str, date]] = []
 
@@ -41,13 +41,13 @@ def test_un_run_complet_marque_toutes_les_fenetres_done() -> None:
     assert all(s.status == "done" for s in states.values())
 
 
-def test_une_seconde_execution_ne_resonde_pas_les_fenetres_deja_faites() -> None:
-    """Coeur de la reprise : après un run réussi, un second run (au-delà de la fenêtre
-    glissante) ne doit retélécharger AUCUNE des journées passées déjà 'done'.
+def test_second_execution_does_not_repoll_already_done_windows() -> None:
+    """Heart of recovery: after a successful run, a second run (beyond the refresh window)
+    must NOT redownload ANY of the past days already 'done'.
 
-    ``today`` avance d'un jour entre les deux runs (simule un jour calendaire écoulé) :
-    la journée déjà traitée sort alors de la fenêtre glissante (``refresh_lookback_days
-    = 0``), seule la toute nouvelle journée courante doit être sondée."""
+    ``today`` advances one day between runs (simulates a calendar day elapsed) :
+    the already-processed day then exits the refresh window (``refresh_lookback_days
+    = 0``), only the brand new current day must be polled."""
     db = FakePollDB()
     calls: list[date] = []
 
@@ -67,7 +67,7 @@ def test_une_seconde_execution_ne_resonde_pas_les_fenetres_deja_faites() -> None
     )
     calls.clear()
 
-    db.clock = datetime(2026, 8, 2, 6, 0)  # le lendemain
+    db.clock = datetime(2026, 8, 2, 6, 0)  # next day
     run_scheduled_poll(
         db,
         endpoints=["get_sleep_data"],
@@ -78,15 +78,15 @@ def test_une_seconde_execution_ne_resonde_pas_les_fenetres_deja_faites() -> None
         refresh_lookback_days=0,
     )
 
-    # Contre-épreuve d'un scheduler naïf qui reboucle sur tout l'historique : le 1er
-    # août, déjà 'done' et désormais hors fenêtre glissante, n'est pas re-sondé ; seul
-    # le 2 août (nouvelle journée, jamais tentée) l'est.
+    # Sanity check against a naive scheduler that re-loops through entire history: Aug 1st,
+    # already 'done' and now outside refresh window, is not re-polled; only
+    # Aug 2nd (new day, never tried) is.
     assert calls == [date(2026, 8, 2)]
 
 
-def test_un_echec_au_milieu_du_run_nempeche_pas_les_fenetres_suivantes() -> None:
-    """Garantie non négociable de la mission : un run partiellement échoué ne doit
-    jamais faire perdre les fenêtres encore à traiter."""
+def test_failure_mid_run_does_not_prevent_following_windows() -> None:
+    """Non-negotiable mission guarantee: a partially failed run must
+    never lose windows yet to process."""
     db = FakePollDB()
 
     def fetch_window(endpoint: str, window_date: date) -> list[FetchedWindow]:
@@ -112,18 +112,18 @@ def test_un_echec_au_milieu_du_run_nempeche_pas_les_fenetres_suivantes() -> None
     assert states[date(2026, 8, 20)].status == "done"
 
 
-def test_une_fenetre_en_echec_est_rejouee_au_run_suivant() -> None:
-    """Complète le test précédent : le jour en échec doit revenir, et lui seul --
-    l'historique déjà réussi ne doit pas être rejoué avec lui."""
+def test_failed_window_is_replayed_at_next_run() -> None:
+    """Completes previous test: the failed day must come back, and it alone --
+    already-successful history must not be replayed with it."""
     db = FakePollDB()
     attempts: list[date] = []
-    fail_once_more = {date(2026, 8, 19)}  # jours qui échouent encore à la prochaine visite
+    fail_once_more = {date(2026, 8, 19)}  # days that still fail on next visit
 
     def flaky_fetch(endpoint: str, window_date: date) -> list[FetchedWindow]:
         attempts.append(window_date)
         if window_date in fail_once_more:
             fail_once_more.discard(window_date)
-            raise RuntimeError("panne réseau transitoire")
+            raise RuntimeError("transient network failure")
         return [FetchedWindow(scope_key=None, payload_sha256=b"\x03" * 32)]
 
     db.clock = datetime(2026, 8, 20, 6, 0)
@@ -138,9 +138,9 @@ def test_une_fenetre_en_echec_est_rejouee_au_run_suivant() -> None:
     )
     attempts.clear()
 
-    # ``today`` inchangé (même journée calendaire) : avec refresh_lookback_days=0, seul
-    # le 20 (jour courant) resterait dû par la fenêtre glissante -- on le fige au-delà
-    # du seuil de péremption pour isoler la reprise du seul jour en échec.
+    # ``today`` unchanged (same calendar day) : with refresh_lookback_days=0, only
+    # day 20 (current day) would remain due by refresh window -- we freeze it beyond
+    # stale threshold to isolate recovery of only the failed day.
     db.clock = datetime(2026, 8, 20, 7, 0)
     summary2 = run_scheduled_poll(
         db,
@@ -152,53 +152,53 @@ def test_une_fenetre_en_echec_est_rejouee_au_run_suivant() -> None:
         refresh_lookback_days=0,
     )
 
-    # Contre-épreuve : sans la persistance de l'état par jour, ce second run rejouerait
-    # aussi le 18 et le 20 (déjà 'done') -- seul le 19 (le seul 'failed') doit revenir.
+    # Sanity check: without per-day state persistence, this second run would replay
+    # also days 18 and 20 (already 'done') -- only 19 (the only 'failed') must return.
     assert attempts == [date(2026, 8, 19), date(2026, 8, 20)]
     assert len(summary2.succeeded) == 2
     states = load_window_states(db, endpoint="get_activities")
     assert states[date(2026, 8, 19)].status == "done"
     assert states[date(2026, 8, 19)].last_error is None
-    assert states[date(2026, 8, 18)].status == "done"  # jamais retouché, resté tel quel
+    assert states[date(2026, 8, 18)].status == "done"  # never touched, stayed unchanged
 
 
-def test_une_panne_mortelle_pendant_le_fetch_laisse_la_fenetre_rejouable() -> None:
-    """Simule un crash du processus : ``fetch_window`` ne revient JAMAIS (ni succès ni
-    exception propre -- on simule en levant, mais sans que le code appelant existe pour
-    la capturer, ce que ``run_scheduled_poll`` ferait normalement). Ici on vérifie
-    directement l'invariant sur lequel repose toute la garantie de reprise : après
-    ``begin_window`` seul (sans complete/fail -- exactement l'état d'un process tué),
-    la fenêtre reste 'in_progress' et redevient due une fois périmée."""
+def test_fatal_crash_during_fetch_leaves_window_replayable() -> None:
+    """Simulates process crash: ``fetch_window`` NEVER returns (neither success nor
+    clean exception -- we simulate by raising, but without calling code to catch it,
+    which ``run_scheduled_poll`` would normally do). Here we verify directly the invariant
+    on which the entire recovery guarantee rests: after ``begin_window`` alone
+    (no complete/fail -- exactly the state of a killed process), the window stays
+    'in_progress' and becomes due again once stale."""
     from garminator.scheduler.planning import due_windows
     from garminator.scheduler.store import begin_window
 
     db = FakePollDB(clock=datetime(2026, 8, 19, 6, 0))
     begin_window(db, endpoint="get_activities", window_date=date(2026, 8, 19), ingest_run_id=1)
-    # Le "processus" meurt ici -- ni complete_window ni fail_window n'est jamais appelé.
+    # The "process" dies here -- neither complete_window nor fail_window is ever called.
 
     states = load_window_states(db, endpoint="get_activities")
     due_juste_apres = due_windows(
         history_start=date(2026, 8, 19),
         today=date(2026, 8, 19),
         states=states,
-        now=datetime(2026, 8, 19, 6, 1),  # 1 min plus tard : run concurrent plausible
+        now=datetime(2026, 8, 19, 6, 1),  # 1 min later : plausible concurrent run
         stale_after=timedelta(hours=2),
     )
     due_plus_tard = due_windows(
         history_start=date(2026, 8, 19),
         today=date(2026, 8, 19),
         states=states,
-        now=datetime(2026, 8, 19, 9, 0),  # 3h plus tard : plus aucun doute, c'est une panne
+        now=datetime(2026, 8, 19, 9, 0),  # 3h later : no doubt now, it's a crash
         stale_after=timedelta(hours=2),
     )
 
-    assert due_juste_apres == []  # laisse une chance à un run concurrent légitime
-    assert due_plus_tard == [date(2026, 8, 19)]  # mais ne perd jamais la fenêtre pour de bon
+    assert due_juste_apres == []  # give a chance to a legitimate concurrent run
+    assert due_plus_tard == [date(2026, 8, 19)]  # but never lose the window for good
 
 
-def test_duplique_le_meme_payload_incremente_already_seen_pas_new() -> None:
-    """La déduplication de contenu (raw.payload_seen) ne doit jamais empêcher de marquer
-    la fenêtre 'done' -- un contenu inchangé est un succès, pas une erreur."""
+def test_duplicate_same_payload_increments_already_seen_not_new() -> None:
+    """Content deduplication (raw.payload_seen) must never prevent marking
+    window 'done' -- unchanged content is success, not error."""
     db = FakePollDB()
     sha = b"\x04" * 32
 
@@ -220,7 +220,7 @@ def test_duplique_le_meme_payload_incremente_already_seen_pas_new() -> None:
         today=date(2026, 8, 19),
         fetch_window=fetch_window,
         now=datetime(2026, 8, 19, 6, 0),
-        refresh_lookback_days=1,  # force le re-sondage du même jour
+        refresh_lookback_days=1,  # force re-polling of the same day
     )
 
     outcome = summary2.outcomes[0]
@@ -229,9 +229,9 @@ def test_duplique_le_meme_payload_incremente_already_seen_pas_new() -> None:
     assert outcome.succeeded
 
 
-def test_un_payload_change_est_compte_comme_nouveau_pas_comme_deja_vu() -> None:
-    """Une activité renommée/corrigée change son hash : elle doit être réingérée, pas
-    silencieusement ignorée par l'idempotence."""
+def test_changed_payload_counted_as_new_not_already_seen() -> None:
+    """A renamed/corrected activity changes its hash: it must be reingested, not
+    silently ignored by idempotence."""
     db = FakePollDB()
 
     def make_fetch(sha_byte: int) -> WindowFetcher:
@@ -253,7 +253,7 @@ def test_un_payload_change_est_compte_comme_nouveau_pas_comme_deja_vu() -> None:
         endpoints=["get_activities"],
         history_start=date(2026, 8, 19),
         today=date(2026, 8, 19),
-        fetch_window=make_fetch(6),  # contenu modifié -- ex. sport corrigé après coup
+        fetch_window=make_fetch(6),  # content modified -- e.g. sport corrected retroactively
         now=datetime(2026, 8, 19, 6, 0),
         refresh_lookback_days=1,
     )
@@ -263,7 +263,7 @@ def test_un_payload_change_est_compte_comme_nouveau_pas_comme_deja_vu() -> None:
     assert outcome.already_seen_count == 0
 
 
-def test_plusieurs_endpoints_sont_traites_independamment() -> None:
+def test_multiple_endpoints_are_processed_independently() -> None:
     db = FakePollDB()
 
     def fetch_window(endpoint: str, window_date: date) -> list[FetchedWindow]:
@@ -283,7 +283,7 @@ def test_plusieurs_endpoints_sont_traites_independamment() -> None:
     assert {o.endpoint for o in summary.outcomes} == {"get_activities", "get_sleep_data"}
 
 
-def test_history_start_posterieur_a_today_leve_une_erreur() -> None:
+def test_history_start_after_today_raises_error() -> None:
     db = FakePollDB()
 
     with pytest.raises(ValueError):
@@ -297,39 +297,39 @@ def test_history_start_posterieur_a_today_leve_une_erreur() -> None:
         )
 
 
-def test_un_rattrapage_massif_est_borne_et_progresse_a_chaque_run() -> None:
-    """Le premier run après installation ne doit pas enchaîner tout l'historique.
+def test_massive_catchup_is_bounded_and_progresses_per_run() -> None:
+    """First run after install must not chain entire history.
 
-    Sans borne, un ``history_start`` en avril 2025 produirait plus de cinq cents appels
-    réseau d'affilée : le limiteur de débit les espacerait sans les borner, et une API
-    non publique sollicitée ainsi conduit au bannissement. Ce test vérifie les deux
-    moitiés de la garantie : la borne mord, ET le rattrapage PROGRESSE -- une borne qui
-    resonderait les mêmes fenêtres à chaque run ne rattraperait jamais rien.
+    Without bound, a ``history_start`` in April 2025 would produce over five hundred network
+    calls in a row: the rate limiter would space them without bounding them, and an unpublic
+    API hammered this way leads to ban. This test verifies both halves of the guarantee:
+    the bound bites, AND catch-up PROGRESSES -- a bound that re-polled the same windows
+    at each run would never catch up.
 
-    Contre-épreuve incluse : sans borne (``None``), les 100 fenêtres passent en un run.
+    Sanity check included: without bound (``None``), all 100 windows pass in one run.
     """
     history_start = date(2026, 5, 1)
-    today = date(2026, 8, 8)  # 100 jours inclus
-    horodatage = datetime(2026, 8, 8, 6, 0)
+    today = date(2026, 8, 8)  # 100 days inclusive
+    timestamp = datetime(2026, 8, 8, 6, 0)
 
     def _fetch(endpoint: str, window_date: date) -> list[FetchedWindow]:
         return [FetchedWindow(scope_key=None, payload_sha256=bytes(32))]
 
     db = FakePollDB()
-    premier = run_scheduled_poll(
+    first = run_scheduled_poll(
         db,
         endpoints=["get_sleep_data"],
         history_start=history_start,
         today=today,
         fetch_window=_fetch,
-        now=horodatage,
+        now=timestamp,
         max_windows_per_endpoint=40,
     )
-    assert len(premier.outcomes) == 40
-    assert premier.truncated_endpoints == ["get_sleep_data"], "la troncature doit être visible"
-    # Les plus ANCIENNES d'abord : c'est ce qui rend la borne sûre.
-    assert premier.outcomes[0].window_date == date(2026, 5, 1)
-    assert premier.outcomes[-1].window_date == date(2026, 6, 9)
+    assert len(first.outcomes) == 40
+    assert first.truncated_endpoints == ["get_sleep_data"], "truncation must be visible"
+    # OLDEST first: this is what makes the bound safe.
+    assert first.outcomes[0].window_date == date(2026, 5, 1)
+    assert first.outcomes[-1].window_date == date(2026, 6, 9)
 
     second = run_scheduled_poll(
         db,
@@ -337,22 +337,22 @@ def test_un_rattrapage_massif_est_borne_et_progresse_a_chaque_run() -> None:
         history_start=history_start,
         today=today,
         fetch_window=_fetch,
-        now=horodatage,
+        now=timestamp,
         max_windows_per_endpoint=40,
     )
-    # Le run reprend là où le précédent s'est arrêté : aucune fenêtre déjà faite n'est
-    # resondée, hormis la fenêtre glissante de rafraîchissement des jours récents.
+    # The run resumes where the previous one left off: no already-done window is
+    # re-polled, except the refresh window for recent days.
     assert second.outcomes[0].window_date == date(2026, 6, 10)
 
-    # Contre-épreuve : sans borne, tout passe d'un coup et rien n'est signalé tronqué.
-    sans_borne = run_scheduled_poll(
+    # Sanity check: without bound, everything passes at once and nothing is marked truncated.
+    unbounded = run_scheduled_poll(
         FakePollDB(),
         endpoints=["get_sleep_data"],
         history_start=history_start,
         today=today,
         fetch_window=_fetch,
-        now=horodatage,
+        now=timestamp,
         max_windows_per_endpoint=None,
     )
-    assert len(sans_borne.outcomes) == 100
-    assert sans_borne.truncated_endpoints == []
+    assert len(unbounded.outcomes) == 100
+    assert unbounded.truncated_endpoints == []

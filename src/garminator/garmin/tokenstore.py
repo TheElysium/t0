@@ -1,29 +1,27 @@
-"""Gestion du tokenstore de session Garmin.
+"""Garmin session tokenstore handling.
 
-``garminconnect`` 0.3.2 n'a **aucun chemin de tokenstore par défaut** (vérifié dans la
-source installée, ``garminconnect/__init__.py`` ligne 419 :
-``tokenstore = tokenstore or os.getenv("GARMINTOKENS")``). Sans ce chemin, chaque
-redémarrage de pod refait un SSO complet — le risque de blocage de compte que ce lot
-cherche précisément à éviter. Ce module centralise donc la seule décision qui compte :
-« le tokenstore contenait-il déjà une session réutilisable, ou allons-nous devoir en
-refaire une ? »
+``garminconnect`` 0.3.2 has **no default tokenstore path** (checked in the installed
+source, ``garminconnect/__init__.py`` line 419:
+``tokenstore = tokenstore or os.getenv("GARMINTOKENS")``). Without that path, every pod
+restart performs a full SSO — exactly the account-lockout risk this batch is meant to
+avoid. This module therefore centralises the only decision that matters: "did the
+tokenstore already hold a reusable session, or are we going to have to build a new one?"
 
-**Ce que dit la source installée**, et qui interdit de se contenter d'un « le répertoire
-est non vide » :
+**What the installed source says**, and why "the directory is non-empty" is not good
+enough:
 
-- ``garminconnect/client.py::dump`` et ``::load`` — si le chemin fourni est un
-  répertoire, tous deux le complètent par ``garmin_tokens.json``. C'est **le seul**
-  fichier que ``garminconnect`` lit ; n'importe quel autre contenu du répertoire est
-  ignoré.
-- ``garminconnect/client.py::loads`` relit trois clés (``di_token``,
-  ``di_refresh_token``, ``di_client_id``) et échoue si ``di_token`` est absent
-  (``is_authenticated`` = ``bool(di_token or jwt_web)``, et ``jwt_web`` n'est jamais
-  rechargé depuis le fichier).
+- ``garminconnect/client.py::dump`` and ``::load`` — if the given path is a directory,
+  both append ``garmin_tokens.json`` to it. That is the **only** file ``garminconnect``
+  reads; any other content of the directory is ignored.
+- ``garminconnect/client.py::loads`` reads back three keys (``di_token``,
+  ``di_refresh_token``, ``di_client_id``) and fails if ``di_token`` is missing
+  (``is_authenticated`` = ``bool(di_token or jwt_web)``, and ``jwt_web`` is never
+  reloaded from the file).
 
-Un fichier illisible, un JSON malformé, ou un ``di_token`` vide font que
-``Garmin.login()`` bascule silencieusement sur un SSO par identifiants
-(``__init__.py`` lignes ~455-462 : ``except Exception -> tokens_loaded = False``).
-Rapporter « session restaurée » dans ces cas serait un journal faux.
+An unreadable file, malformed JSON, or an empty ``di_token`` all make ``Garmin.login()``
+fall back silently to a credentials SSO (``__init__.py`` lines ~455-462:
+``except Exception -> tokens_loaded = False``). Reporting "session restored" in those
+cases would make the log lie.
 """
 
 from __future__ import annotations
@@ -35,22 +33,22 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-#: Nom de fichier imposé par ``garminconnect/client.py::dump``/``::load`` lorsqu'on leur
-#: passe un répertoire.
-TOKEN_FILENAME = "garmin_tokens.json"  # noqa: S105 - nom de fichier, pas un secret
+#: Filename imposed by ``garminconnect/client.py::dump``/``::load`` when they are given
+#: a directory.
+TOKEN_FILENAME = "garmin_tokens.json"  # noqa: S105 - a filename, not a secret
 
 
 def token_file(path: Path) -> Path:
-    """Chemin du fichier de jetons que ``garminconnect`` lira réellement sous ``path``."""
+    """Path of the token file ``garminconnect`` will actually read under ``path``."""
     return path / TOKEN_FILENAME
 
 
 def has_loadable_tokens(path: Path) -> bool:
-    """``True`` si ``garminconnect`` pourra recharger une session depuis ``path``.
+    """``True`` if ``garminconnect`` will be able to reload a session from ``path``.
 
-    Applique exactement le critère de ``garminconnect/client.py::loads`` : un JSON objet
-    portant un ``di_token`` non vide. Ne garantit **pas** que le jeton soit encore
-    valide — seulement qu'un SSO par identifiants n'est pas d'emblée inévitable.
+    Applies exactly the criterion of ``garminconnect/client.py::loads``: a JSON object
+    carrying a non-empty ``di_token``. Does **not** guarantee that the token is still
+    valid — only that a credentials SSO is not unavoidable up front.
     """
     try:
         raw = token_file(path).read_text(encoding="utf-8")
@@ -64,18 +62,18 @@ def has_loadable_tokens(path: Path) -> bool:
 
 
 def tokenstore_fingerprint(path: Path) -> str | None:
-    """sha256 (hex) du fichier de jetons, ou ``None`` s'il est absent ou illisible.
+    """sha256 (hex) of the token file, or ``None`` if it is missing or unreadable.
 
-    Sert à répondre, **après** ``login()``, à la question à laquelle le wrapper ne peut
-    pas répondre autrement : « ``garminconnect`` a-t-il réécrit les jetons ? » Il ne les
-    réécrit (``client.dump``) que dans deux cas — un SSO complet par identifiants, ou un
-    rafraîchissement de jeton (``_refresh_session``). Une empreinte inchangée prouve donc
-    qu'aucun des deux n'a eu lieu ; une empreinte modifiée signale l'un des deux, sans
-    permettre de les distinguer (``garminconnect`` n'expose rien qui le permette).
+    Used to answer, **after** ``login()``, the question the wrapper cannot answer any
+    other way: "did ``garminconnect`` rewrite the tokens?" It only rewrites them
+    (``client.dump``) in two cases — a full credentials SSO, or a token refresh
+    (``_refresh_session``). An unchanged fingerprint therefore proves neither happened;
+    a changed one signals one of the two, without telling them apart
+    (``garminconnect`` exposes nothing that would).
 
-    C'est délibérément un hash du contenu et non une ``mtime`` : une ``mtime`` change
-    aussi lors d'une réécriture à contenu identique, et sa granularité varie selon le
-    système de fichiers du PVC.
+    This is deliberately a hash of the content rather than an ``mtime``: an ``mtime``
+    also changes on a rewrite with identical content, and its granularity varies with
+    the PVC's filesystem.
     """
     try:
         return hashlib.sha256(token_file(path).read_bytes()).hexdigest()
@@ -84,17 +82,17 @@ def tokenstore_fingerprint(path: Path) -> str | None:
 
 
 def ensure_tokenstore(path: Path) -> bool:
-    """Garantit que le répertoire du tokenstore existe, et rapporte s'il porte une session.
+    """Ensure the tokenstore directory exists, and report whether it carries a session.
 
-    Crée le répertoire (et ses parents) s'il est absent — le pod tourne en filesystem
-    racine en lecture seule, mais ce chemin est censé pointer sur un volume inscriptible
-    partagé (``fsGroup: 10001``).
+    Creates the directory (and its parents) if missing — the pod runs with a read-only
+    root filesystem, but this path is meant to point at a writable shared volume
+    (``fsGroup: 10001``).
 
     Returns:
-        ``True`` si ``garmin_tokens.json`` existe et porte un ``di_token`` exploitable
-        (cf. :func:`has_loadable_tokens`). ``False`` sinon : le prochain appel à
-        :meth:`~garminator.garmin.transport.GarminTransport.login` va déclencher un SSO
-        complet par identifiants.
+        ``True`` if ``garmin_tokens.json`` exists and carries a usable ``di_token``
+        (cf. :func:`has_loadable_tokens`). ``False`` otherwise: the next call to
+        :meth:`~garminator.garmin.transport.GarminTransport.login` will trigger a full
+        credentials SSO.
     """
     had_tokens = has_loadable_tokens(path)
     path.mkdir(parents=True, exist_ok=True)

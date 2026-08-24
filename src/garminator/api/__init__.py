@@ -1,14 +1,13 @@
-"""API HTTP de garminator : endpoint d'envoi manuel de fichiers FIT/TCX/ZIP (lot L7).
+"""HTTP API: manual upload endpoint for FIT/TCX/ZIP files.
 
-Ce paquet n'importe RIEN au niveau package (pas de réexport ici, contrairement à
-``garminator.garmin``) : ``garminator.api.upload`` (et donc ``garminator.api.app``)
-déclare une route utilisant ``File(...)``, ce qui fait échouer l'IMPORT du module dès
-sa définition si ``python-multipart`` n'est pas installé (vérifié sur ce dépôt — voir
-le rapport de fin de lot). Réexporter ces symboles ici casserait l'import de
-``garminator.api.ingest`` (logique pure, sans dépendance à FastAPI/multipart) dans tout
-environnement sans ``python-multipart``. Importez donc le sous-module voulu directement :
-``garminator.api.ingest`` pour la logique métier, ``garminator.api.app``/``.upload``
-pour la couche HTTP.
+This package deliberately re-exports NOTHING (unlike ``garminator.garmin``):
+``garminator.api.upload`` (and therefore ``garminator.api.app``) declares a route using
+``File(...)``, which makes the module IMPORT fail outright when ``python-multipart`` is
+missing. Re-exporting those symbols here would break importing
+``garminator.api.ingest`` (pure logic, no FastAPI/multipart dependency) in any
+environment without ``python-multipart``. Import the submodule you need directly:
+``garminator.api.ingest`` for the business logic, ``garminator.api.app``/``.upload`` for
+the HTTP layer.
 """
 
 from __future__ import annotations

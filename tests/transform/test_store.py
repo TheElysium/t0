@@ -1,15 +1,14 @@
-"""Tests de :mod:`garminator.transform.store`, contre une connexion DB en mémoire.
+"""Tests for :mod:`garminator.transform.store`, against an in-memory DB connection.
 
-``FakeConnection``/``FakeCursor`` (définies ci-dessous, locales à ce module -- pas
-partagées avec ``tests/garmin/fakes.py`` qui sert un tout autre lot) implémentent
-seulement la vue structurelle ``garminator.transform.store.DBConnection``. Elles ne se
-contentent pas d'enregistrer les requêtes : elles rejouent aussi ``DELETE``/``INSERT``/
-``executemany`` sur un état Python en mémoire, table par table, pour que
-l'idempotence (deux passages laissent le même état) soit vérifiable sur l'état
-lui-même, pas seulement sur la séquence de requêtes.
+``FakeConnection``/``FakeCursor`` (defined below, local to this module -- not shared
+with ``tests/garmin/fakes.py`` which serves a different purpose) implement
+only the structural interface ``garminator.transform.store.DBConnection``. They don't just
+record queries: they also replay ``DELETE``/``INSERT``/``executemany`` on an in-memory
+Python state, table by table, so that idempotence (two passes leave the same state)
+is verifiable on the state itself, not just on the query sequence.
 
-Fixtures 100% synthétiques (aucun octet des fichiers réels de l'athlète), dans le
-style de ``tests/transform/conftest.py``."""
+100% synthetic fixtures (no bytes from the athlete's real files), in the style of
+``tests/transform/conftest.py``."""
 
 from __future__ import annotations
 
@@ -35,8 +34,8 @@ _TABLE_RE = re.compile(r"(?:INSERT INTO|DELETE FROM) (core\.\w+)", re.IGNORECASE
 
 
 class FakeCursor:
-    """Curseur en mémoire : enregistre chaque requête et rejoue DELETE/INSERT/executemany
-    sur ``conn.tables`` (un dict table -> liste de tuples de paramètres)."""
+    """In-memory cursor: records each query and replays DELETE/INSERT/executemany
+    on ``conn.tables`` (a dict table -> list of parameter tuples)."""
 
     def __init__(self, conn: FakeConnection) -> None:
         self._conn = conn
@@ -66,7 +65,7 @@ class FakeCursor:
     @staticmethod
     def _table_of(normalized_query: str) -> str:
         match = _TABLE_RE.search(normalized_query)
-        assert match is not None, f"requête sans table core.* reconnaissable : {normalized_query}"
+        assert match is not None, f"query without recognizable core.* table: {normalized_query}"
         return match.group(1).lower()
 
     def __enter__(self) -> FakeCursor:
@@ -78,7 +77,7 @@ class FakeCursor:
 
 @dataclass
 class FakeConnection:
-    """Connexion DB en mémoire satisfaisant ``garminator.transform.store.DBConnection``."""
+    """In-memory DB connection satisfying ``garminator.transform.store.DBConnection``."""
 
     executed: list[tuple[str, Any]] = field(default_factory=list)
     commit_count: int = 0
@@ -133,7 +132,7 @@ def _bundle(**overrides: Any) -> CoreActivityBundle:
     return CoreActivityBundle(**base)
 
 
-def test_l_activite_est_ecrite_avant_ses_series() -> None:
+def test_activity_written_before_its_samples() -> None:
     conn = FakeConnection()
     bundle = _bundle(samples=(_sample(0, power=200, heart_rate=140),))
 
@@ -144,7 +143,7 @@ def test_l_activite_est_ecrite_avant_ses_series() -> None:
     assert "core.sample" in tables_touched[1:]
 
 
-def test_rejouer_le_meme_bundle_laisse_le_meme_etat() -> None:
+def test_replaying_same_bundle_leaves_same_state() -> None:
     conn = FakeConnection()
     bundle = _bundle(
         samples=(_sample(0, power=200, heart_rate=140), _sample(1, power=205, heart_rate=141)),
@@ -160,14 +159,14 @@ def test_rejouer_le_meme_bundle_laisse_le_meme_etat() -> None:
     delete_queries = [
         q for q, _ in conn.executed if q.upper().startswith("DELETE FROM CORE.SAMPLE")
     ]
-    assert len(delete_queries) == 2  # une purge à chaque passage, jamais de doublon
+    assert len(delete_queries) == 2  # one purge per pass, never a duplicate
     assert len(conn.tables["core.sample"]) == 2
 
 
-def test_un_none_reste_un_none_et_ne_devient_jamais_zero() -> None:
+def test_none_stays_none_never_becomes_zero() -> None:
     conn = FakeConnection()
-    # Séance home-trainer avec puissance mais sans FC (cas réel : 4/19 séances de cet
-    # athlète) : trimp/hrtss doivent rester NULL, jamais 0.
+    # Home-trainer session with power but no HR (real case: 4/19 sessions for this
+    # athlete): trimp/hrtss must remain NULL, never 0.
     bundle = _bundle(
         samples=(_sample(0, power=200, heart_rate=None),),
         metrics=(
@@ -185,12 +184,12 @@ def test_un_none_reste_un_none_et_ne_devient_jamais_zero() -> None:
     store_activity_bundle(conn, bundle)
 
     sample_row = conn.tables["core.sample"][0]
-    assert sample_row[8] is None  # heart_rate : ni 0 ni chaîne vide
+    assert sample_row[8] is None  # heart_rate: neither 0 nor empty string
     metric_row = conn.tables["core.activity_metric"][0]
     assert metric_row[3] is None  # value
 
 
-def test_les_echantillons_partent_en_un_seul_lot() -> None:
+def test_samples_sent_in_single_batch() -> None:
     conn = FakeConnection()
     bundle = _bundle(samples=tuple(_sample(i, power=200) for i in range(500)))
 
@@ -205,7 +204,7 @@ def test_les_echantillons_partent_en_un_seul_lot() -> None:
     assert len(executemany_sample_calls[0]) == 500
 
 
-def test_natation_sans_echantillon_mais_avec_longueurs() -> None:
+def test_swimming_without_samples_but_with_lengths() -> None:
     conn = FakeConnection()
     bundle = _bundle(
         activity=_activity_row(sport_code="lap_swimming", duration_s=1800),
@@ -227,17 +226,17 @@ def test_natation_sans_echantillon_mais_avec_longueurs() -> None:
     assert result.swim_lengths == 1
     assert conn.tables.get("core.sample", []) == []
     assert len(conn.tables["core.swim_length"]) == 1
-    # Le DELETE de core.sample doit tout de même avoir eu lieu (remplacement complet
-    # inconditionnel), même si aucune ligne n'existait à supprimer.
+    # The DELETE from core.sample must still have occurred (unconditional full
+    # replacement), even if no rows existed to delete.
     assert any(q.upper().startswith("DELETE FROM CORE.SAMPLE") for q, _ in conn.executed)
 
 
-def test_changement_de_methode_canonique_entre_deux_passages() -> None:
-    """1er passage : hrTSS canonique (pas de puissance). 2e passage : un capteur de
-    puissance est apparu, le TSS puissance devient canonique. L'index unique partiel
-    ``activity_metric_canonical_uq`` interdirait aux deux lignes canoniques de
-    coexister avec des ``method_code`` différents -- le DELETE préalable de ce module
-    doit rendre ce cas sans risque, jamais une violation silencieuse."""
+def test_canonical_method_change_between_two_passes() -> None:
+    """First pass: hrTSS canonical (no power). Second pass: a power sensor appeared,
+    power TSS becomes canonical. The partial unique index ``activity_metric_canonical_uq``
+    would prevent both canonical rows from coexisting with different ``method_code``
+    values -- the prior DELETE in this module must make this case risk-free, never a
+    silent violation."""
     conn = FakeConnection()
     first_pass = _bundle(
         metrics=(
@@ -271,12 +270,12 @@ def test_changement_de_methode_canonique_entre_deux_passages() -> None:
     store_activity_bundle(conn, second_pass)
 
     rows = conn.tables["core.activity_metric"]
-    assert len(rows) == 1  # l'ancienne ligne hr a bien été purgée, pas seulement ignorée
+    assert len(rows) == 1  # the old hr row was properly purged, not just ignored
     assert rows[0][2] == "power"
     assert rows[0][4] is True
 
 
-def test_les_tours_sont_supprimes_puis_reinseres_au_second_passage() -> None:
+def test_laps_deleted_then_reinserted_on_second_pass() -> None:
     conn = FakeConnection()
     bundle_v1 = _bundle(
         laps=(
@@ -287,18 +286,18 @@ def test_les_tours_sont_supprimes_puis_reinseres_au_second_passage() -> None:
     store_activity_bundle(conn, bundle_v1)
     assert len(conn.tables["core.activity_lap"]) == 2
 
-    # Décodeur corrigé : les deux tours sont recollés en un seul.
+    # Corrected decoder: the two laps are merged into one.
     bundle_v2 = _bundle(
         laps=(LapRow(activity_id=ACTIVITY_ID, lap_index=0, start_time=START, duration_s=1200),),
     )
     store_activity_bundle(conn, bundle_v2)
 
     rows = conn.tables["core.activity_lap"]
-    assert len(rows) == 1  # aucune ligne fantôme de l'ancien découpage
+    assert len(rows) == 1  # no phantom rows from the old split
     assert rows[0][3] == 1200
 
 
-def test_ingested_at_jamais_reecrite_et_un_seul_commit() -> None:
+def test_ingested_at_never_rewritten_and_single_commit() -> None:
     conn = FakeConnection()
     bundle = _bundle()
 
@@ -309,6 +308,6 @@ def test_ingested_at_jamais_reecrite_et_un_seul_commit() -> None:
     query, params = conn.executed[0]
     assert "INSERT INTO core.activity" in query
     assert "ON CONFLICT (activity_id) DO UPDATE" in query
-    assert "ingested_at" not in query.split("ON CONFLICT")[1]  # jamais réécrite
+    assert "ingested_at" not in query.split("ON CONFLICT")[1]  # never rewritten
     assert "updated_at = now()" in query
     assert params[0] == ACTIVITY_ID

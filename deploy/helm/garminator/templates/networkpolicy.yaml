@@ -1,7 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
 ---
-# PostgreSQL : n'accepte que le trafic entrant de l'ingestion, de Grafana
-# et du CronJob de sauvegarde (mêmes labels de release).
+# PostgreSQL: accepts only inbound traffic from ingest, Grafana,
+# and the backup CronJob (same release labels).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -24,10 +24,10 @@ spec:
         - port: 5432
           protocol: TCP
 ---
-# Ingestion : sortie autorisée vers PostgreSQL, DNS, et HTTPS (API Garmin).
-# Aucune entrée requise sauf si le port d'upload FIT est utilisé depuis un
-# autre pod du même Release (port-forward n'est pas concerné par les
-# NetworkPolicy : il parle directement au kubelet/pod).
+# Ingest: outbound allowed to PostgreSQL, DNS, and HTTPS (Garmin API).
+# No inbound required unless the FIT upload port is used from another pod
+# in the same Release (port-forward is not subject to NetworkPolicy:
+# it talks directly to kubelet/pod).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -64,7 +64,7 @@ spec:
         - port: 443
           protocol: TCP
 ---
-# Grafana : sortie autorisée uniquement vers PostgreSQL.
+# Grafana: outbound allowed only to PostgreSQL.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

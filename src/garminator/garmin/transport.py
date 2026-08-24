@@ -1,17 +1,16 @@
-"""Contrat structurel du transport Garmin, pour injection.
+"""Structural contract of the Garmin transport, for injection.
 
-``garminconnect.Garmin`` (le vrai client réseau) satisfait ce protocole sans en hériter
-explicitement (typage structurel). Dans les tests, un faux transport qui l'implémente
-suffit à exercer tout le lot L2 **sans aucun appel réseau**.
+``garminconnect.Garmin`` (the real network client) satisfies this protocol without
+inheriting from it explicitly (structural typing). In tests, a fake transport that
+implements it is enough to exercise all of L2 **without any network call**.
 
-Volontairement minimal : seules ``login`` et ``download_activity`` sont typées
-explicitement, parce que ce sont les deux seules méthodes dont :class:`~garminator.
-garmin.client.GarminClient` a besoin de connaître la signature précise. Les ~130 autres
-méthodes de endpoint (``get_sleep_data``, ``get_activities_by_date``, ...) sont invoquées
-dynamiquement par :meth:`~garminator.garmin.client.GarminClient.fetch` via ``getattr`` :
-leur nom est une donnée d'appel, pas une dépendance de typage — épingler les 132
-signatures ici serait une duplication du fichier source de ``garminconnect`` que rien ne
-garde synchronisée.
+Deliberately minimal: only ``login`` and ``download_activity`` are typed explicitly,
+because they are the only two methods whose precise signature
+:class:`~garminator.garmin.client.GarminClient` needs to know. The ~130 other endpoint
+methods (``get_sleep_data``, ``get_activities_by_date``, ...) are invoked dynamically by
+:meth:`~garminator.garmin.client.GarminClient.fetch` through ``getattr``: their name is
+call data, not a typing dependency — pinning the 132 signatures here would duplicate
+``garminconnect``'s source file with nothing keeping the copy in sync.
 """
 
 from __future__ import annotations
@@ -20,22 +19,22 @@ from typing import Any, Protocol
 
 
 class GarminTransport(Protocol):
-    """Sous-ensemble de l'API de ``garminconnect.Garmin`` utilisé par ce client."""
+    """Subset of the ``garminconnect.Garmin`` API used by this client."""
 
     def login(self, tokenstore: str) -> tuple[str | None, str | None]:
-        """Authentifie (ou restaure une session depuis le tokenstore) et persiste les jetons.
+        """Authenticate (or restore a session from the tokenstore) and persist the tokens.
 
-        Reproduit la signature de ``garminconnect.Garmin.login`` : retourne
-        ``(None, None)`` en cas de succès complet, ou lève une des exceptions de
-        ``garminconnect`` (jamais de retour silencieux en cas d'échec définitif).
+        Mirrors the signature of ``garminconnect.Garmin.login``: returns ``(None, None)``
+        on full success, or raises one of ``garminconnect``'s exceptions (never a silent
+        return on definitive failure).
         """
         ...
 
     def download_activity(self, activity_id: str, dl_fmt: Any = ...) -> bytes:
-        """Télécharge une activité dans le format demandé et retourne les octets bruts.
+        """Download an activity in the requested format and return the raw bytes.
 
-        Pour ``ActivityDownloadFormat.ORIGINAL``, les octets sont ceux d'une archive ZIP
-        dont le contenu (un seul fichier, ``.fit`` ou ``.tcx``) n'est jamais présumé par
-        ce module — voir :mod:`garminator.garmin.archive`.
+        For ``ActivityDownloadFormat.ORIGINAL`` the bytes are those of a ZIP archive
+        whose content (a single file, ``.fit`` or ``.tcx``) is never presumed by this
+        module — see :mod:`garminator.garmin.archive`.
         """
         ...

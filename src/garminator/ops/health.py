@@ -1,25 +1,25 @@
-"""État de santé exploitable du pipeline (lot L10).
+"""Operational health status of the pipeline (batch L10).
 
-Chaque fonction de ce module répond à une question posée en exploitation réelle, et
-SEULEMENT depuis ce qui existe réellement en base :
+Each function in this module answers a question posed in real operations, and
+ONLY from what actually exists in the database:
 
-- « Quand a-t-on ingéré pour la dernière fois, par endpoint ? » -- lu depuis
-  ``raw.poll_window.completed_at`` (migration 009), qui n'est renseigné que sur un
-  succès complet (cf. ``garminator.scheduler.store.complete_window``).
-- « Quelles fenêtres sont en échec ? » -- ``raw.poll_window`` où ``status = 'failed'``.
-- « Quelles fenêtres sont bloquées ``in_progress`` ? » -- même table, ``status =
-  'in_progress'`` et ``last_attempted_at`` plus vieux que le seuil de péremption déjà
-  défini par L6 (:data:`garminator.scheduler.planning.DEFAULT_STALE_IN_PROGRESS_AFTER`),
-  réutilisé ici plutôt que redéfini.
-- « Les vues ``mart`` sont-elles à jour ? » -- comparaison entre
-  ``MAX(local_date)`` de chaque vue et ``MAX(local_date)`` de ``core.activity`` (la
-  donnée source la plus fraîche déjà transformée), plus ``pg_matviews.ispopulated``.
-- « Où sont les trous du calendrier ? » -- déléguée à
-  :func:`garminator.ops.backfill.backfill_progress`, qui EST déjà la réponse à cette
-  question (une fenêtre « due » est un trou : jamais tentée, en échec, ou bloquée).
+- "When did we last ingest per endpoint?" -- read from ``raw.poll_window.completed_at``
+  (migration 009), which is only set on complete success (see
+  ``garminator.scheduler.store.complete_window``).
+- "Which windows are failing?" -- ``raw.poll_window`` where ``status = 'failed'``.
+- "Which windows are stuck ``in_progress``?" -- same table, ``status = 'in_progress'``
+  and ``last_attempted_at`` older than the expiry threshold already defined by L6
+  (:data:`garminator.scheduler.planning.DEFAULT_STALE_IN_PROGRESS_AFTER`), reused here
+  rather than redefined.
+- "Are the ``mart`` views up to date?" -- comparison between ``MAX(local_date)`` of each
+  view and ``MAX(local_date)`` of ``core.activity`` (most recent source data already
+  transformed), plus ``pg_matviews.ispopulated``.
+- "Where are the calendar gaps?" -- delegated to
+  :func:`garminator.ops.backfill.backfill_progress`, which already IS the answer to that
+  question (a "due" window is a gap: never attempted, failed, or stuck).
 
-Aucune table n'est inventée : tout est lu depuis ``raw.poll_window``, ``core.activity``
-et le catalogue système ``pg_matviews``, qui existent tous avant ce lot.
+No tables are invented: everything is read from ``raw.poll_window``, ``core.activity``,
+and the system catalog ``pg_matviews``, all of which exist before this batch.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class LastSuccess:
-    """Dernière fenêtre menée à bien pour un endpoint (``None`` si jamais)."""
+    """Last successful window for an endpoint (``None`` if never)."""
 
     endpoint: str
     last_completed_at: datetime | None
@@ -48,7 +48,7 @@ class LastSuccess:
 
 @dataclass(frozen=True, slots=True)
 class FailedWindow:
-    """Une fenêtre ``failed``, telle que persistée dans ``raw.poll_window``."""
+    """A ``failed`` window as persisted in ``raw.poll_window``."""
 
     endpoint: str
     window_date: date
@@ -59,7 +59,7 @@ class FailedWindow:
 
 @dataclass(frozen=True, slots=True)
 class StuckWindow:
-    """Une fenêtre ``in_progress`` plus vieille que le seuil de péremption."""
+    """An ``in_progress`` window older than the expiry threshold."""
 
     endpoint: str
     window_date: date
@@ -69,19 +69,19 @@ class StuckWindow:
 
 @dataclass(frozen=True, slots=True)
 class MartViewFreshness:
-    """Fraîcheur d'une vue ``mart`` par rapport à ``core.activity``."""
+    """Freshness of a ``mart`` view relative to ``core.activity``."""
 
     view: str
     populated: bool
-    #: ``None`` si la vue est vide (peuplée mais sans ligne, ou non peuplée).
+    #: ``None`` if view is empty (populated but no rows, or not populated).
     latest_local_date: date | None
-    #: ``None`` si ``core.activity`` est vide.
+    #: ``None`` if ``core.activity`` is empty.
     latest_core_local_date: date | None
 
     @property
     def lag_days(self) -> int | None:
-        """Écart en jours entre la donnée source la plus fraîche et la vue. ``None``
-        si l'une des deux dates manque (rien à comparer)."""
+        """Lag in days between most recent source data and view. ``None`` if either
+        date is missing (nothing to compare)."""
         if self.latest_local_date is None or self.latest_core_local_date is None:
             return None
         return (self.latest_core_local_date - self.latest_local_date).days
@@ -89,7 +89,7 @@ class MartViewFreshness:
 
 @dataclass(frozen=True, slots=True)
 class HealthReport:
-    """Bilan de santé agrégé, produit par :func:`build_health_report`."""
+    """Aggregated health report produced by :func:`build_health_report`."""
 
     generated_at: datetime
     last_success: list[LastSuccess]
@@ -99,13 +99,13 @@ class HealthReport:
 
 
 def last_success_by_endpoint(conn: psycopg.Connection[tuple[Any, ...]]) -> list[LastSuccess]:
-    """``MAX(completed_at)`` par endpoint parmi les fenêtres ``done``.
+    """``MAX(completed_at)`` per endpoint among ``done`` windows.
 
-    Un endpoint qui n'apparaît dans ``raw.poll_window`` qu'avec des fenêtres
-    ``pending``/``failed``/``in_progress`` (jamais ``done``) apparaît quand même dans
-    le résultat, avec ``last_completed_at = None`` -- c'est précisément le cas qu'un
-    opérateur doit voir (endpoint qui n'a jamais réussi une seule fois), pas un cas à
-    faire disparaître par un ``WHERE completed_at IS NOT NULL``.
+    An endpoint appearing in ``raw.poll_window`` only with ``pending``/``failed``/
+    ``in_progress`` windows (never ``done``) still appears in the result with
+    ``last_completed_at = None`` -- this is precisely what an operator needs to see
+    (endpoint that never succeeded once), not a case to hide with ``WHERE
+    completed_at IS NOT NULL``.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -117,12 +117,11 @@ def last_success_by_endpoint(conn: psycopg.Connection[tuple[Any, ...]]) -> list[
 
 
 def failed_windows(conn: psycopg.Connection[tuple[Any, ...]]) -> list[FailedWindow]:
-    """Toutes les fenêtres actuellement ``failed``, les plus anciennes d'abord.
+    """All currently ``failed`` windows, oldest first.
 
-    Note d'exploitation : une fenêtre ``failed`` est rejouée automatiquement au
-    prochain sondage (:func:`garminator.scheduler.planning.due_windows` la considère
-    due) -- cette liste est un signal de surveillance, pas une file à traiter à la
-    main.
+    Ops note: a ``failed`` window is auto-retried on next poll
+    (:func:`garminator.scheduler.planning.due_windows` considers it due) -- this list
+    is a monitoring signal, not a queue to handle manually.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -148,13 +147,12 @@ def stuck_in_progress_windows(
     stale_after: timedelta = DEFAULT_STALE_IN_PROGRESS_AFTER,
     now: datetime | None = None,
 ) -> list[StuckWindow]:
-    """Fenêtres ``in_progress`` plus vieilles que ``stale_after``.
+    """``in_progress`` windows older than ``stale_after``.
 
-    Même seuil que :func:`garminator.scheduler.planning.due_windows` par défaut : une
-    fenêtre listée ici sera de toute façon rejouée au prochain sondage. Cette fonction
-    sert à la SURVEILLER (par exemple alerter si le nombre reste élevé d'un run à
-    l'autre, signe d'un sondage qui ne tourne plus du tout), pas à agir dessus --
-    aucune action manuelle n'est nécessaire : voir ``docs/RUNBOOK.md``.
+    Same threshold as :func:`garminator.scheduler.planning.due_windows` by default: a
+    window listed here will be retried on next poll anyway. This function serves to
+    MONITOR it (e.g., alert if count stays high run-to-run, sign polling stopped),
+    not to act on it -- no manual action needed: see ``docs/RUNBOOK.md``.
     """
     active_now = now if now is not None else datetime.now(UTC)
     threshold = active_now - stale_after
@@ -176,11 +174,11 @@ def stuck_in_progress_windows(
 def mart_views_freshness(
     conn: psycopg.Connection[tuple[Any, ...]], *, views: Iterable[str] = MART_VIEWS
 ) -> list[MartViewFreshness]:
-    """Fraîcheur de chaque vue de ``views`` par rapport à ``core.activity``.
+    """Freshness of each view in ``views`` relative to ``core.activity``.
 
-    ``latest_core_local_date`` est calculé UNE fois (même valeur pour toutes les
-    vues) : c'est la donnée source la plus fraîche déjà transformée par le lot L1-L5,
-    donc le plafond de fraîcheur qu'un ``REFRESH`` peut atteindre.
+    ``latest_core_local_date`` is calculated ONCE (same value for all views): this is
+    the most recent source data already transformed by batches L1-L5, hence the freshness
+    ceiling a ``REFRESH`` can achieve.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(local_date) FROM core.activity;")
@@ -200,7 +198,7 @@ def mart_views_freshness(
         latest_view_date = None
         if populated:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT MAX(local_date) FROM {view};")  # noqa: S608 -- `view` vient de MART_VIEWS, jamais d'une entrée utilisateur
+                cur.execute(f"SELECT MAX(local_date) FROM {view};")  # noqa: S608 -- `view` from MART_VIEWS, never user input
                 view_row = cur.fetchone()
             latest_view_date = view_row[0] if view_row is not None else None
         results.append(
@@ -220,8 +218,8 @@ def build_health_report(
     stale_after: timedelta = DEFAULT_STALE_IN_PROGRESS_AFTER,
     now: datetime | None = None,
 ) -> HealthReport:
-    """Assemble le bilan complet en un seul appel -- pratique pour la CLI et pour un
-    éventuel export vers un exportateur de métriques plus tard (hors périmètre ici)."""
+    """Assemble full report in one call -- convenient for CLI and for possible
+    export to metrics exporter later (out of scope here)."""
     active_now = now if now is not None else datetime.now(UTC)
     return HealthReport(
         generated_at=active_now,
@@ -232,54 +230,53 @@ def build_health_report(
     )
 
 
-#: Nombre maximum de fenêtres listées nommément dans le rapport texte. Au-delà, seul le
-#: total est affiché : un rapport de santé qui déroule des centaines de lignes en console
-#: (ou dans les logs d'un CronJob) cesse d'être lu. Le détail complet reste interrogeable
-#: en SQL sur ``raw.poll_window``.
-_MAX_LIGNES_LISTEES = 20
+#: Maximum windows listed by name in text report. Beyond this, only total is shown: a
+#: health report that unrolls hundreds of lines in console (or CronJob logs) stops
+#: being read. Full detail still queryable in SQL from ``raw.poll_window``.
+_MAX_LISTED_LINES = 20
 
 
 def format_health_report(report: HealthReport) -> str:
-    """Rendu texte simple, dans le même esprit que
+    """Simple text rendering, similar spirit to
     :func:`garminator.db.runner.format_status`."""
     lines = [
-        f"Bilan de santé au {report.generated_at.isoformat()}",
+        f"Health check at {report.generated_at.isoformat()}",
         "",
-        "Dernier succès par endpoint :",
+        "Last success per endpoint:",
     ]
     if report.last_success:
         for entry in report.last_success:
-            completed = entry.last_completed_at.isoformat() if entry.last_completed_at else "JAMAIS"
-            lines.append(f"  {entry.endpoint} : {completed}")
+            completed = entry.last_completed_at.isoformat() if entry.last_completed_at else "NEVER"
+            lines.append(f"  {entry.endpoint}: {completed}")
     else:
-        lines.append("  (aucun endpoint connu dans raw.poll_window)")
+        lines.append("  (no endpoints in raw.poll_window)")
 
     lines.append("")
-    lines.append(f"Fenêtres en échec ({len(report.failed_windows)}) :")
-    for fw in report.failed_windows[:_MAX_LIGNES_LISTEES]:
+    lines.append(f"Failed windows ({len(report.failed_windows)}):")
+    for fw in report.failed_windows[:_MAX_LISTED_LINES]:
         lines.append(
-            f"  {fw.endpoint} / {fw.window_date} (tentatives={fw.attempts}) : {fw.last_error}"
+            f"  {fw.endpoint} / {fw.window_date} " f"(attempts={fw.attempts}): {fw.last_error}"
         )
-    if len(report.failed_windows) > _MAX_LIGNES_LISTEES:
-        lines.append(f"  ... et {len(report.failed_windows) - _MAX_LIGNES_LISTEES} de plus.")
+    if len(report.failed_windows) > _MAX_LISTED_LINES:
+        lines.append(f"  ... and {len(report.failed_windows) - _MAX_LISTED_LINES} more.")
 
     lines.append("")
-    lines.append(f"Fenêtres bloquées in_progress ({len(report.stuck_windows)}) :")
-    for sw in report.stuck_windows[:_MAX_LIGNES_LISTEES]:
+    lines.append(f"Stuck in_progress windows ({len(report.stuck_windows)}):")
+    for sw in report.stuck_windows[:_MAX_LISTED_LINES]:
         lines.append(
-            f"  {sw.endpoint} / {sw.window_date} (dernière tentative {sw.last_attempted_at})"
+            f"  {sw.endpoint} / {sw.window_date} " f"(last attempt {sw.last_attempted_at})"
         )
-    if len(report.stuck_windows) > _MAX_LIGNES_LISTEES:
-        lines.append(f"  ... et {len(report.stuck_windows) - _MAX_LIGNES_LISTEES} de plus.")
+    if len(report.stuck_windows) > _MAX_LISTED_LINES:
+        lines.append(f"  ... and {len(report.stuck_windows) - _MAX_LISTED_LINES} more.")
 
     lines.append("")
-    lines.append("Fraîcheur des vues mart :")
+    lines.append("Mart view freshness:")
     for mv in report.mart_freshness:
         if not mv.populated:
-            lines.append(f"  {mv.view} : JAMAIS PEUPLÉE")
+            lines.append(f"  {mv.view}: NEVER POPULATED")
         else:
             lag = mv.lag_days
-            lag_txt = f"{lag} j de retard" if lag else "à jour"
-            lines.append(f"  {mv.view} : {mv.latest_local_date} ({lag_txt})")
+            lag_txt = f"{lag}d behind" if lag else "current"
+            lines.append(f"  {mv.view}: {mv.latest_local_date} ({lag_txt})")
 
     return "\n".join(lines)

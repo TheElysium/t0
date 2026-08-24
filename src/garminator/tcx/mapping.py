@@ -1,14 +1,13 @@
-"""Mapping declaratif element TCX deja parse -> colonne core.sample.
+"""Declarative mapping parsed TCX element → core.sample column.
 
-Meme principe qu'en FIT (garminator.fit.mapping) : les fonctions ci-dessous ne
-prennent jamais de texte XML brut, uniquement des dictionnaires deja extraits
-par le lecteur (garminator.tcx.reader), pour rester testables sans fixture
-binaire.
+Same principle as FIT (garminator.fit.mapping): functions below never take raw
+XML, only dicts already extracted by reader (garminator.tcx.reader), to stay
+testable without binary fixture.
 
-Structure mesuree sur bike.tcx (addendum) : par Trackpoint, seuls Time,
-Cadence et Watts (sous Extensions/TPX, namespace ActivityExtension/v2) sont
-presents. Frequence cardiaque, distance, vitesse, altitude, position sont
-ABSENTS -- aucune valeur n'est inventee pour ces champs, ils restent None.
+Structure measured on bike.tcx (addendum): per Trackpoint, only Time, Cadence,
+and Watts (under Extensions/TPX, ActivityExtension/v2 namespace) present. Heart
+rate, distance, speed, altitude, position ABSENT—no value invented for these
+fields, they stay None.
 """
 
 from __future__ import annotations
@@ -20,51 +19,56 @@ from typing import Any
 from garminator.fit.errors import TcxParseError
 from garminator.fit.model import SampleRow
 
-#: Namespace des extensions Garmin (cadence velo, watts) sur les Trackpoint TCX.
+#: Namespace for Garmin extensions (bike cadence, watts) on TCX Trackpoints.
 TPX_NAMESPACE = "http://www.garmin.com/xmlschemas/ActivityExtension/v2"
 
-#: Namespace racine TrainingCenterDatabase.
-TCD_NAMESPACE = "http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2"
+#: Root namespace TrainingCenterDatabase. The slash before ``v2`` is part of the
+#: official URI: without it every lookup silently yields zero elements instead of
+#: failing, so a decode returns an empty activity rather than an error. Guarded by
+#: test_tcd_namespace_matches_the_official_uri, which compares against a literal
+#: rather than against a fixture -- fixtures are written to match this constant and
+#: would keep agreeing with it while both are wrong.
+TCD_NAMESPACE = "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
 
 
 def _to_float(raw: Any) -> float:
-    """Convertit un texte XML en ``float``, en erreur TYPEE si le texte n'est pas un nombre.
+    """Convert XML text to ``float``, raising typed error if text not a number.
 
-    ``float(raw)`` nu laisserait remonter une :class:`ValueError` brute jusqu'a
-    l'appelant, qui n'a alors qu'une trace Python la ou tout le reste du lot leve
+    Bare ``float(raw)`` would let raw :class:`ValueError` bubble up to caller,
+    who only sees Python trace where rest of batch raises
     :class:`garminator.fit.errors.SourceParseError`.
     """
     try:
         return float(raw)
     except (TypeError, ValueError) as exc:
-        raise TcxParseError(f"Valeur numerique TCX illisible ({raw!r}) : ligne rejetee.") from exc
+        raise TcxParseError(f"Unreadable TCX numeric value ({raw!r}): row rejected.") from exc
 
 
 def _to_int(raw: Any) -> int:
-    """Convertit un texte XML en ``int``, en tolerant la notation decimale.
+    """Convert XML text to ``int``, tolerating decimal notation.
 
-    ``int("150")`` fonctionne mais ``int("150.0")`` leve : or rien n'oblige un
-    exportateur TCX a ecrire les entiers sans partie decimale (le schema TCD type
-    ``Watts`` en ``xsd:unsignedShort``, mais l'extension TPX n'est pas validee et les
-    outils tiers ecrivent les deux). On passe donc par ``float`` puis on arrondit,
-    plutot que de rejeter un fichier entier sur une virgule.
+    ``int("150")`` works but ``int("150.0")`` raises: nothing forces TCX
+    exporter to write integers without decimal part (TCD schema types ``Watts``
+    as ``xsd:unsignedShort``, but TPX extension unvalidated and third-party
+    tools write both). Go through ``float`` then round rather than reject entire
+    file over a comma.
     """
     return round(_to_float(raw))
 
 
 @dataclass(frozen=True, slots=True)
 class TrackpointFieldSpec:
-    """Une colonne core.sample cible et la cle du dict trackpoint qui la nourrit."""
+    """Target core.sample column and trackpoint dict key that feeds it."""
 
     column: str
     source_key: str
     converter: Any = None
 
 
-#: Table de correspondance trackpoint (dict deja extrait par le lecteur) -> core.sample.
-#: Le dict source est produit par le lecteur avec des cles deja normalisees en minuscules
-#: ASCII ("time", "heart_rate_bpm", "distance_meters", "altitude_meters", "cadence",
-#: "watts", "latitude_degrees", "longitude_degrees") -- jamais les tags XML bruts.
+#: Mapping table trackpoint (dict already extracted by reader) → core.sample.
+#: Source dict produced by reader with keys already normalized to lowercase ASCII
+#: ("time", "heart_rate_bpm", "distance_meters", "altitude_meters", "cadence",
+#: "watts", "latitude_degrees", "longitude_degrees")—never raw XML tags.
 TRACKPOINT_FIELD_SPECS: tuple[TrackpointFieldSpec, ...] = (
     TrackpointFieldSpec("heart_rate", "heart_rate_bpm", _to_int),
     TrackpointFieldSpec("distance_m", "distance_meters", _to_float),
@@ -77,16 +81,15 @@ TRACKPOINT_FIELD_SPECS: tuple[TrackpointFieldSpec, ...] = (
 
 
 def map_trackpoint(point: dict[str, Any], *, activity_id: int, start_time: datetime) -> SampleRow:
-    """Convertit un trackpoint deja extrait (dict) en :class:`SampleRow`.
+    """Convert already-extracted trackpoint (dict) to :class:`SampleRow`.
 
     Raises:
-        TcxParseError: si ``time`` est absent ou n'est pas un ``datetime`` -- un
-            echantillon sans horodatage ne peut pas prendre place dans
-            ``core.sample`` (cle primaire ``(activity_id, t)``).
+        TcxParseError: if ``time`` missing or not a ``datetime``—sample without
+            timestamp cannot fit in ``core.sample`` (primary key ``(activity_id, t)``).
     """
     t = point.get("time")
     if not isinstance(t, datetime):
-        raise TcxParseError("Trackpoint TCX sans Time exploitable : ligne rejetee.")
+        raise TcxParseError("TCX Trackpoint missing usable Time: row rejected.")
     mapped: dict[str, Any] = {}
     for spec in TRACKPOINT_FIELD_SPECS:
         value = point.get(spec.source_key)

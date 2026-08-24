@@ -1,14 +1,13 @@
-"""Test de non-régression transversal : sur une activité entièrement dépourvue de
-données exploitables (aucun échantillon), AUCUN champ "non calculable" de
-``ActivityRow`` ne doit valoir 0 -- seul ``None`` représente une grandeur non
-calculable dans ce schéma (cf. docstring de ``garminator.transform.rows`` et le
-commentaire de ``core.activity_metric.value`` dans migrations/005_core_series.sql).
+"""Transversal regression test: on an activity entirely devoid of usable data (no
+samples), NO "non-calculable" field of ``ActivityRow`` must be 0 -- only ``None``
+represents an incalculable quantity in this schema (see ``garminator.transform.rows``
+docstring and comment on ``core.activity_metric.value`` in migrations/005_core_series.sql).
 
-Ce test balaie explicitement les champs *nullable* de la DDL -- il exclut à dessein les
-compteurs qui ont légitimement 0 comme valeur par défaut significative
-(``imputed_seconds``/``excised_seconds``/``gap_applied``/``is_parent``/
-``needs_manual_rpe``), qui ne sont PAS des grandeurs "non calculable" mais des
-compteurs/booléens dont 0/False est la valeur réelle en l'absence d'anomalie."""
+This test explicitly sweeps nullable DDL fields -- it intentionally excludes counters
+that legitimately have 0 as a meaningful default value (``imputed_seconds``/
+``excised_seconds``/``gap_applied``/``is_parent``/``needs_manual_rpe``), which are
+NOT "non-calculable" quantities but counters/booleans whose 0/False is the real value
+in the absence of anomaly."""
 
 from __future__ import annotations
 
@@ -21,8 +20,8 @@ if TYPE_CHECKING:
 
 from .conftest import ALL_THRESHOLD, ATHLETE_ID, BIKE_THRESHOLD, bike_context, parsed_source
 
-#: Champs nullables de core.activity (migrations/004) qui représentent une grandeur
-#: "non calculable" -- jamais un compteur ou un flag booléen à défaut significatif.
+#: Nullable fields of core.activity (migrations/004) that represent an "incalculable"
+#: quantity -- never a counter or boolean flag with a meaningful default.
 _NULLABLE_METRIC_FIELDS = (
     "distance_m",
     "ascent_m",
@@ -56,25 +55,25 @@ def _empty_bike_bundle() -> CoreActivityBundle:
     )
 
 
-class TestAucunZeroSubstitueANoneSurActiviteVide:
-    def test_tous_les_champs_nullable_de_activity_row_sont_none(self) -> None:
+class TestNoZeroSubstitutedForNoneOnEmptyActivity:
+    def test_all_nullable_fields_of_activity_row_are_none(self) -> None:
         bundle = _empty_bike_bundle()
         for field_name in _NULLABLE_METRIC_FIELDS:
             value = getattr(bundle.activity, field_name)
-            assert value is None, f"{field_name} vaut {value!r}, attendu None"
+            assert value is None, f"{field_name} is {value!r}, expected None"
 
-    def test_les_compteurs_legitimes_restent_a_leur_valeur_par_defaut_zero(self) -> None:
+    def test_legitimate_counters_remain_at_default_zero(self) -> None:
         bundle = _empty_bike_bundle()
         assert bundle.activity.imputed_seconds == 0
         assert bundle.activity.excised_seconds == 0
         assert bundle.activity.total_samples == 0
 
-    def test_aucune_ligne_activity_metric_ne_vaut_zero_toutes_valent_none(self) -> None:
+    def test_no_activity_metric_row_is_zero_all_are_none(self) -> None:
         bundle = _empty_bike_bundle()
         for row in bundle.metrics:
-            assert row.value is None, f"{row.metric}/{row.method_code} vaut {row.value!r}"
+            assert row.value is None, f"{row.metric}/{row.method_code} is {row.value!r}"
             assert row.is_canonical is False
 
-    def test_needs_manual_rpe_vrai_car_aucune_methode_calculee_n_a_produit_de_tss(self) -> None:
+    def test_needs_manual_rpe_true_because_no_calculated_method_produced_tss(self) -> None:
         bundle = _empty_bike_bundle()
         assert bundle.activity.needs_manual_rpe is True

@@ -1,4 +1,4 @@
-"""Power-duration curve via prefix sums — §8 of ``04-formules-charge.md``.
+"""Power-duration curve via prefix sums — §8 of ``04-load-formulas.md``.
 
 Principle: for a 1 Hz series of length ``N``, best average effort over duration ``d`` is
 ``max_i (S[i+d] - S[i]) / d`` where ``S`` is the series prefix sum. O(N) per duration
@@ -38,10 +38,10 @@ def log_spaced_durations(
     explicit range never silently produces zero durations.
     """
     if min_s < 1:
-        msg = "min_s doit être >= 1"
+        msg = "min_s must be >= 1"
         raise ValueError(msg)
     if max_s < min_s:
-        msg = "max_s doit être >= min_s"
+        msg = "max_s must be >= min_s"
         raise ValueError(msg)
 
     j_min = math.ceil(math.log10(min_s) * points_per_decade)

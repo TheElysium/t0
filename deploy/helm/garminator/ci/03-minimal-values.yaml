@@ -1,9 +1,9 @@
-# Jeu de valeurs 3 — installation minimale : pas de Grafana, pas de sauvegarde,
-# pas de persistance PostgreSQL, pas de Service d'ingestion.
+# Value set 3 -- minimal install: no Grafana, no backup, no PostgreSQL
+# persistence, no ingestion Service.
 fullnameOverride: gmn
 postgresql:
   auth:
-    password: "motdepasse-de-test-postgres"
+    password: "test-password-postgres"
   persistence:
     enabled: false
 grafana:

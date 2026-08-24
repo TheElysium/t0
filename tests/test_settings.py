@@ -1,10 +1,9 @@
-"""Tests du module de configuration.
+"""Tests for the settings module.
 
-Aucun appel réseau, aucun appel Garmin : uniquement de la validation locale.
+No network, no Garmin calls: local validation only.
 
-L'essentiel de ce fichier porte sur une propriété de sécurité : aucune valeur
-d'identifiant ne doit apparaître dans un ``repr``, une sérialisation ou un message
-d'exception, car ces trois chemins finissent dans les logs du conteneur.
+Core concern: no identifier value must appear in repr, serialization, or exception
+message, as these three paths end up in container logs.
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ def test_settings_load_from_fake_environment(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_garmintokens_is_read_without_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``garminconnect`` lit ``GARMINTOKENS`` tel quel : le préfixe ne doit pas s'appliquer."""
+    """``garminconnect`` reads ``GARMINTOKENS`` as is: the prefix must not apply."""
     _set_full_environment(monkeypatch)
     monkeypatch.delenv("GARMINTOKENS")
     monkeypatch.setenv("GARMINATOR_GARMIN_TOKENS_PATH", FAKE_TOKENS_DIR)
@@ -72,7 +71,7 @@ def test_garmintokens_is_read_without_prefix(monkeypatch: pytest.MonkeyPatch) ->
     ],
 )
 def test_missing_variable_is_fatal(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
-    """Aucun champ obligatoire n'a de valeur par défaut implicite."""
+    """No required field has an implicit default value."""
     _set_full_environment(monkeypatch)
     monkeypatch.delenv(missing)
 
@@ -93,10 +92,10 @@ def test_missing_variable_is_fatal(monkeypatch: pytest.MonkeyPatch, missing: str
 def test_validation_error_never_reveals_a_secret(
     monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
-    """Régression : pydantic recopie le dictionnaire d'entrée (mot de passe inclus).
+    """Regression: pydantic copies the input dictionary back (password included).
 
-    ``get_settings`` doit intercepter cela, y compris dans la trace complète — une
-    exception chaînée réintroduirait la fuite via ``__cause__`` / ``__context__``.
+    ``get_settings`` must intercept that, including in the full traceback -- a chained
+    exception would reintroduce the leak through ``__cause__`` / ``__context__``.
     """
     _set_full_environment(monkeypatch)
     monkeypatch.delenv(missing)
@@ -113,7 +112,7 @@ def test_validation_error_never_reveals_a_secret(
 
 
 def test_secrets_never_appear_in_repr_or_serialization(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``repr``/``str``/``model_dump`` d'un objet de settings ne révèlent rien."""
+    """``repr``/``str``/``model_dump`` of a settings object reveal nothing."""
     _set_full_environment(monkeypatch)
 
     settings = get_settings()
@@ -129,15 +128,15 @@ def test_secrets_never_appear_in_repr_or_serialization(monkeypatch: pytest.Monke
 
     for rendering in renderings:
         for canary in CANARIES:
-            assert canary not in rendering, f"fuite de {canary!r} dans {rendering!r}"
+            assert canary not in rendering, f"leak of {canary!r} in {rendering!r}"
 
 
 def test_settings_can_be_built_without_reading_a_local_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Un ``.env`` présent dans le répertoire courant ne doit pas polluer les tests."""
+    """A ``.env`` present in the current directory must not pollute the tests."""
     dotenv = tmp_path / ".env"
-    dotenv.write_text("GARMINATOR_GARMIN_PASSWORD=valeur-du-fichier\n", encoding="utf-8")
+    dotenv.write_text("GARMINATOR_GARMIN_PASSWORD=value-from-file\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     _set_full_environment(monkeypatch)
 

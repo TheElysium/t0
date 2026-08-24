@@ -6,21 +6,21 @@ metadata:
     {{- include "garminator.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
 data:
-  # Les noms doivent porter le prefixe GARMINATOR_ : `garminator.settings.Settings`
-  # est un BaseSettings avec `env_prefix="GARMINATOR_"`. Une cle sans prefixe est
-  # simplement ignoree (extra="ignore"), et le pod echoue au demarrage sur un champ
-  # requis manquant -- panne visible seulement en production.
-  # SEULE EXCEPTION : GARMINTOKENS, lu tel quel par garminconnect 0.3.2 lui-meme
-  # (`os.getenv("GARMINTOKENS")`), d'ou le `validation_alias` explicite cote Python.
+  # Names must carry the GARMINATOR_ prefix: `garminator.settings.Settings`
+  # is a BaseSettings with `env_prefix="GARMINATOR_"`. A key without the prefix is
+  # simply ignored (extra="ignore"), and the pod fails on startup with a missing
+  # required field -- failure visible only in production.
+  # SOLE EXCEPTION: GARMINTOKENS, read as-is by garminconnect 0.3.2 itself
+  # (`os.getenv("GARMINTOKENS")`), hence the explicit `validation_alias` on Python side.
   GARMINTOKENS: {{ .Values.ingest.config.garminTokensPath | quote }}
   GARMINATOR_FIT_ARCHIVE_PATH: {{ .Values.ingest.config.fitArchivePath | quote }}
   GARMINATOR_HISTORY_START: {{ .Values.ingest.config.backfillStartDate | quote }}
-  # DEFAUT REEL CORRIGE : cette cle s'appelait `LOG_LEVEL`, sans le prefixe --
-  # exactement le cas que le commentaire ci-dessus decrit. Aucun code ne l'a
-  # jamais lue, donc regler `ingest.config.logLevel` n'avait aucun effet.
-  # Lue par garminator.logging_setup.configure_logging (et non par Settings :
-  # un outil d'exploitation en lecture seule doit pouvoir regler sa verbosite
-  # sans avoir a fournir un identifiant Garmin).
+  # ACTUAL DEFAULT CORRECTED: this key was called `LOG_LEVEL`, without the prefix --
+  # exactly the case the above comment describes. No code ever read it, so setting
+  # `ingest.config.logLevel` had no effect.
+  # Read by garminator.logging_setup.configure_logging (not by Settings:
+  # a read-only ops tool must be able to adjust verbosity without providing
+  # Garmin credentials).
   GARMINATOR_LOG_LEVEL: {{ .Values.ingest.config.logLevel | quote }}
   TZ: {{ .Values.ingest.config.timezone | quote }}
   PGHOST: {{ include "garminator.postgresql.serviceName" . | quote }}

@@ -1,0 +1,9 @@
+# Value set 1 -- default configuration, with only the mandatory secrets.
+# Used for offline validation (`helm lint` / `helm template`).
+# The passwords below are TEST values, never deployed.
+postgresql:
+  auth:
+    password: "test-password-postgres"
+grafana:
+  admin:
+    password: "test-password-grafana"

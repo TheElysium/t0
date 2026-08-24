@@ -7,11 +7,11 @@ metadata:
     {{- include "garminator.labels" . | nindent 4 }}
     app.kubernetes.io/component: grafana
 data:
-  # Provisioning "provider" Grafana : indique où lire les fichiers JSON de
-  # dashboards. Le contenu des dashboards (lot L9) arrive via la ConfigMap
-  # `{{ include "garminator.grafana.dashboardsConfigMapName" . }}`, montée
-  # dans /var/lib/grafana/dashboards par le Deployment Grafana. Ce fichier
-  # n'a pas besoin d'être modifié quand L9 ajoute des dashboards.
+  # Grafana provisioning "provider": tells where to read dashboard JSON files.
+  # Dashboard content (batch L9) arrives via the ConfigMap
+  # `{{ include "garminator.grafana.dashboardsConfigMapName" . }}`, mounted
+  # at /var/lib/grafana/dashboards by the Grafana Deployment. This file
+  # does not need to be modified when L9 adds dashboards.
   dashboards.yaml: |
     apiVersion: 1
     providers:

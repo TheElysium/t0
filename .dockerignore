@@ -1,9 +1,9 @@
-# Contexte de build minimal : seuls pyproject.toml, README.md et src/ sont copiés
-# par le Dockerfile. Tout le reste est exclu — en particulier les données
-# personnelles, dont l'inclusion dans le contexte exposerait au risque de fuite
-# vers une image publiée sur GHCR.
+# Minimal build context: only pyproject.toml, README.md, and src/ are copied
+# by Dockerfile. Everything else is excluded -- especially personal data,
+# whose inclusion in the context would expose the risk of leaking into an
+# image published on GHCR.
 
-# --- Données personnelles Garmin — ne doivent JAMAIS entrer dans le contexte ---
+# --- Personal Garmin data -- MUST NEVER enter the context ---
 Activities.csv
 metrics&wellness_1year/
 data/
@@ -11,14 +11,14 @@ data/
 *.FIT
 *.Fit
 
-# --- Secrets et configuration locale ---
+# --- Secrets and local configuration ---
 .env
 .env.*
 !.env.example
 secrets/
 *.secret.yaml
 
-# --- Environnements et caches ---
+# --- Environments and caches ---
 .venv/
 venv/
 __pycache__/
@@ -32,7 +32,7 @@ htmlcov/
 dist/
 build/
 
-# --- Sources non nécessaires à la construction du wheel ---
+# --- Sources not needed for wheel building ---
 .git/
 .github/
 .gitignore

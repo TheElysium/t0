@@ -1,7 +1,7 @@
 """Intermediate structure shared by FIT and TCX readers.
 
 Single type set for both input formats: design constraint from addendum
-(``01-addendum-donnees-athlete.md`` §2)—"two distinct readers producing same
+(addendum §2)—"two distinct readers producing same
 intermediate structure, one write path behind". Fields match exactly columns in
 ``core.sample`` / ``core.activity_lap`` / ``core.swim_length`` tables (migrations 004, 005)
 so passage to ``INSERT`` (out of this batch scope) is pure field projection, no hidden transform.
@@ -98,7 +98,7 @@ class SessionSummary:
 
     Verified (addendum §1): ``training_stress_score`` absent from both real FITs. Fields
     below ARE present, must be kept for comparison, never used as canonical load
-    (research/05-schema-postgres.md §8.1). No ``core`` table accepts them in current frozen
+    (research/05-postgres-schema.md §8.1). No ``core`` table accepts them in current frozen
     DDL: class exists so caller (L2/L6, out of L3 scope) decides where to store them,
     rather than L3 discarding them meanwhile.
     """
@@ -128,3 +128,9 @@ class ParsedActivitySource:
     start_time: datetime | None
     """Earliest known absolute instant in activity (session.start_time for FIT,
     first sample timestamp for TCX). ``None`` only if file contains no usable samples."""
+    tcx_sport: str | None = None
+    """Root ``Activity`` element's ``Sport`` attribute, TCX only ("Running" | "Biking" |
+    "Other" per the TCX schema). Added here rather than as a new dataclass because this
+    frozen dataclass IS the shared contract between both readers: an optional field with
+    a default keeps the FIT reader, which never sets it, unchanged. Always ``None`` for
+    FIT -- the FIT ``session`` message already carries sport/sub_sport in ``.raw``."""

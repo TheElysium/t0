@@ -97,7 +97,7 @@ LENGTH_FIELD_SPECS: tuple[FieldSpec, ...] = (
 )
 
 #: ``session`` message fields kept as COMPARISON metrics, never as truth source
-#: (research/05-schema-postgres.md §8.1, addendum §1).
+#: (research/05-postgres-schema.md §8.1, addendum §1).
 SESSION_COMPARISON_FIELDS: tuple[str, ...] = (
     "training_load_peak",
     "total_training_effect",
@@ -153,7 +153,7 @@ def map_record(msg: dict[str, Any], *, activity_id: int, start_time: datetime) -
     """
     t = msg.get("timestamp")
     if not isinstance(t, datetime):
-        raise FitParseError("Message record sans timestamp exploitable : ligne rejetée.")
+        raise FitParseError("Record message missing usable timestamp: row rejected.")
     mapped, consumed = _apply_specs(msg, RECORD_FIELD_SPECS)
     extra = _build_extra(msg, consumed, exclude={"timestamp"})
     elapsed_s = round((t - start_time).total_seconds())
@@ -173,13 +173,13 @@ def map_lap(msg: dict[str, Any], *, activity_id: int) -> LapRow:
     """
     start_time = msg.get("start_time")
     if not isinstance(start_time, datetime):
-        raise FitParseError("Message lap sans start_time exploitable : ligne rejetée.")
+        raise FitParseError("Lap message missing usable start_time: row rejected.")
     duration_s = round_to_int(msg.get("total_timer_time"))
     if duration_s is None:
-        raise FitParseError("Message lap sans total_timer_time : durée non déductible.")
+        raise FitParseError("Lap message missing total_timer_time: duration not deducible.")
     lap_index = msg.get("message_index")
     if lap_index is None:
-        raise FitParseError("Message lap sans message_index : index de tour non déductible.")
+        raise FitParseError("Lap message missing message_index: lap index not deducible.")
     mapped, consumed = _apply_specs(msg, LAP_FIELD_SPECS)
     extra = _build_extra(msg, consumed, exclude={"start_time", "total_timer_time", "message_index"})
     return LapRow(
@@ -201,19 +201,19 @@ def map_length(msg: dict[str, Any], *, activity_id: int, lap_index: int | None) 
     """
     start_time = msg.get("start_time")
     if not isinstance(start_time, datetime):
-        raise FitParseError("Message length sans start_time exploitable : ligne rejetée.")
+        raise FitParseError("Length message missing usable start_time: row rejected.")
     duration = msg.get("total_timer_time", msg.get("total_elapsed_time"))
     if duration is None:
-        raise FitParseError("Message length sans durée exploitable : ligne rejetée.")
+        raise FitParseError("Length message missing usable duration: row rejected.")
     length_type = msg.get("length_type")
     if length_type not in ("active", "idle"):
         raise FitParseError(
-            f"Message length avec length_type inattendu ({length_type!r}) : "
-            "seuls 'active'/'idle' sont acceptés par core.swim_length."
+            f"Length message with unexpected length_type ({length_type!r}): "
+            "only 'active'/'idle' accepted by core.swim_length."
         )
     length_index = msg.get("message_index")
     if length_index is None:
-        raise FitParseError("Message length sans message_index : index non déductible.")
+        raise FitParseError("Length message missing message_index: index not deducible.")
     mapped, consumed = _apply_specs(msg, LENGTH_FIELD_SPECS)
     return SwimLengthRow(
         activity_id=activity_id,

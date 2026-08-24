@@ -8,9 +8,9 @@ metadata:
     app.kubernetes.io/component: backup
 spec:
   schedule: {{ .Values.backup.schedule | quote }}
-  # Tous les CronJobs du chart partagent ce fuseau : sans ce champ le controleur
-  # applique UTC, et l'ordre quotidien annonce dans values.yaml ne serait plus
-  # celui reellement execute -- avec un decalage qui change deux fois par an.
+  # All chart CronJobs share this timezone: without this field the controller
+  # applies UTC, and the daily order announced in values.yaml would no longer
+  # be what is actually executed -- with a shift that changes twice a year.
   timeZone: {{ .Values.ingest.config.timezone | quote }}
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: {{ .Values.backup.startingDeadlineSeconds }}
@@ -31,12 +31,11 @@ spec:
             runAsNonRoot: true
             runAsUser: 999
             runAsGroup: 999
-            # fsGroup ALIGNE sur celui du pod d'ingestion : les deux pods
-            # montent le MEME PVC (fit-archive). Deux fsGroup differents se
-            # ecrasent mutuellement a chaque montage (le kubelet applique
-            # fsGroup recursivement au volume), et l'ingestion perdrait le
-            # droit d'ecrire son archive FIT et son token store apres le
-            # premier passage de la sauvegarde.
+            # fsGroup ALIGNED with ingest pod: both pods mount the SAME PVC
+            # (fit-archive). Two different fsGroups overwrite each other on every
+            # mount (kubelet applies fsGroup recursively to the volume), and
+            # ingest would lose write permission to its FIT archive and token store
+            # after the first backup run.
             fsGroup: {{ .Values.ingest.securityContext.fsGroup }}
           containers:
             - name: pg-dump
@@ -75,36 +74,34 @@ spec:
                   dumpfile="${BACKUP_DIR}/garminator-${timestamp}.dump"
                   partial="${dumpfile}.part"
 
-                  # Un dump interrompu ne doit jamais rester sous le nom
-                  # definitif : il serait compte par la rotation et pourrait
-                  # etre choisi pour une restauration.
+                  # An interrupted dump must never remain with its final name:
+                  # it would be counted by rotation and could be chosen for
+                  # restoration.
                   trap 'rm -f "${partial}"' EXIT
 
-                  echo "Sauvegarde vers ${dumpfile}"
-                  # pg_dump n'est PAS place dans un tube : son code de retour
-                  # remonte directement, et `set -e` fait echouer le Job. Une
-                  # sauvegarde qui echoue en silence est pire que pas de
-                  # sauvegarde.
+                  echo "Backup to ${dumpfile}"
+                  # pg_dump is NOT piped: its exit code comes back directly,
+                  # and `set -e` fails the Job. A backup that fails silently is
+                  # worse than no backup.
                   if ! pg_dump --format=custom --no-password --file="${partial}"; then
-                    echo "ECHEC : pg_dump a retourne un code non nul, aucune sauvegarde produite." >&2
+                    echo "FAILURE: pg_dump returned non-zero, no backup produced." >&2
                     exit 1
                   fi
                   if [ ! -s "${partial}" ]; then
-                    echo "ECHEC : le dump produit est vide." >&2
+                    echo "FAILURE: produced dump is empty." >&2
                     exit 1
                   fi
                   mv "${partial}" "${dumpfile}"
                   trap - EXIT
-                  echo "Dump termine : $(wc -c < "${dumpfile}") octets."
+                  echo "Dump completed: $(wc -c < "${dumpfile}") bytes."
 
                   # --- Rotation ---
-                  # Volontairement sans `ls -1t | tail | xargs -r` : `xargs -r`
-                  # est une extension GNU dont la presence n'est pas garantie
-                  # dans le busybox d'une image alpine, et l'analyse de la
-                  # sortie de `ls` est fragile. Les noms portent un horodatage
-                  # UTC de largeur fixe, donc l'ordre lexicographique du glob
-                  # (du plus ancien au plus recent) EST l'ordre chronologique.
-                  echo "Retention : conservation des ${RETENTION} dumps les plus recents"
+                  # Deliberately without `ls -1t | tail | xargs -r`: `xargs -r`
+                  # is a GNU extension whose presence is not guaranteed in
+                  # alpine image busybox, and parsing `ls` output is fragile.
+                  # Names carry fixed-width UTC timestamps, so lexicographic
+                  # glob order (oldest to newest) IS chronological order.
+                  echo "Retention: keeping ${RETENTION} most recent dumps"
                   total=0
                   for f in "${BACKUP_DIR}"/garminator-*.dump; do
                     [ -f "${f}" ] || continue
@@ -117,11 +114,11 @@ spec:
                       [ -f "${f}" ] || continue
                       n=$((n + 1))
                       [ "${n}" -le "${surplus}" ] || break
-                      echo "Purge du dump ancien : ${f}"
+                      echo "Purging old dump: ${f}"
                       rm -f "${f}"
                     done
                   fi
-                  echo "Sauvegarde terminee (${total} dump(s) avant purge)."
+                  echo "Backup completed (${total} dump(s) before purge)."
               volumeMounts:
                 - name: fit-archive
                   mountPath: /backups

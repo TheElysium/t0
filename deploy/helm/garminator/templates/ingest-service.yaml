@@ -7,8 +7,8 @@ metadata:
     {{- include "garminator.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
 spec:
-  # ClusterIP uniquement : pas d'exposition externe. L'athlète atteint
-  # l'endpoint d'upload FIT (lot L7) via `kubectl port-forward`.
+  # ClusterIP only: no external exposure. The athlete reaches
+  # the FIT upload endpoint (batch L7) via `kubectl port-forward`.
 {{- include "garminator.assertLocalOnlyService" (dict "key" "ingest.service.type" "type" .Values.ingest.service.type) }}
   type: {{ .Values.ingest.service.type }}
   selector:

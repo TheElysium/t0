@@ -33,12 +33,11 @@ def _decode_messages(data: bytes) -> dict[str, Any]:
         stream = Stream.from_byte_array(bytearray(data))
         decoder = Decoder(stream)
         messages, errors = decoder.read()
-    except Exception as exc:  # le SDK peut aussi lever directement sur un flux inexploitable
-        raise FitParseError(f"Décodage FIT impossible : {exc}") from exc
+    except Exception as exc:  # SDK can also raise directly on unusable stream
+        raise FitParseError(f"FIT decoding impossible: {exc}") from exc
     if errors:
         raise FitParseError(
-            "Décodage FIT terminé avec des erreurs, fichier rejeté : "
-            + "; ".join(str(e) for e in errors)
+            "FIT decoding finished with errors, file rejected: " + "; ".join(str(e) for e in errors)
         )
     # garmin_fit_sdk.Decoder.read() returns SDK-specific TypedDict (FitMessages);
     # this module intentionally works in generic dict[str, Any] (see garminator.fit.mapping,
@@ -76,8 +75,8 @@ def decode_fit(data: bytes, *, activity_id: int) -> ParsedActivitySource:
 
     if start_time is None and (record_msgs or lap_msgs):
         raise FitParseError(
-            "Impossible de déterminer l'instant de départ de l'activité "
-            "(ni session.start_time, ni record[0].timestamp)."
+            "Cannot determine activity start time "
+            "(neither session.start_time nor record[0].timestamp)."
         )
 
     samples = [

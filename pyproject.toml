@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "garminator"
 version = "0.1.0"
-description = "Pipeline auto-hébergé d'ingestion et de visualisation des données Garmin Connect."
+description = "Self-hosted Garmin Connect data ingestion and visualization pipeline."
 readme = "README.md"
-# Borne haute assumée : la CI, mypy (`python_version`), la cible ruff et l'image Docker
-# sont tous en 3.12. Élargir la borne sans élargir la matrice de CI reviendrait à
-# promettre un support non testé.
+# Upper bound assumed: CI, mypy (`python_version`), ruff target, and Docker image
+# are all on 3.12. Widening the bound without widening the CI matrix would mean
+# promising untested support.
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "Lukas" }]
@@ -20,9 +20,9 @@ dependencies = [
     "psycopg[binary]==3.2.3",
     "apscheduler==3.10.4",
     "fastapi==0.115.5",
-    # Exigé À L'EXÉCUTION par les paramètres File()/UploadFile de l'endpoint d'upload
-    # (garminator.api.upload) : FastAPI ne le tire pas lui-même, et son absence ne se
-    # manifeste qu'au premier envoi réel, pas à l'import.
+    # Required AT RUNTIME by File()/UploadFile parameters of the upload endpoint
+    # (garminator.api.upload): FastAPI does not pull it itself, and its absence only
+    # shows up on first actual send, not on import.
     "python-multipart==0.0.20",
     "uvicorn[standard]==0.32.1",
     "pydantic==2.10.2",
@@ -35,8 +35,8 @@ dev = [
     "pytest-cov==6.0.0",
     "ruff==0.8.1",
     "mypy==1.13.0",
-    # Requis par starlette.testclient.TestClient : sans lui, TOUTE la couche HTTP de
-    # l'endpoint d'upload est sautée en silence par pytest.
+    # Required by starlette.testclient.TestClient: without it, the ENTIRE HTTP layer of
+    # the upload endpoint is silently skipped by pytest.
     "httpx==0.28.1",
 ]
 
@@ -54,8 +54,8 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle erreurs
-    "W",    # pycodestyle avertissements
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
     "F",    # pyflakes
     "I",    # isort
     "UP",   # pyupgrade
@@ -63,14 +63,14 @@ select = [
     "C4",   # flake8-comprehensions
     "SIM",  # flake8-simplify
     "N",    # pep8-naming
-    "RUF",  # règles ruff
+    "RUF",  # ruff rules
     "S",    # flake8-bandit
     "A",    # flake8-builtins
     "PL",   # pylint
     "TCH",  # flake8-type-checking
 ]
 ignore = [
-    "PLR0913", # trop d'arguments : les signatures d'ingestion en ont légitimement beaucoup
+    "PLR0913", # too many arguments: ingestion signatures legitimately have many
 ]
 
 [tool.ruff.lint.per-file-ignores]

@@ -1,36 +1,33 @@
-"""Réconciliation PVC <-> ``raw.fit_file`` : le scan que le DDL promet, en lecture seule.
+"""Archive reconciliation: PVC <-> ``raw.fit_file`` scan promised by the DDL, read-only.
 
-``migrations/002_raw.sql`` pose la règle d'atomicité (le fichier est écrit et fsync sur le
-PVC AVANT l'INSERT de sa ligne) et qualifie la seule anomalie tolérée : « Un fichier
-orphelin (sans ligne) est inoffensif et rattrapable par un scan ; une ligne orpheline
-(sans fichier) rend la reconstructibilité de core fausse. » Ce scan n'existait pas. Ce
-module EST ce scan.
+``migrations/002_raw.sql`` sets the atomicity rule (file is written and fsync to PVC
+BEFORE the row INSERT) and qualifies the only tolerated anomaly: "An orphan file
+(without row) is harmless and catchable by a scan; an orphan row (without file) breaks
+core reconstructibility." This scan did not exist. This module IS that scan.
 
-Les deux anomalies ne sont pas symétriques, et ce module ne les traite pas de la même
-façon :
+The two anomalies are not symmetric, and this module treats them differently:
 
-- **Fichier orphelin** (sur le PVC, aucune ligne) -- bénin. Se produit légitimement quand
-  un archivage a réussi et que l'INSERT qui suit a échoué : la règle d'atomicité a
-  précisément pour but de rendre CE sens-là possible plutôt que l'autre. Se produisait
-  aussi, jusqu'à la correction du hachage ZIP dans
-  :mod:`garminator.scheduler.activity_files`, à chaque passage sur la fenêtre du jour
-  courant -- un déploiement antérieur à cette correction en a très probablement accumulé.
-  Rien à réparer en base : le fichier est simplement inutilisé.
-- **Ligne orpheline** (en base, aucun fichier) -- grave. La ligne affirme qu'un fichier
-  source existe ; toute reconstruction de ``core`` à partir de ``raw`` s'appuiera dessus
-  et échouera, ou pire, sautera silencieusement l'activité.
-- **Taille divergente** -- le fichier existe mais ne fait plus la taille inscrite en base.
-  Traité comme grave : c'est soit une troncature, soit un fichier écrasé, dans les deux
-  cas la ligne ne décrit plus son fichier.
+- **Orphan file** (on PVC, no row) -- benign. Legitimately occurs when archiving succeeds
+  but the following INSERT fails: the atomicity rule is meant to make THIS direction
+  possible rather than the other. Also occurred, until ZIP hash fix in
+  :mod:`garminator.scheduler.activity_files`, on every pass over the current day window
+  -- a deployment before that fix very likely accumulated some. Nothing to fix in DB:
+  the file is simply unused.
+- **Orphan row** (in DB, no file) -- critical. The row asserts a source file exists; any
+  ``core`` reconstruction from ``raw`` depends on it and will fail, or worse, silently
+  skip the activity.
+- **Size mismatch** -- file exists but no longer matches the size in DB. Treated as
+  critical: either truncation or file overwrite, either way the row no longer describes
+  its file.
 
-Ce module ne recalcule PAS les sha256 par défaut : sur ~1 090 fichiers de plusieurs Mo,
-relire l'intégralité du PVC pour un contrôle de routine coûte cher pour une anomalie que
-la comparaison de taille attrape déjà dans l'écrasante majorité des cas. ``--deep`` force
-la vérification par contenu quand on soupçonne une corruption silencieuse.
+This module does NOT recalculate sha256 by default: over ~1,090 files of several MB,
+rereading the entire PVC for routine checks costs a lot for an anomaly that size
+comparison catches in the vast majority of cases. ``--deep`` forces content verification
+when silent corruption is suspected.
 
-**Lecture seule, sans exception.** Aucune fonction d'ici ne supprime de fichier ni ne
-modifie de ligne. Supprimer un « orphelin » sur la foi d'un scan est irréversible et
-suppose que le scan a raison ; le rapport nomme les fichiers, l'opérateur décide.
+**Read-only without exception.** No function here deletes files or modifies rows.
+Deleting an "orphan" based on a scan is irreversible and assumes the scan is right; the
+report names the files, the operator decides.
 """
 
 from __future__ import annotations
@@ -38,26 +35,38 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    import psycopg
 
-#: Extensions des fichiers source archivés (cf. ``garminator.fit.archive.sniff_format``).
-#: Tout autre fichier du PVC est ignoré par le scan plutôt que rapporté orphelin : le
-#: volume peut légitimement porter des fichiers temporaires ou des répertoires vides.
+class _Cursor(Protocol):
+    def execute(self, query: str, params: Any = ...) -> object: ...
+    def fetchall(self) -> list[tuple[Any, ...]]: ...
+    def __enter__(self) -> _Cursor: ...
+    def __exit__(self, *exc_info: object) -> None: ...
+
+
+class DBConnection(Protocol):
+    """Read-only structural view of the connection used by reconciliation."""
+
+    def cursor(self) -> _Cursor: ...
+
+
+#: Extensions of archived source files (see ``garminator.fit.archive.sniff_format``).
+#: Any other file on the PVC is ignored by the scan rather than reported as orphan: the
+#: volume can legitimately carry temp files or empty directories.
 ARCHIVE_SUFFIXES: frozenset[str] = frozenset({".fit", ".tcx"})
 
-#: Lecture par blocs pour le sha256 en mode ``--deep`` : un .FIT d'ultra peut peser
-#: plusieurs dizaines de Mo, et le scan les parcourt tous.
+#: Block read for sha256 in ``--deep`` mode: an ultra .FIT can weigh dozens of MB,
+#: and the scan walks through them all.
 _HASH_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
 class MissingFile:
-    """Ligne ``raw.fit_file`` dont le fichier est absent, ou ne correspond plus."""
+    """Row ``raw.fit_file`` whose file is absent or no longer matches."""
 
     fit_file_id: int
     garmin_activity_id: int | None
@@ -67,7 +76,7 @@ class MissingFile:
 
 @dataclass(frozen=True, slots=True)
 class OrphanFile:
-    """Fichier présent sur le PVC qu'aucune ligne ``raw.fit_file`` ne référence."""
+    """File on PVC not referenced by any ``raw.fit_file`` row."""
 
     path: Path
     size_bytes: int
@@ -75,7 +84,7 @@ class OrphanFile:
 
 @dataclass(frozen=True, slots=True)
 class ReconcileReport:
-    """Résultat d'un scan. ``is_clean`` distingue le bénin du grave."""
+    """Scan result. ``is_clean`` distinguishes benign from critical."""
 
     rows_scanned: int
     files_scanned: int
@@ -85,11 +94,11 @@ class ReconcileReport:
 
     @property
     def is_clean(self) -> bool:
-        """Vrai si aucune anomalie GRAVE. Les fichiers orphelins n'en sont pas une.
+        """True if no CRITICAL anomalies. Orphan files are not.
 
-        C'est cette propriété que le code de sortie du CLI suit : faire échouer un CronJob
-        parce que le PVC porte un fichier inutilisé entraînerait à ignorer ses alertes,
-        et c'est l'alerte « ligne orpheline » qu'on ne peut pas se permettre d'ignorer.
+        This property controls the CLI exit code: failing a CronJob because the PVC
+        holds an unused file would teach ignoring its alerts, and we cannot afford to
+        ignore the "orphan row" alert.
         """
         return not self.missing_files
 
@@ -113,24 +122,24 @@ def _iter_archive_files(archive_root: Path) -> Iterable[Path]:
 
 
 def reconcile_archive(
-    conn: psycopg.Connection,
+    conn: DBConnection,
     archive_root: Path,
     *,
     deep: bool = False,
 ) -> ReconcileReport:
-    """Compare l'inventaire de ``raw.fit_file`` au contenu réel de ``archive_root``.
+    """Compare ``raw.fit_file`` inventory against actual ``archive_root`` contents.
 
     Args:
-        conn: connexion PostgreSQL. Utilisée en LECTURE seule.
-        archive_root: racine du volume d'archivage (le ``fit-archive`` du PVC).
-        deep: recalcule le sha256 de chaque fichier présent au lieu de comparer sa taille.
-            Coûteux : relit l'intégralité du volume.
+        conn: PostgreSQL connection. Used read-only.
+        archive_root: archive volume root (the ``fit-archive`` PVC).
+        deep: recalculate sha256 for each file instead of comparing size. Costly:
+            rereads entire volume.
 
     Returns:
-        Le rapport. Un chemin en base est résolu tel quel : les lignes portent un chemin
-        absolu, et un ``archive_root`` monté ailleurs qu'à l'écriture ferait rapporter
-        TOUTES les lignes manquantes -- symptôme volontairement bruyant plutôt que
-        silencieux, un PVC monté au mauvais endroit étant exactement ce qu'il faut voir.
+        The report. A path in DB is resolved as-is: rows carry absolute paths, and an
+        ``archive_root`` mounted elsewhere than at write time would report ALL rows as
+        missing -- deliberately loud symptom rather than silent, a wrongly-mounted PVC
+        being exactly what must be seen.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -147,7 +156,7 @@ def reconcile_archive(
         referenced.add(path)
         if not path.is_file():
             missing.append(
-                MissingFile(fit_file_id, activity_id, storage_path, "fichier absent du volume")
+                MissingFile(fit_file_id, activity_id, storage_path, "file missing from volume")
             )
             continue
         if deep:
@@ -155,7 +164,7 @@ def reconcile_archive(
                 actual = _file_sha256(path)
             except OSError as exc:
                 missing.append(
-                    MissingFile(fit_file_id, activity_id, storage_path, f"illisible : {exc}")
+                    MissingFile(fit_file_id, activity_id, storage_path, f"unreadable: {exc}")
                 )
                 continue
             if actual != bytes(sha256):
@@ -164,8 +173,8 @@ def reconcile_archive(
                         fit_file_id,
                         activity_id,
                         storage_path,
-                        f"sha256 divergent (base {bytes(sha256).hex()[:12]}, "
-                        f"disque {actual.hex()[:12]})",
+                        f"sha256 mismatch (db {bytes(sha256).hex()[:12]}, "
+                        f"disk {actual.hex()[:12]})",
                     )
                 )
             continue
@@ -176,7 +185,7 @@ def reconcile_archive(
                     fit_file_id,
                     activity_id,
                     storage_path,
-                    f"taille divergente (base {size_bytes}, disque {actual_size})",
+                    f"size mismatch (db {size_bytes}, disk {actual_size})",
                 )
             )
 
@@ -195,42 +204,43 @@ def reconcile_archive(
     )
 
 
-#: Même borne d'affichage que le bilan de santé, pour la même raison : un rapport qui
-#: déroule des centaines de lignes dans les logs d'un CronJob cesse d'être lu.
-_MAX_LIGNES_LISTEES = 20
+#: Same display bound as health report, for same reason: report scrolling hundreds of
+#: lines in CronJob logs stops being read.
+_MAX_LISTED_LINES = 20
 
 
 def format_reconcile_report(report: ReconcileReport) -> str:
-    """Rendu texte, même esprit que :func:`garminator.ops.health.format_health_report`."""
-    mode = "profond (sha256 recalculé)" if report.deep else "rapide (taille comparée)"
+    """Text rendering, similar spirit to
+    :func:`garminator.ops.health.format_health_report`."""
+    mode = "deep (sha256 recalculated)" if report.deep else "fast (size compared)"
     lines = [
-        f"Réconciliation PVC <-> raw.fit_file -- mode {mode}",
-        f"  lignes examinées : {report.rows_scanned}",
+        f"PVC reconciliation <-> raw.fit_file -- {mode} mode",
+        f"  rows examined: {report.rows_scanned}",
         "",
-        f"GRAVE -- lignes sans fichier valide ({len(report.missing_files)}) :",
+        f"CRITICAL -- rows without valid file ({len(report.missing_files)}):",
     ]
     if not report.missing_files:
-        lines.append("  (aucune -- toute ligne raw.fit_file a bien son fichier)")
-    for mf in report.missing_files[:_MAX_LIGNES_LISTEES]:
-        activity = mf.garmin_activity_id if mf.garmin_activity_id is not None else "upload manuel"
-        lines.append(f"  #{mf.fit_file_id} (activité {activity}) {mf.storage_path} : {mf.reason}")
-    if len(report.missing_files) > _MAX_LIGNES_LISTEES:
-        lines.append(f"  ... et {len(report.missing_files) - _MAX_LIGNES_LISTEES} de plus.")
+        lines.append("  (none -- all raw.fit_file rows have their file)")
+    for mf in report.missing_files[:_MAX_LISTED_LINES]:
+        activity = mf.garmin_activity_id if mf.garmin_activity_id is not None else "manual upload"
+        lines.append(f"  #{mf.fit_file_id} (activity {activity}) {mf.storage_path}: {mf.reason}")
+    if len(report.missing_files) > _MAX_LISTED_LINES:
+        lines.append(f"  ... and {len(report.missing_files) - _MAX_LISTED_LINES} more.")
 
     lines.append("")
-    lines.append(f"BÉNIN -- fichiers orphelins sur le volume ({len(report.orphan_files)}) :")
+    lines.append(f"BENIGN -- orphan files on volume ({len(report.orphan_files)}):")
     if not report.orphan_files:
-        lines.append("  (aucun)")
-    for of in report.orphan_files[:_MAX_LIGNES_LISTEES]:
-        lines.append(f"  {of.path} ({of.size_bytes} octets)")
-    if len(report.orphan_files) > _MAX_LIGNES_LISTEES:
-        lines.append(f"  ... et {len(report.orphan_files) - _MAX_LIGNES_LISTEES} de plus.")
+        lines.append("  (none)")
+    for of in report.orphan_files[:_MAX_LISTED_LINES]:
+        lines.append(f"  {of.path} ({of.size_bytes} bytes)")
+    if len(report.orphan_files) > _MAX_LISTED_LINES:
+        lines.append(f"  ... and {len(report.orphan_files) - _MAX_LISTED_LINES} more.")
     if report.orphan_files:
         lines.append(
-            "  Ces fichiers ne sont référencés par aucune ligne : inoffensifs, ils "
-            "n'occupent que de l'espace. AUCUNE suppression n'est faite par ce scan."
+            "  These files are not referenced by any row: harmless, they only use "
+            "space. NO deletion is done by this scan."
         )
 
     lines.append("")
-    lines.append("Verdict : " + ("RAS" if report.is_clean else "ANOMALIE GRAVE, voir ci-dessus"))
+    lines.append("Verdict: " + ("OK" if report.is_clean else "CRITICAL ANOMALY, see above"))
     return "\n".join(lines)

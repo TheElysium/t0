@@ -1,11 +1,11 @@
-"""Backoff exponentiel avec jitter, borné, et discrimination stricte des erreurs.
+"""Bounded exponential backoff with jitter, and strict error discrimination.
 
-Principe non négociable de ce module : un échec d'authentification ne doit **jamais**
-être réessayé. C'est précisément la boucle « échec de login → nouvel essai → nouvel
-essai... » qui expose le compte Garmin à un blocage. Seules les erreurs *transitoires*
-(429, erreurs de connexion/5xx) entrent dans :data:`RETRYABLE_EXCEPTIONS` ; tout le reste
-— dont ``GarminConnectAuthenticationError`` et ``GarminConnectInvalidFileFormatError`` —
-se propage dès la première occurrence.
+Non-negotiable principle of this module: an authentication failure must **never** be
+retried. It is precisely the "login failure -> retry -> retry..." loop that exposes the
+Garmin account to a lockout. Only *transient* errors (429, connection/5xx errors) belong
+to :data:`RETRYABLE_EXCEPTIONS`; everything else — including
+``GarminConnectAuthenticationError`` and ``GarminConnectInvalidFileFormatError`` —
+propagates on the very first occurrence.
 """
 
 from __future__ import annotations
@@ -26,26 +26,26 @@ from garminconnect import (
 
 T = TypeVar("T")
 
-#: Types d'exception *candidats* au réessai : 429 (limitation de débit) et erreurs de
-#: connexion. Le type ne suffit pas à décider — voir :func:`is_retryable`.
+#: Exception types that are *candidates* for a retry: 429 (rate limiting) and connection
+#: errors. The type alone is not enough to decide — see :func:`is_retryable`.
 RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
     GarminConnectTooManyRequestsError,
     GarminConnectConnectionError,
 )
 
-#: Marqueurs d'échec d'authentification/autorisation à chercher dans le *message* d'une
+#: Authentication/authorisation failure markers to look for in the *message* of a
 #: ``GarminConnectConnectionError``.
 #:
-#: Nécessaire parce que ``garminconnect`` 0.3.2 n'expose pas le code HTTP autrement :
-#: ``client.py::_run_request`` — le chemin emprunté par ``connectapi()``, donc par la
-#: quasi-totalité des ~130 méthodes d'endpoint — lève
-#: ``GarminConnectConnectionError(f"API Error {resp.status_code} ...")`` pour **tout**
-#: statut >= 400, 401 et 403 compris, sans attribut ``response`` ni sous-type dédié
-#: (contrairement à ``Garmin.download()``, qui, lui, discrimine 401/429). Sans cette
-#: inspection du message, un 401 sur un endpoint de données serait réessayé
-#: ``max_attempts`` fois — et chaque réessai déclenche en plus un ``_refresh_session()``
-#: interne vers le SSO (``_run_request`` ligne ~1154). C'est exactement le scénario qui
-#: fait bloquer un compte Garmin.
+#: Needed because ``garminconnect`` 0.3.2 exposes the HTTP status no other way:
+#: ``client.py::_run_request`` — the path taken by ``connectapi()``, hence by nearly all
+#: of the ~130 endpoint methods — raises
+#: ``GarminConnectConnectionError(f"API Error {resp.status_code} ...")`` for **every**
+#: status >= 400, 401 and 403 included, with no ``response`` attribute and no dedicated
+#: subtype (unlike ``Garmin.download()``, which does discriminate 401/429). Without this
+#: message inspection, a 401 on a data endpoint would be retried ``max_attempts`` times —
+#: and each retry additionally triggers an internal ``_refresh_session()`` against SSO
+#: (``_run_request`` line ~1154). That is exactly the scenario that gets a Garmin account
+#: locked.
 NON_RETRYABLE_MESSAGE_MARKERS: tuple[str, ...] = (
     "401",
     "403",
@@ -56,12 +56,11 @@ NON_RETRYABLE_MESSAGE_MARKERS: tuple[str, ...] = (
 
 
 def is_retryable(exc: BaseException) -> bool:
-    """``True`` si ``exc`` est une erreur *transitoire* qu'on peut réessayer sans risque.
+    """``True`` if ``exc`` is a *transient* error that can safely be retried.
 
-    Un 429 l'est toujours (type dédié, sans ambiguïté). Une
-    ``GarminConnectConnectionError`` ne l'est que si son message ne porte aucun marqueur
-    d'authentification/autorisation : dans ce cas, réessayer ne peut pas réussir et ne
-    fait qu'ajouter des tentatives d'authentification au compteur de Garmin.
+    A 429 always is (dedicated, unambiguous type). A ``GarminConnectConnectionError`` is
+    only if its message carries no authentication/authorisation marker: otherwise
+    retrying cannot succeed and merely adds authentication attempts to Garmin's counter.
     """
     if isinstance(exc, GarminConnectTooManyRequestsError):
         return True
@@ -72,12 +71,12 @@ def is_retryable(exc: BaseException) -> bool:
 
 
 class RetryExhaustedError(RuntimeError):
-    """Le nombre maximal de tentatives a été atteint sans succès."""
+    """The maximum number of attempts was reached without success."""
 
 
 @dataclass(frozen=True, slots=True)
 class RetryPolicy:
-    """Paramètres bornés du backoff exponentiel."""
+    """Bounded parameters of the exponential backoff."""
 
     max_attempts: int = 5
     base_delay_s: float = 1.0
@@ -86,17 +85,17 @@ class RetryPolicy:
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1:
-            raise ValueError("max_attempts doit être >= 1")
+            raise ValueError("max_attempts must be >= 1")
         if self.base_delay_s < 0 or self.max_delay_s < 0 or self.jitter_s < 0:
-            raise ValueError("les délais doivent être positifs")
+            raise ValueError("delays must be positive")
 
 
 def compute_delay(policy: RetryPolicy, attempt: int, rng: random.Random) -> float:
-    """Délai avant la tentative suivante : backoff exponentiel plafonné + jitter positif.
+    """Delay before the next attempt: capped exponential backoff plus positive jitter.
 
-    ``attempt`` est le numéro (1-indexé) de la tentative qui vient d'échouer. Le jitter
-    est strictement additif (jamais négatif) : on ne veut jamais qu'un jitter défavorable
-    réduise le délai sous ce que le backoff exponentiel exige.
+    ``attempt`` is the 1-indexed number of the attempt that just failed. The jitter is
+    strictly additive (never negative): an unlucky jitter must never shorten the delay
+    below what the exponential backoff requires.
     """
     exponential: float = min(policy.base_delay_s * (2 ** (attempt - 1)), policy.max_delay_s)
     jitter = float(rng.uniform(0, policy.jitter_s)) if policy.jitter_s > 0 else 0.0
@@ -110,20 +109,20 @@ def call_with_retry(
     sleep: Callable[[float], None] = time.sleep,
     rng: random.Random | None = None,
     logger: logging.Logger | None = None,
-    op_name: str = "appel",
+    op_name: str = "call",
 ) -> T:
-    """Exécute ``func`` avec réessais bornés sur les seules erreurs transitoires.
+    """Run ``func`` with bounded retries on transient errors only.
 
-    Toute exception hors de :data:`RETRYABLE_EXCEPTIONS` (notamment
-    ``GarminConnectAuthenticationError``) est propagée immédiatement, sans consommer de
-    tentative supplémentaire ni dormir.
+    Any exception outside :data:`RETRYABLE_EXCEPTIONS` (notably
+    ``GarminConnectAuthenticationError``) propagates immediately, without consuming an
+    extra attempt or sleeping.
 
     Raises:
-        RetryExhaustedError: si ``policy.max_attempts`` tentatives ont toutes échoué sur
-            une erreur transitoire. L'exception d'origine est chaînée (``__cause__``).
+        RetryExhaustedError: if all ``policy.max_attempts`` attempts failed on a
+            transient error. The originating exception is chained (``__cause__``).
     """
     active_policy = policy or RetryPolicy()
-    active_rng = rng or random.Random()  # noqa: S311 -- jitter non cryptographique
+    active_rng = rng or random.Random()  # noqa: S311 -- non-cryptographic jitter
     active_logger = logger or logging.getLogger(__name__)
 
     last_exc: Exception | None = None
@@ -133,7 +132,7 @@ def call_with_retry(
         except RETRYABLE_EXCEPTIONS as exc:
             if not is_retryable(exc):
                 active_logger.error(
-                    "%s : échec non transitoire (%s : %s) — propagé sans réessai.",
+                    "%s: non-transient failure (%s: %s) - propagated without retry.",
                     op_name,
                     type(exc).__name__,
                     exc,
@@ -142,7 +141,7 @@ def call_with_retry(
             last_exc = exc
             if attempt == active_policy.max_attempts:
                 active_logger.error(
-                    "%s : échec définitif après %d tentative(s) (%s).",
+                    "%s: definitive failure after %d attempt(s) (%s).",
                     op_name,
                     attempt,
                     type(exc).__name__,
@@ -150,7 +149,7 @@ def call_with_retry(
                 break
             delay = compute_delay(active_policy, attempt, active_rng)
             active_logger.warning(
-                "%s : tentative %d/%d échouée (%s), nouvel essai dans %.2fs.",
+                "%s: attempt %d/%d failed (%s), retrying in %.2fs.",
                 op_name,
                 attempt,
                 active_policy.max_attempts,
@@ -159,7 +158,7 @@ def call_with_retry(
             )
             sleep(delay)
 
-    assert last_exc is not None  # noqa: S101 — atteint uniquement après le for/break ci-dessus
+    assert last_exc is not None  # noqa: S101 - only reached after the for/break above
     raise RetryExhaustedError(
-        f"{op_name} : {active_policy.max_attempts} tentative(s) épuisée(s)"
+        f"{op_name}: {active_policy.max_attempts} attempt(s) exhausted"
     ) from last_exc

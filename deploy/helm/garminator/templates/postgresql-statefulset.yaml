@@ -18,8 +18,8 @@ spec:
         {{- include "garminator.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgresql
     spec:
-      # Ce pod n'appelle jamais l'API Kubernetes : pas de jeton de compte
-      # de service monte.
+      # This pod never calls the Kubernetes API: no service account token
+      # is mounted.
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.postgresql.podSecurityContext | nindent 8 }}
@@ -29,10 +29,10 @@ spec:
           imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
-            # L'entrypoint de l'image postgres demarre root pour ajuster les
-            # droits de PGDATA puis abandonne ses privileges (su-exec vers
-            # l'utilisateur postgres). CAP_CHOWN / CAP_*_DAC_OVERRIDE sont
-            # donc necessaires : un `drop: [ALL]` empecherait l'initdb.
+            # The postgres image entrypoint starts as root to adjust PGDATA
+            # permissions then drops privileges (su-exec to postgres user).
+            # CAP_CHOWN / CAP_*_DAC_OVERRIDE are thus necessary: a `drop: [ALL]`
+            # would prevent initdb.
             capabilities:
               drop:
                 - ALL
@@ -58,8 +58,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "garminator.postgresql.secretName" . }}
                   key: password
-            # PGDATA dans un sous-répertoire du volume (jamais à la racine
-            # du point de montage).
+            # PGDATA in a subdirectory of the volume (never at the mount
+            # point root).
             - name: PGDATA
               value: /var/lib/postgresql/data/{{ .Values.postgresql.persistence.pgdataSubPath }}
           volumeMounts:

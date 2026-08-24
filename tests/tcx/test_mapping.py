@@ -1,7 +1,7 @@
-"""Tests du mapping declaratif TCX -> core.sample (sur dictionnaires deja extraits).
+"""Tests of declarative mapping TCX → core.sample (on already-extracted dicts).
 
-Comme pour le FIT, aucune fixture XML/binaire ici : uniquement des dictionnaires
-dans la forme produite par garminator.tcx.reader._extract_trackpoint.
+Like FIT, no XML/binary fixture here: only dicts in form produced by
+garminator.tcx.reader._extract_trackpoint.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ def test_map_trackpoint_maps_cadence_and_watts_only() -> None:
     assert row.elapsed_s == 0
     assert row.cadence == 80
     assert row.power == 150
-    # Structure mesuree sur bike.tcx (addendum) : FC, distance, vitesse, altitude,
-    # position sont absents -- jamais inventes, restent None.
+    # Structure measured on bike.tcx (addendum): heart rate, distance, speed, altitude,
+    # position absent—never invented, stay None.
     assert row.heart_rate is None
     assert row.distance_m is None
     assert row.altitude_m is None
@@ -62,10 +62,10 @@ def test_map_trackpoint_converts_optional_numeric_fields() -> None:
     assert row.longitude_deg == pytest.approx(-1.25)
 
 
-# --- Regression : conversions numeriques robustes (_to_int / _to_float) -------------
-# Avant correction, TRACKPOINT_FIELD_SPECS utilisait `int` / `float` nus : un
-# <Watts>N/A</Watts> remontait une ValueError brute (pas une SourceParseError) et
-# un <Watts>150.0</Watts> faisait echouer tout le fichier.
+# --- Regression: robust numeric conversion (_to_int / _to_float) -----------------
+# Before fix, TRACKPOINT_FIELD_SPECS used bare `int` / `float`: <Watts>N/A</Watts>
+# would surface raw ValueError (not SourceParseError) and <Watts>150.0</Watts>
+# would fail entire file.
 
 
 @pytest.mark.parametrize(
@@ -81,18 +81,18 @@ def test_map_trackpoint_accepts_decimal_notation_for_integer_columns(
 
 @pytest.mark.parametrize("raw", ["N/A", "", "   ", "abc", "1,5"])
 def test_map_trackpoint_rejects_non_numeric_with_typed_error(raw: str) -> None:
-    """Une valeur presente mais illisible est une erreur TYPEE, pas une ValueError brute.
+    """Present but unreadable value is typed error, not bare ValueError.
 
-    Cas ``""`` inclus : le lecteur ne pose la cle que si l'element existe, donc une
-    chaine vide vient d'un ``<Watts></Watts>`` reellement present dans le fichier --
-    c'est un fichier malforme, pas un champ absent (un champ absent n'a pas de cle).
+    Case ``""`` included: reader only poses key if element exists, so empty string
+    comes from ``<Watts></Watts>`` really present in file—malformed file, not
+    missing field (absent field has no key).
     """
-    with pytest.raises(TcxParseError, match="illisible"):
+    with pytest.raises(TcxParseError, match="Unreadable"):
         map_trackpoint({"time": T0, "watts": raw}, activity_id=1, start_time=T0)
 
 
 def test_map_trackpoint_never_substitutes_zero_for_absent_fields() -> None:
-    """Point 2 : un champ absent reste None, jamais 0 (0 W est une valeur mesuree)."""
+    """Point 2: absent field stays None, never 0 (0 W is measured value)."""
     row = map_trackpoint({"time": T0}, activity_id=1, start_time=T0)
     for column in (
         "heart_rate",
@@ -105,6 +105,6 @@ def test_map_trackpoint_never_substitutes_zero_for_absent_fields() -> None:
         "speed_mps",
     ):
         assert getattr(row, column) is None, column
-    # ... alors qu'un zero explicitement present est bien conserve.
+    # ...whereas explicitly present zero is preserved.
     zero = map_trackpoint({"time": T0, "watts": "0"}, activity_id=1, start_time=T0)
     assert zero.power == 0

@@ -1,23 +1,22 @@
-"""Fixtures partagées des tests du lot L2, et preuve qu'aucun test ne fait de réseau.
+"""Shared fixtures for batch L2 tests, and proof no test does network.
 
-``block_all_network`` est ``autouse`` sur tout ce paquet de tests.
+``block_all_network`` is ``autouse`` on this entire test package.
 
-**Pourquoi il ne suffit pas de neutraliser ``socket.socket``.** ``garminconnect``
-n'utilise pas uniquement ``requests`` : sa chaîne de stratégies d'authentification
-emploie ``curl_cffi`` (3 stratégies sur 5), c'est-à-dire libcurl appelé via CFFI. libcurl
-ouvre ses sockets **en natif**, sans jamais passer par le module ``socket`` de Python.
-Vérifié expérimentalement : avec ``socket.socket`` neutralisé, ``curl_cffi`` établit
-quand même une connexion (l'échec observé venait du port fermé, pas du garde-fou). Un
-garde-fou limité à ``socket.socket`` laissait donc précisément le chemin SSO — le plus
-dangereux, celui qui peut faire bloquer le compte Garmin — entièrement ouvert.
+**Why it's not enough to mock ``socket.socket``.** ``garminconnect`` does not use only
+``requests``: its authentication strategy chain uses ``curl_cffi`` (3 of 5 strategies),
+i.e., libcurl via CFFI. libcurl opens sockets **natively**, never through Python's
+``socket`` module. Verified experimentally: with ``socket.socket`` mocked, ``curl_cffi``
+still establishes a connection (the observed failure came from closed port, not the
+guard). A guard limited to ``socket.socket`` left precisely the SSO path — the most
+dangerous, the one that can lock out a Garmin account — entirely open.
 
-On barre donc les trois portes, à leur point d'entrée respectif :
+So we block three doors at their respective entry points:
 
-1. ``socket.socket`` — tout le réseau en Python pur (dont psycopg en mode natif) ;
-2. ``curl_cffi.curl.Curl.perform`` — la seule méthode qui déclenche un transfert libcurl,
-   quel que soit le niveau d'API (``Session``, ``requests.get``, …) ;
-3. ``requests.adapters.HTTPAdapter.send`` — ceinture et bretelles pour ``requests``,
-   dont la mise en commun de connexions pourrait réutiliser un socket préexistant.
+1. ``socket.socket`` — all pure-Python network (including psycopg native mode);
+2. ``curl_cffi.curl.Curl.perform`` — the only method triggering a libcurl transfer,
+   regardless of API level (``Session``, ``requests.get``, …);
+3. ``requests.adapters.HTTPAdapter.send`` — belt and suspenders for ``requests``,
+   whose connection pooling could reuse a pre-existing socket.
 """
 
 from __future__ import annotations
@@ -32,31 +31,31 @@ if TYPE_CHECKING:
 
 
 class NetworkAccessDeniedError(RuntimeError):
-    """Levée quand du code sous test tente d'atteindre le réseau."""
+    """Raised when code under test attempts network access."""
 
 
 def _deny(what: str) -> object:
     raise NetworkAccessDeniedError(
-        f"tests/garmin : tentative d'accès réseau interceptée ({what}) — aucun test de "
-        "ce lot ne doit contacter un service réel (Garmin ou autre)."
+        f"tests/garmin: network access attempt intercepted ({what}) — no test in this "
+        "batch must contact a real service (Garmin or otherwise)."
     )
 
 
 @pytest.fixture(autouse=True)
 def block_all_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Interdit tout accès réseau pendant les tests de ``tests/garmin``."""
+    """Block all network access during ``tests/garmin`` tests."""
 
     def _forbidden_socket(*_args: object, **_kwargs: object) -> object:
         return _deny("socket.socket")
 
     monkeypatch.setattr(socket, "socket", _forbidden_socket)
 
-    # curl_cffi (libcurl via CFFI) : sockets natifs, invisibles du module socket.
-    # L'import doit précéder le patch de socket.socket dans un processus neuf, mais ici
-    # pytest a déjà tout importé au moment où la fixture s'exécute.
+    # curl_cffi (libcurl via CFFI): native sockets, invisible to socket module.
+    # Import must precede socket.socket patch in a fresh process, but here pytest has
+    # already imported everything by the time the fixture runs.
     try:
         import curl_cffi.curl
-    except ImportError:  # pragma: no cover - dépendance présente en pratique
+    except ImportError:  # pragma: no cover - dependency present in practice
         pass
     else:
 
@@ -67,7 +66,7 @@ def block_all_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
     try:
         import requests.adapters
-    except ImportError:  # pragma: no cover - dépendance présente en pratique
+    except ImportError:  # pragma: no cover - dependency present in practice
         pass
     else:
 

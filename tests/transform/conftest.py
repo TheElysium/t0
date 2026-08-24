@@ -1,17 +1,22 @@
-"""Fixtures 100% synthétiques pour les tests du lot ``garminator.transform``.
+"""100% synthetic fixtures for tests of the ``garminator.transform`` layer.
 
-AUCUN octet réel d'activité (``running.fit``/``swim.fit``/``bike.tcx``/
-``Activities.csv``/``metrics&wellness_1year/``) n'apparaît ici : ces fichiers
-contiennent des traces GPS qui identifient le domicile de l'athlète (cf. mandat du
-lot). Toutes les valeurs ci-dessous sont construites à la main, choisies pour être
-rondes et faciles à vérifier de tête (une puissance de 200 W pendant 60 s a une
-moyenne de 200 W, pas un chiffre extrait d'un vrai fichier)."""
+NO actual activity byte (``running.fit``/``swim.fit``/``bike.tcx``/
+``Activities.csv``/``metrics&wellness_1year/``) appears here: these files contain GPS
+traces that identify the athlete's home (cf. layer mandate). All values below are
+constructed by hand, chosen to be round and easy to verify mentally (200 W for 60s has
+an average of 200 W, not a figure extracted from a real file)."""
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from garminator.fit.model import LapRow, ParsedActivitySource, SampleRow, SwimLengthRow
+from garminator.fit.model import (
+    LapRow,
+    ParsedActivitySource,
+    SampleRow,
+    SessionSummary,
+    SwimLengthRow,
+)
 from garminator.load.thresholds import Threshold
 from garminator.transform.activity import ActivityContext
 
@@ -19,7 +24,7 @@ ACTIVITY_ID = 1
 ATHLETE_ID = 7
 START = datetime(2026, 6, 1, 7, 0, 0, tzinfo=UTC)
 
-#: Seuils synthétiques couvrant les trois disciplines, dans le style de
+#: Synthetic thresholds covering three disciplines, in the style of
 #: tests/load/test_activity_load.py.
 BIKE_THRESHOLD = Threshold(
     discipline="bike", valid_from=date(2026, 1, 1), valid_to=None, threshold_id=1, ftp_watts=220.0
@@ -29,7 +34,7 @@ RUN_THRESHOLD = Threshold(
     valid_from=date(2026, 1, 1),
     valid_to=None,
     threshold_id=2,
-    rftp_watts=None,  # jamais deviné pour cet athlète : cf. mandat du lot.
+    rftp_watts=None,  # never guessed for this athlete: cf. layer mandate.
     ftp_pace_s_per_km=270.0,  # 4:30/km
 )
 SWIM_THRESHOLD = Threshold(
@@ -56,7 +61,7 @@ def make_sample(
     altitude_m: float | None = None,
     cadence: int | None = None,
 ) -> SampleRow:
-    """Un ``SampleRow`` synthétique à ``elapsed_s`` secondes du départ."""
+    """A synthetic ``SampleRow`` at ``elapsed_s`` seconds from start."""
     return SampleRow(
         activity_id=ACTIVITY_ID,
         t=START + timedelta(seconds=elapsed_s),
@@ -73,7 +78,7 @@ def make_sample(
 def bike_context(*, duration_s: int = 3600, activity_id: int = ACTIVITY_ID) -> ActivityContext:
     return ActivityContext(
         activity_id=activity_id,
-        sport_code="virtual_cycling",  # home-trainer TCX, cf. profil athlète.
+        sport_code="virtual_cycling",  # home-trainer TCX, cf. athlete profile.
         discipline="bike",
         duration_s=duration_s,
         start_time_local=START,
@@ -108,12 +113,13 @@ def parsed_source(
     *,
     laps: list[LapRow] | None = None,
     swim_lengths: list[SwimLengthRow] | None = None,
+    session: SessionSummary | None = None,
 ) -> ParsedActivitySource:
     return ParsedActivitySource(
         source_format="fit",
         samples=samples,
         laps=laps or [],
         swim_lengths=swim_lengths or [],
-        session=None,
+        session=session,
         start_time=samples[0].t if samples else START,
     )

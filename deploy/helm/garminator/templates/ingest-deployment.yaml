@@ -6,9 +6,9 @@ metadata:
     {{- include "garminator.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
 spec:
-  # Une seule réplique : la session Garmin (SSO, GARMINTOKENS) et le poll
-  # ne doivent pas être dupliqués — deux pollers concurrents sur le même
-  # compte sans 2FA augmentent le risque de blocage.
+  # Single replica: Garmin session (SSO, GARMINTOKENS) and polling must not be
+  # duplicated -- two concurrent pollers on the same account without 2FA increase
+  # lockout risk.
   replicas: {{ .Values.ingest.replicaCount }}
   strategy:
     type: Recreate
@@ -24,15 +24,14 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/ingest-configmap.yaml") . | sha256sum }}
         {{- if not .Values.postgresql.auth.existingSecret }}
-        # Les identifiants PostgreSQL sont injectes par `env.valueFrom`, qui
-        # n'est relu qu'au demarrage du conteneur : sans ce checksum, une
-        # rotation du mot de passe laisserait le pod avec l'ancienne valeur.
+        # PostgreSQL credentials are injected via `env.valueFrom`, which is only
+        # read at container startup: without this checksum, a password rotation
+        # would leave the pod with the old value.
         checksum/postgresql-secret: {{ include (print $.Template.BasePath "/postgresql-secret.yaml") . | sha256sum }}
         {{- end }}
     spec:
-      # Ce pod n'appelle jamais l'API Kubernetes. Il detient en revanche les
-      # identifiants Garmin (compte sans 2FA) : aucun jeton de compte de
-      # service n'y est monte.
+      # This pod never calls the Kubernetes API. It holds Garmin credentials
+      # (account without 2FA): no service account token is mounted.
       automountServiceAccountToken: false
       {{- if .Values.ingest.imagePullSecrets }}
       imagePullSecrets:
@@ -57,8 +56,8 @@ spec:
             - configMapRef:
                 name: {{ include "garminator.fullname" . }}-ingest
           env:
-            # Identifiants Garmin — SECRET REFERENCE UNIQUEMENT, jamais créé
-            # par ce chart. Voir README.md pour la commande de création.
+            # Garmin credentials -- SECRET REFERENCE ONLY, never created
+            # by this chart. See README.md for the creation command.
             - name: GARMINATOR_GARMIN_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -79,16 +78,15 @@ spec:
                 secretKeyRef:
                   name: {{ include "garminator.postgresql.secretName" . }}
                   key: password
-            # Compose comme dans les CronJobs : `Settings.postgres_dsn` est requis et
-            # n'a aucun defaut ; PGHOST/PGDATABASE seuls ne suffisent pas.
+            # Composed as in CronJobs: `Settings.postgres_dsn` is required and has
+            # no default; PGHOST/PGDATABASE alone are not enough.
             - name: GARMINATOR_POSTGRES_DSN
               value: >-
                 postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
-            # --- Chemins d'ecriture compatibles readOnlyRootFilesystem ---
-            # La racine du conteneur est en lecture seule. Tout ce que le
-            # runtime Python ecrit par defaut sous $HOME ou dans les caches
-            # doit etre redirige vers /tmp (emptyDir), faute de quoi le
-            # plantage ne se manifeste qu'a l'execution en production.
+            # --- Writeable paths compatible with readOnlyRootFilesystem ---
+            # Container root is read-only. Everything Python runtime writes by
+            # default under $HOME or in caches must be redirected to /tmp (emptyDir),
+            # otherwise failures only manifest in production execution.
             - name: HOME
               value: /tmp
             - name: TMPDIR
@@ -97,9 +95,8 @@ spec:
               value: /tmp/cache
             - name: XDG_CONFIG_HOME
               value: /tmp/config
-            # Aucun .pyc ecrit a cote des sources (site-packages est en
-            # lecture seule) ; si un cache est malgre tout produit, il va
-            # dans /tmp.
+            # No .pyc written next to sources (site-packages is read-only);
+            # if cache is produced anyway, it goes to /tmp.
             - name: PYTHONDONTWRITEBYTECODE
               value: "1"
             - name: PYTHONPYCACHEPREFIX
@@ -116,18 +113,17 @@ spec:
           resources:
             {{- toYaml .Values.ingest.resources | nindent 12 }}
           volumeMounts:
-            # Archive des fichiers FIT (écriture avant insertion en base —
-            # voir principe ELT du lot L3).
+            # FIT file archive (write before insert to database --
+            # see ELT principle in batch L3).
             - name: fit-archive
               mountPath: {{ .Values.ingest.config.fitArchivePath }}
               subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
-            # Token store Garmin — persistant, sinon SSO complet à chaque
-            # redémarrage (risque de blocage de compte, cf. GARMINTOKENS).
+            # Garmin token store -- persistent, otherwise full SSO on each
+            # restart (account lockout risk, cf. GARMINTOKENS).
             - name: fit-archive
               mountPath: {{ .Values.ingest.config.garminTokensPath }}
               subPath: {{ .Values.fitArchive.subPaths.garminTokens }}
-            # Système de fichiers racine en lecture seule : /tmp inscriptible
-            # via emptyDir dédié.
+            # Root filesystem read-only: /tmp writable via dedicated emptyDir.
             - name: tmp
               mountPath: /tmp
       volumes:

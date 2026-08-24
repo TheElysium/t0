@@ -1,11 +1,11 @@
-"""Client Garmin garminator (lot L2).
+"""Garminator Garmin client (batch L2).
 
-Enveloppe autour de ``garminconnect`` 0.3.2 : session persistante (tokenstore obligatoire,
-jamais implicite), limitation de débit et backoff exponentiel borné, écriture systématique
-du brut dans ``raw.api_response`` avant toute transformation, journalisation dans
-``raw.ingest_run``. Le transport réseau réel (``garminconnect.Garmin``) est **injecté** —
-ce paquet ne le construit jamais lui-même, afin de rester entièrement testable sans
-réseau (voir :class:`~garminator.garmin.transport.GarminTransport`).
+Wrapper around ``garminconnect`` 0.3.2: persistent session (tokenstore mandatory, never
+implicit), rate limiting and bounded exponential backoff, systematic write of the raw
+payload to ``raw.api_response`` before any transformation, journalling in
+``raw.ingest_run``. The real network transport (``garminconnect.Garmin``) is **injected**
+— this package never builds it itself, so that it stays fully testable without network
+(see :class:`~garminator.garmin.transport.GarminTransport`).
 """
 
 from __future__ import annotations

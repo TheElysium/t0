@@ -1,9 +1,9 @@
-"""D'ou vient ``core.activity.start_time``, et ce qui se passe quand le fichier se tait.
+"""Where ``core.activity.start_time`` comes from, and what happens when the file is silent.
 
-La colonne est un ``timestamptz``. PostgreSQL accepte sans broncher un datetime naif :
-il l'interprete comme de l'UTC. Une seance decalee de deux heures ne viole aucune
-contrainte, ne leve aucune erreur, et fausse silencieusement tout regroupement
-journalier du PMC. C'est le seul defaut que ce fichier surveille.
+The column is a ``timestamptz``. PostgreSQL accepts a naive datetime without complaint:
+it interprets it as UTC. A session shifted two hours doesn't violate any constraint,
+raise any error, and silently corrupts all daily PMC grouping. This file monitors
+that one flaw.
 """
 
 from __future__ import annotations
@@ -12,14 +12,12 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 
 from garminator.fit.model import ParsedActivitySource
-from garminator.transform.activity import build_core_rows
-from garminator.transform.summary import ActivityContext
+from garminator.transform.activity import ActivityContext, build_core_rows
 
 from .conftest import ALL_THRESHOLD, ATHLETE_ID, RUN_THRESHOLD, make_sample
 
-#: Heure locale naive telle que ``build_activity_context`` la produit depuis
-#: ``startTimeLocal``, et decalage deduit de l'ecart avec ``startTimeGMT`` (09h00
-#: locales - 07h00 GMT = +2 h).
+#: Naive local time as ``build_activity_context`` produces it from ``startTimeLocal``,
+#: and offset inferred from the gap with ``startTimeGMT`` (09:00 local - 07:00 GMT = +2 h).
 LOCAL_NAIF = datetime(2026, 6, 1, 9, 0)
 OFFSET_S = 7200
 
@@ -60,22 +58,22 @@ def _build(decoded: ParsedActivitySource) -> datetime:
     return bundle.activity.start_time
 
 
-def test_l_instant_du_fichier_prime_sur_celui_du_resume() -> None:
-    """Le fichier porte l'horodatage de la montre ; le resume n'a qu'une precision minute.
+def test_file_timestamp_takes_precedence_over_summary() -> None:
+    """File carries the device timestamp; summary has minute-level precision only.
 
-    Les deux sources divergent volontairement de 37 secondes : sans cet ecart, le test
-    passerait quelle que soit celle qui gagne, et ne prouverait rien.
+    The two sources intentionally diverge by 37 seconds: without this gap, the test
+    would pass regardless of which source wins, and prove nothing.
     """
-    instant_fichier = datetime(2026, 6, 1, 7, 0, 37, tzinfo=UTC)
-    assert _build(_decoded(start_time=instant_fichier)) == instant_fichier
+    file_instant = datetime(2026, 6, 1, 7, 0, 37, tzinfo=UTC)
+    assert _build(_decoded(start_time=file_instant)) == file_instant
 
 
-def test_sans_horodatage_le_fichier_muet_est_recale_par_le_decalage_du_resume() -> None:
-    """Repli atteignable : un TCX sans horodatage de trackpoint ne datte rien.
+def test_without_timestamp_silent_file_adjusted_by_summary_offset() -> None:
+    """Reachable fallback: TCX without trackpoint timestamps gives no time.
 
-    Ecrire ``start_time_local`` tel quel decalerait la seance de 2 h vers le passe sans
-    qu'aucune contrainte ne proteste. On verifie donc l'instant absolu ET le fait qu'il
-    porte un fuseau -- un naif serait relu comme 09h00 UTC.
+    Writing ``start_time_local`` as-is would shift the session 2 hours into the past
+    without any constraint complaining. We verify both the absolute instant AND that it
+    carries a timezone -- a naive one would be read back as 09:00 UTC.
     """
     obtenu = _build(_decoded(start_time=None))
 

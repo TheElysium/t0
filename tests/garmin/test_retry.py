@@ -1,8 +1,8 @@
-"""Tests de :mod:`garminator.garmin.retry`.
+"""Tests for :mod:`garminator.garmin.retry`.
 
-Couvre les deux exigences d'acceptation du lot :
-- une séquence 429 -> backoff -> succès ;
-- un échec d'authentification qui ne déclenche aucun réessai.
+Covers two acceptance requirements for this batch:
+- sequence 429 -> backoff -> success;
+- authentication failure triggers no retry.
 """
 
 from __future__ import annotations
@@ -41,12 +41,12 @@ def test_429_then_429_then_success_retries_and_returns_value() -> None:
         flaky,
         policy=RetryPolicy(max_attempts=5, base_delay_s=0.01, max_delay_s=1, jitter_s=0.0),
         sleep=sleeps.append,
-        rng=random.Random(0),  # noqa: S311 -- déterminisme du test, pas de crypto
+        rng=random.Random(0),  # noqa: S311 -- test determinism, not crypto
     )
 
     assert result == "ok"
     assert calls == 3
-    assert len(sleeps) == 2  # un sommeil après chacun des deux 429
+    assert len(sleeps) == 2  # one sleep after each of the two 429s
 
 
 def test_connection_error_is_also_retried() -> None:
@@ -85,8 +85,8 @@ def test_authentication_error_is_never_retried() -> None:
             sleep=sleeps.append,
         )
 
-    assert calls == 1  # aucune tentative supplémentaire
-    assert sleeps == []  # aucun backoff déclenché
+    assert calls == 1  # no additional attempts
+    assert sleeps == []  # no backoff triggered
 
 
 def test_invalid_file_format_error_is_never_retried() -> None:
@@ -119,18 +119,18 @@ def test_exhausted_retries_raise_retry_exhausted_error_chained() -> None:
 
 def test_compute_delay_is_exponential_and_capped() -> None:
     policy = RetryPolicy(max_attempts=10, base_delay_s=1.0, max_delay_s=5.0, jitter_s=0.0)
-    rng = random.Random(0)  # noqa: S311 -- déterminisme du test, pas de crypto
+    rng = random.Random(0)  # noqa: S311 -- test determinism, not crypto
 
     assert compute_delay(policy, attempt=1, rng=rng) == 1.0
     assert compute_delay(policy, attempt=2, rng=rng) == 2.0
     assert compute_delay(policy, attempt=3, rng=rng) == 4.0
-    assert compute_delay(policy, attempt=4, rng=rng) == 5.0  # plafonné
-    assert compute_delay(policy, attempt=10, rng=rng) == 5.0  # toujours plafonné
+    assert compute_delay(policy, attempt=4, rng=rng) == 5.0  # capped
+    assert compute_delay(policy, attempt=10, rng=rng) == 5.0  # still capped
 
 
 def test_compute_delay_jitter_is_never_negative() -> None:
     policy = RetryPolicy(max_attempts=2, base_delay_s=1.0, max_delay_s=5.0, jitter_s=0.5)
-    rng = random.Random(42)  # noqa: S311 -- déterminisme du test, pas de crypto
+    rng = random.Random(42)  # noqa: S311 -- test determinism, not crypto
 
     for attempt in range(1, 5):
         delay = compute_delay(policy, attempt=attempt, rng=rng)
@@ -142,16 +142,16 @@ def test_compute_delay_jitter_is_never_negative() -> None:
 def test_retry_policy_rejects_invalid_values() -> None:
     with pytest.raises(ValueError, match="max_attempts"):
         RetryPolicy(max_attempts=0)
-    with pytest.raises(ValueError, match="délais"):
+    with pytest.raises(ValueError, match="delays"):
         RetryPolicy(base_delay_s=-1)
 
 
-# --- Discrimination d'un 401/403 déguisé en GarminConnectConnectionError -------------
+# --- Discriminating 401/403 disguised as GarminConnectConnectionError ---------
 #
-# ``garminconnect/client.py::_run_request`` lève ``GarminConnectConnectionError("API
-# Error 401 ...")`` pour tout statut >= 400 : sans inspection du message, un refus
-# d'authentification serait réessayé, et chaque réessai relance un ``_refresh_session()``
-# vers le SSO. Ces tests verrouillent la discrimination.
+# ``garminconnect/client.py::_run_request`` raises ``GarminConnectConnectionError("API
+# Error 401 ...")`` for any status >= 400: without message inspection, auth denial
+# would be retried, and each retry re-triggers ``_refresh_session()`` to SSO.
+# These tests lock in the discrimination.
 
 
 @pytest.mark.parametrize(
@@ -175,7 +175,7 @@ def test_transient_connection_error_stays_retryable(message: str) -> None:
 
 
 def test_429_is_always_retryable_whatever_the_message() -> None:
-    # Le message du 429 de login contient « attempts » ; le type dédié tranche seul.
+    # Login 429 message contains "attempts"; dedicated type decides alone.
     assert is_retryable(GarminConnectTooManyRequestsError("Too many login attempts")) is True
 
 
@@ -194,5 +194,5 @@ def test_401_shaped_error_is_propagated_without_retry_and_without_sleeping() -> 
             sleep=slept.append,
         )
 
-    assert len(calls) == 1  # un seul appel : aucun réessai
-    assert slept == []  # et aucun backoff consommé
+    assert len(calls) == 1  # only one call: no retry
+    assert slept == []  # and no backoff consumed

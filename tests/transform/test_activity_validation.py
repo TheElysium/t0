@@ -1,5 +1,5 @@
-"""Garde-fous de ``build_core_rows`` : deux incohérences d'appel qui doivent être
-détectées plutôt que silencieusement ignorées (cf. docstring de la fonction)."""
+"""Guardrails for ``build_core_rows``: two call inconsistencies that must be
+detected rather than silently ignored (see function docstring)."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from .conftest import (
 )
 
 
-class TestGardeFousBuildCoreRows:
-    def test_duree_nulle_ou_negative_leve_value_error(self) -> None:
+class TestGuardrailsBuildCoreRows:
+    def test_zero_or_negative_duration_raises_value_error(self) -> None:
         decoded = parsed_source([])
         with pytest.raises(ValueError, match="duration_s"):
             build_core_rows(
@@ -33,9 +33,9 @@ class TestGardeFousBuildCoreRows:
                 sex="male",
             )
 
-    def test_incoherence_activity_id_entre_contexte_et_echantillons_leve_value_error(self) -> None:
-        # Un échantillon qui porte l'activity_id d'une AUTRE activité : le genre de bug
-        # qu'on veut détecter, pas ignorer (cf. docstring de build_core_rows).
+    def test_activity_id_mismatch_between_context_and_samples_raises_value_error(self) -> None:
+        # A sample carrying the activity_id of a DIFFERENT activity: the kind of bug
+        # we want to detect, not ignore (see build_core_rows docstring).
         sample = make_sample(0, power=200)
         wrong_activity_sample = replace(sample, activity_id=999)
         decoded = parsed_source([wrong_activity_sample])

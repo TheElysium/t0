@@ -1,7 +1,7 @@
 """Series regularization at 1 Hz: gaps, imputation, pause excision.
 
 Mandatory step before any series metric (NP, power-duration curve, NGP...)—see
-``04-formules-charge.md`` §1.3. Deliberately **separated** from algorithms consuming
+``04-load-formulas.md`` §1.3. Deliberately **separated** from algorithms consuming
 regularized series (:mod:`garminator.compute.normalized_power` etc.): those thus have
 no gap assumptions, and test cases ("algorithm mechanics", e.g. ``p = [100, 200, 300, 400]``)
 transcribe directly from spec without regularization.
@@ -68,7 +68,7 @@ def detect_gaps(elapsed_s: Sequence[int]) -> list[Gap]:
     gaps: list[Gap] = []
     for prev, curr in pairwise(elapsed_s):
         if curr <= prev:
-            msg = "elapsed_s doit être strictement croissant"
+            msg = "elapsed_s must be strictly increasing"
             raise ValueError(msg)
         if curr - prev > 1:
             gaps.append(Gap(start_s=prev + 1, end_s=curr - 1))
@@ -102,7 +102,7 @@ def regularize_series(
     ``RegularizedSeries``, ``data_quality="unknown"``.
     """
     if len(elapsed_s) != len(values):
-        msg = "elapsed_s et values doivent avoir la même longueur"
+        msg = "elapsed_s and values must have the same length"
         raise ValueError(msg)
     if not elapsed_s:
         return RegularizedSeries((), (), 0, 0, 0, "unknown", ())
@@ -123,7 +123,7 @@ def regularize_series(
     )
     for (prev_t, prev_v), (curr_t, curr_v) in pairs:
         if curr_t <= prev_t:
-            msg = "elapsed_s doit être strictement croissant"
+            msg = "elapsed_s must be strictly increasing"
             raise ValueError(msg)
         gap = curr_t - prev_t - 1
         if 0 < gap <= max_interp_gap_s:

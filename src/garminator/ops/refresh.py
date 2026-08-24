@@ -1,32 +1,30 @@
-"""Rafraîchissement des vues matérialisées ``mart.*`` (lot L10).
+"""Refresh of materialized views ``mart.*`` (batch L10).
 
-Trois faits, vérifiés dans les migrations 007 et 008 (pas devinés), tiennent ce module :
+Three facts, verified in migrations 007 and 008 (not guessed), underpin this module:
 
-1. **Ordre de dépendance.** Une seule vue matérialisée en lit une autre : ``mart.pmc``
-   fait ``LEFT JOIN mart.daily_load`` (migration 007, CTE ``d``). Aucune autre vue de
-   ``mart`` n'apparaît dans le corps SQL d'une autre (vérifié par recherche textuelle
-   sur les deux migrations : la seule occurrence de ``FROM mart.`` ou ``JOIN mart.``
-   est celle-là). ``mart.daily_load`` doit donc être rafraîchie avant ``mart.pmc`` ;
-   les quatre autres vues (``activity_load``, ``power_curve_best``, ``hr_zone_time``,
-   ``activity_wide``) ne lisent que ``core.*`` et n'ont entre elles ni avec les deux
-   premières aucune contrainte d'ordre.
-2. **``CONCURRENTLY`` exige un index UNIQUE.** Les six vues en portent bien un
+1. **Dependency order.** Only one materialized view reads another: ``mart.pmc`` does
+   ``LEFT JOIN mart.daily_load`` (migration 007, CTE ``d``). No other ``mart`` view
+   appears in the SQL body of another (verified by textual search on both migrations:
+   the only occurrence of ``FROM mart.`` or ``JOIN mart.`` is that one). ``mart.
+   daily_load`` must be refreshed before ``mart.pmc``; the other four views
+   (``activity_load``, ``power_curve_best``, ``hr_zone_time``, ``activity_wide``)
+   read only ``core.*`` and have no ordering constraint with each other or the first two.
+2. **``CONCURRENTLY`` requires a UNIQUE index.** All six views have one
    (``activity_load_pk``, ``daily_load_pk``, ``pmc_pk``, ``power_curve_best_pk``,
-   ``hr_zone_time_pk``, ``activity_wide_pk``) -- condition documentée explicitement
-   par le commentaire de ``mart.activity_load`` (migration 007) : « L'index UNIQUE
-   n'est pas décoratif : il est la condition sine qua non du REFRESH MATERIALIZED VIEW
-   CONCURRENTLY ».
-3. **``CONCURRENTLY`` refuse une vue jamais peuplée.** ``CREATE MATERIALIZED VIEW ...``
-   (sans ``WITH NO DATA``, qui n'est utilisé par aucune des deux migrations) peuple la
-   vue à sa création : en fonctionnement normal, ce cas ne se présente donc qu'une
-   seule fois, juste après ``python -m garminator.db migrate`` sur une base neuve, où
-   PostgreSQL a néanmoins déjà peuplé les vues -- ``ispopulated`` sera ``True`` dès la
-   migration appliquée. Le cas ``ispopulated = False`` ne peut donc réellement se
-   produire qu'après un ``REFRESH ... WITH NO DATA`` manuel (hors de ce module) ou une
-   restauration partielle depuis une sauvegarde ``pg_dump`` sans données. Ce module le
-   détecte via ``pg_matviews.ispopulated`` et bascule sur un rafraîchissement NON
-   concurrent pour cette vue précise plutôt que de laisser PostgreSQL renvoyer
-   l'erreur brute (« materialized view "..." has not been populated »).
+   ``hr_zone_time_pk``, ``activity_wide_pk``) -- condition explicitly documented by
+   the comment on ``mart.activity_load`` (migration 007): "The UNIQUE index is not
+   decorative: it is the sine qua non condition for REFRESH MATERIALIZED VIEW
+   CONCURRENTLY".
+3. **``CONCURRENTLY`` rejects an unpopulated view.** ``CREATE MATERIALIZED VIEW ...``
+   (without ``WITH NO DATA``, not used by either migration) populates the view at
+   creation: in normal operation, this case happens only once, just after
+   ``python -m garminator.db migrate`` on a new DB, though PostgreSQL has already
+   populated views -- ``ispopulated`` is True once migration is applied. The
+   ``ispopulated = False`` case can only truly occur after manual ``REFRESH ... WITH
+   NO DATA`` (outside this module) or partial restore from ``pg_dump`` without data.
+   This module detects it via ``pg_matviews.ispopulated`` and switches to non-concurrent
+   refresh for that view specifically rather than letting PostgreSQL return the bare
+   error ("materialized view "..." has not been populated").
 """
 
 from __future__ import annotations
@@ -42,12 +40,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Vues matérialisées de ``mart``, dans l'ordre de rafraîchissement correct. Voir le
-#: point 1 de la docstring du module pour la justification tirée des migrations 007/008.
+#: Materialized views of ``mart``, in correct refresh order. See point 1 of module
+#: docstring for justification from migrations 007/008.
 MART_VIEWS: tuple[str, ...] = (
-    # Rafraîchie bien qu'aucun tableau de bord ne la lise : la migration 011 en fait une
-    # vue de CONTRE-EXPERTISE, dont l'écart avec mart.activity_wide révèle qu'un seuil a
-    # été corrigé après l'ingestion. Cet écart n'a de sens que si elle reste à jour.
+    # Refreshed even though no dashboard reads it: migration 011 makes it a
+    # counter-expert view, its gap with mart.activity_wide reveals if a threshold was
+    # adjusted after ingestion. This gap only makes sense if it stays current.
     "mart.activity_load",
     "mart.daily_load",
     "mart.pmc",
@@ -61,17 +59,16 @@ RefreshMode = Literal["concurrently", "with_data"]
 
 @dataclass(frozen=True, slots=True)
 class RefreshStep:
-    """Une étape planifiée : rafraîchir ``view`` selon ``mode``."""
+    """A planned step: refresh ``view`` using ``mode``."""
 
     view: str
     mode: RefreshMode
 
     @property
     def sql(self) -> str:
-        """Instruction SQL correspondante -- pas de paramètre lié : un nom de vue ne se
-        paramètre pas dans ``REFRESH MATERIALIZED VIEW`` (ce n'est pas une valeur de
-        colonne), et ``MART_VIEWS`` est un tuple figé du dépôt, jamais une entrée
-        utilisateur."""
+        """Corresponding SQL statement -- no parameterized bindings: view name is not
+        parameterized in ``REFRESH MATERIALIZED VIEW`` (not a column value), and
+        ``MART_VIEWS`` is a frozen tuple from the repo, never user input."""
         if self.mode == "concurrently":
             return f"REFRESH MATERIALIZED VIEW CONCURRENTLY {self.view};"
         return f"REFRESH MATERIALIZED VIEW {self.view} WITH DATA;"
@@ -79,7 +76,7 @@ class RefreshStep:
 
 @dataclass(frozen=True, slots=True)
 class RefreshOutcome:
-    """Résultat de l'exécution d'une :class:`RefreshStep`."""
+    """Outcome of executing a :class:`RefreshStep`."""
 
     step: RefreshStep
     error: str | None = None
@@ -92,26 +89,25 @@ class RefreshOutcome:
 def refresh_plan(
     populated: Mapping[str, bool], *, views: Iterable[str] = MART_VIEWS
 ) -> list[RefreshStep]:
-    """Détermine, pour chaque vue de ``views`` dans l'ordre donné, le mode de
-    rafraîchissement à appliquer : ``with_data`` (non concurrent) si jamais peuplée
-    d'après ``populated``, ``concurrently`` sinon.
+    """Determine, for each view in ``views`` in the given order, the refresh mode to apply:
+    ``with_data`` (non-concurrent) if ever unpopulated per ``populated``, ``concurrently``
+    otherwise.
 
-    Fonction pure -- ``populated`` est fourni par l'appelant (typiquement lu depuis
-    ``pg_matviews.ispopulated``), ce qui la rend testable sans PostgreSQL.
+    Pure function -- ``populated`` supplied by caller (typically read from
+    ``pg_matviews.ispopulated``), making it testable without PostgreSQL.
 
     Raises:
-        KeyError: si une vue de ``views`` est absente de ``populated`` -- l'appelant
-            doit avoir interrogé l'état de TOUTES les vues avant de planifier, jamais
-            en supposer un par défaut (un défaut optimiste risquerait un ``CONCURRENTLY``
-            refusé par PostgreSQL ; un défaut pessimiste ferait perdre le mode concurrent
-            à tort, verrouillant Grafana sans raison).
+        KeyError: if a view in ``views`` is missing from ``populated`` -- caller must
+            query state of ALL views before planning, never assume a default (optimistic
+            default risks PostgreSQL rejecting ``CONCURRENTLY``; pessimistic default
+            wrongly loses concurrent mode, locking Grafana for no reason).
     """
     steps: list[RefreshStep] = []
     for view in views:
         if view not in populated:
             raise KeyError(
-                f"État de peuplement inconnu pour {view} : interrogez pg_matviews avant "
-                "de planifier (voir mart_views_populated)."
+                f"Unknown population state for {view}: query pg_matviews before "
+                "planning (see mart_views_populated)."
             )
         mode: RefreshMode = "concurrently" if populated[view] else "with_data"
         steps.append(RefreshStep(view=view, mode=mode))
@@ -121,12 +117,12 @@ def refresh_plan(
 def mart_views_populated(
     conn: psycopg.Connection[tuple[Any, ...]], *, views: Iterable[str] = MART_VIEWS
 ) -> dict[str, bool]:
-    """Lit ``pg_matviews.ispopulated`` pour chaque vue de ``views``.
+    """Read ``pg_matviews.ispopulated`` for each view in ``views``.
 
     Raises:
-        RuntimeError: si une vue attendue n'apparaît pas dans ``pg_matviews`` -- schéma
-            non migré, ou nom de vue erroné. Mieux vaut échouer tout de suite qu'une
-            planification silencieusement incomplète.
+        RuntimeError: if expected view does not appear in ``pg_matviews`` -- schema not
+            migrated, or wrong view name. Better to fail immediately than silently
+            incomplete planning.
     """
     names = list(views)
     schema_names = [name.split(".", 1)[1] for name in names]
@@ -141,8 +137,8 @@ def mart_views_populated(
     missing = [name for name in names if name not in found]
     if missing:
         raise RuntimeError(
-            f"Vue(s) matérialisée(s) introuvable(s) dans pg_matviews : {', '.join(missing)}. "
-            "Les migrations mart (007/008) ont-elles bien été appliquées ?"
+            f"Materialized view(s) not found in pg_matviews: {', '.join(missing)}. "
+            "Were mart migrations (007/008) applied?"
         )
     return found
 
@@ -150,21 +146,19 @@ def mart_views_populated(
 def refresh_all_mart_views(
     conn: psycopg.Connection[tuple[Any, ...]], *, views: Iterable[str] = MART_VIEWS
 ) -> list[RefreshOutcome]:
-    """Rafraîchit toutes les vues de ``views``, dans l'ordre, chacune dans sa propre
-    transaction autocommise.
+    """Refresh all views in ``views``, in order, each in its own autocommit transaction.
 
-    Une vue en échec n'empêche pas les suivantes d'être tentées -- même philosophie que
-    :func:`garminator.scheduler.service.run_scheduled_poll` : un échec partiel doit
-    rester visible et localisé, jamais bloquer tout le run. C'est notamment nécessaire
-    ici parce que ``mart.pmc`` dépend de ``mart.daily_load`` : si le rafraîchissement de
-    ``daily_load`` échoue, celui de ``pmc`` est quand même tenté (il retravaillera alors
-    sur les données de ``daily_load`` d'avant cet échec, ce qui n'est pas incorrect --
-    seulement moins frais -- et reste préférable à interrompre tout le run).
+    A failed view does not prevent subsequent ones from being tried -- same philosophy
+    as :func:`garminator.scheduler.service.run_scheduled_poll`: partial failure must
+    stay visible and localized, never block the entire run. This is especially needed
+    here because ``mart.pmc`` depends on ``mart.daily_load``: if ``daily_load`` refresh
+    fails, ``pmc`` is still attempted (it will rework on ``daily_load`` data before that
+    failure, which is not wrong -- only less fresh -- and better than interrupting the
+    entire run).
 
-    ``conn`` doit être en ``autocommit=True`` : ``REFRESH MATERIALIZED VIEW CONCURRENTLY``
-    ne doit pas rester ouvert dans une transaction partagée avec les autres vues, sans
-    quoi un verrou pris pour l'une resterait actif pendant le rafraîchissement des
-    suivantes.
+    ``conn`` must be in ``autocommit=True``: ``REFRESH MATERIALIZED VIEW CONCURRENTLY``
+    must not stay open in a transaction shared with other views, or a lock taken for one
+    would remain active during refresh of the following ones.
     """
     populated = mart_views_populated(conn, views=views)
     plan = refresh_plan(populated, views=views)
@@ -173,10 +167,9 @@ def refresh_all_mart_views(
         try:
             with conn.cursor() as cur:
                 cur.execute(step.sql)
-            logger.info("Vue %s rafraîchie (mode %s).", step.view, step.mode)
+            logger.info("View %s refreshed (mode %s).", step.view, step.mode)
             outcomes.append(RefreshOutcome(step=step))
-        # Volontairement large : une vue en échec ne doit jamais interrompre les suivantes.
         except Exception as exc:
-            logger.warning("Rafraîchissement de %s en échec : %s", step.view, exc)
+            logger.warning("Refresh of %s failed: %s", step.view, exc)
             outcomes.append(RefreshOutcome(step=step, error=str(exc)))
     return outcomes

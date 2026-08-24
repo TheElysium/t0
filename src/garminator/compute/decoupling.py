@@ -1,4 +1,4 @@
-"""Efficiency factor (EF) and aerobic decoupling — section 7 of 04-formules-charge.md.
+"""Efficiency factor (EF) and aerobic decoupling — section 7 of 04-load-formulas.md.
 
 EF = output / avg_HR, where output is NP (W) on bike or normalized GAP speed
 (m/s) on run. Decoupling% = (EF1 - EF2) / EF1 x 100 between two equal-duration

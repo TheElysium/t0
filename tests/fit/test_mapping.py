@@ -1,9 +1,8 @@
-"""Tests du mapping declaratif FIT -> colonnes core.* (sur dictionnaires deja decodes).
+"""Tests of declarative FIT mapping → core.* columns (on already-decoded dicts).
 
-Aucune fixture binaire ici : conformement a la contrainte du lot L3, ces tests
-travaillent sur des dictionnaires Python construits a la main, dans la forme
-que produit garmin_fit_sdk.Decoder.read() (verifiee sur running.fit/swim.fit
-lors de l'investigation), jamais sur des octets .FIT.
+No binary fixture here: per L3 batch constraint, these tests work on
+hand-built Python dicts in form produced by garmin_fit_sdk.Decoder.read()
+(verified on running.fit/swim.fit during investigation), never on .FIT bytes.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ def test_semicircles_to_degrees_none() -> None:
 
 
 def test_semicircles_to_degrees_known_value() -> None:
-    # 2**31 semicircles == 180 degres (facteur de conversion FIT standard).
+    # 2**31 semicircles == 180 degrees (standard FIT conversion factor).
     assert semicircles_to_degrees(2**31) == pytest.approx(180.0)
     assert semicircles_to_degrees(2**30) == pytest.approx(90.0)
 
@@ -63,13 +62,13 @@ def test_map_record_maps_known_fields_and_prefers_enhanced() -> None:
     assert row.elapsed_s == 10
     assert row.latitude_deg == pytest.approx(90.0)
     assert row.longitude_deg == pytest.approx(0.0)
-    # enhanced_altitude doit l'emporter sur altitude quand les deux sont presents.
+    # enhanced_altitude must override altitude when both present.
     assert row.altitude_m == 101.5
     assert row.distance_m == 250.0
     assert row.heart_rate == 140
     assert row.cadence == 85
     assert row.power == 210
-    # Le champ non couvert par la table de mapping part dans extra, rien n'est perdu.
+    # Field not covered by mapping table goes to extra, nothing lost.
     assert row.extra == {"unknown_field_123": 42}
 
 
@@ -93,7 +92,7 @@ def test_map_lap_maps_known_fields() -> None:
 
     assert row.activity_id == 9
     assert row.lap_index == 2
-    assert row.duration_s == 305  # arrondi, contrairement a swim_length
+    assert row.duration_s == 305  # rounded, unlike swim_length
     assert row.distance_m == 1000.0
     assert row.avg_hr == 150
     assert row.max_hr == 172
@@ -123,7 +122,7 @@ def test_map_length_active_preserves_float_duration() -> None:
 
     assert row.length_index == 5
     assert row.lap_index == 1
-    assert row.duration_s == pytest.approx(21.34)  # non arrondi (colonne real)
+    assert row.duration_s == pytest.approx(21.34)  # not rounded (real column)
     assert row.length_type == "active"
     assert row.swim_stroke == "freestyle"
     assert row.total_strokes == 18
@@ -153,11 +152,11 @@ def test_map_length_unexpected_length_type_raises() -> None:
 
 
 def test_derive_lap_index_for_lengths_handles_contiguous_ranges_and_gaps() -> None:
-    # Un tour de repos (num_lengths=0) ne doit rattacher aucune longueur, et ne
-    # doit pas decaler la plage du tour suivant (cas reellement observe sur swim.fit).
+    # Rest lap (num_lengths=0) must not attach any length and must not shift next
+    # lap's range (really observed on swim.fit).
     lap_msgs = [
         {"message_index": 0, "first_length_index": 0, "num_lengths": 2},
-        {"message_index": 1, "first_length_index": 2, "num_lengths": 0},  # repos
+        {"message_index": 1, "first_length_index": 2, "num_lengths": 0},  # rest
         {"message_index": 2, "first_length_index": 2, "num_lengths": 3},
     ]
     result = derive_lap_index_for_lengths(lap_msgs)
@@ -166,7 +165,7 @@ def test_derive_lap_index_for_lengths_handles_contiguous_ranges_and_gaps() -> No
 
 
 def test_derive_lap_index_for_lengths_ignores_incomplete_laps() -> None:
-    lap_msgs = [{"message_index": 0}]  # pas de first_length_index/num_lengths
+    lap_msgs = [{"message_index": 0}]  # no first_length_index/num_lengths
     assert derive_lap_index_for_lengths(lap_msgs) == {}
 
 
@@ -187,5 +186,5 @@ def test_map_session_extracts_comparison_fields() -> None:
     summary = map_session(msg)
     assert summary.training_load_peak == 88.0
     assert summary.total_training_effect == 3.2
-    assert summary.training_stress_score is None  # absent des FIT reels, addendum SS1
+    assert summary.training_stress_score is None  # absent from real FITs, addendum SS1
     assert summary.raw == msg

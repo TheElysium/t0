@@ -1,58 +1,58 @@
-# Chart Helm garminator
+# Chart garminator
 
-Déploiement homelab de la chaîne garminator : ingestion Garmin (`garminator-ingest`),
-PostgreSQL, Grafana. **Accès strictement local** : aucun Ingress, aucun TLS. Les
-Services sont en `ClusterIP` ; l'accès se fait par `kubectl port-forward`.
+Homelab deployment of the garminator pipeline: Garmin ingestion (`garminator-ingest`),
+PostgreSQL, Grafana. **Strictly local access**: no Ingress, no TLS. Services are
+`ClusterIP`; access is via `kubectl port-forward`.
 
-Ce chart ne déploie rien tout seul — c'est l'athlète qui exécute `helm install`
-sur son cluster homelab.
+This chart deploys nothing on its own -- the athlete runs `helm install`
+on their homelab cluster.
 
-## Avant d'installer : créer le Secret Garmin
+## Before installing: create the Garmin Secret
 
-**Ce chart ne crée jamais le Secret contenant les identifiants Garmin.** Le compte
-Garmin de l'athlète n'a pas de double authentification (2FA) : ce Secret vaut donc
-l'accès complet au compte. Il doit exister dans le namespace cible avant
-`helm install`, sous le nom donné par `garminSecret.name` (par défaut
-`garminator-garmin-credentials`), avec les clés `username` et `password`.
+**This chart never creates the Secret containing Garmin credentials.** The
+athlete's Garmin account has no two-factor authentication (2FA): this Secret is
+equivalent to full account access. It must exist in the target namespace before
+`helm install`, under the name given by `garminSecret.name` (default
+`garminator-garmin-credentials`), with keys `username` and `password`.
 
 ```bash
 kubectl create namespace garminator   # si besoin
 
 kubectl create secret generic garminator-garmin-credentials \
   --namespace garminator \
-  --from-literal=username='REMPLACER_PAR_EMAIL_GARMIN' \
-  --from-literal=password='REMPLACER_PAR_MOT_DE_PASSE_GARMIN'
+  --from-literal=username='REPLACE_WITH_GARMIN_EMAIL' \
+  --from-literal=password='REPLACE_WITH_GARMIN_PASSWORD'
 ```
 
-**Un Secret Kubernetes n'est pas chiffré.** Ses valeurs sont seulement encodées en
-base64 (`kubectl get secret garminator-garmin-credentials -o jsonpath='{.data.password}' | base64 -d`
-les révèle instantanément). Toute personne ayant accès à l'API server, à `etcd` non
-chiffré au repos, ou aux sauvegardes d'`etcd`, peut lire ces identifiants en clair.
-Si le cluster ne chiffre pas les Secrets au repos (`EncryptionConfiguration`), c'est
-le seul niveau de protection réel. Ne partagez jamais ce Secret, ne le committez
-jamais, et effacez l'historique shell après la commande ci-dessus si nécessaire.
+**A Kubernetes Secret is not encrypted.** Its values are only base64-encoded
+(`kubectl get secret garminator-garmin-credentials -o jsonpath='{.data.password}' | base64 -d`
+reveals them instantly). Anyone with access to the API server, unencrypted `etcd`
+at rest, or `etcd` backups can read these credentials in plain text. If the
+cluster does not encrypt Secrets at rest (`EncryptionConfiguration`), this is
+the only real level of protection. Never share this Secret, never commit it, and
+clear shell history after the above command if necessary.
 
-Si les clés ou le nom du Secret diffèrent, adaptez `garminSecret.name`,
-`garminSecret.usernameKey` et `garminSecret.passwordKey` dans `values.yaml`.
+If the keys or Secret name differ, adjust `garminSecret.name`,
+`garminSecret.usernameKey` and `garminSecret.passwordKey` in `values.yaml`.
 
-## Avant d'installer : choisir les mots de passe (obligatoire)
+## Before installing: choose passwords (mandatory)
 
-**Ce chart ne genere aucun mot de passe aleatoire, volontairement.**
+**This chart deliberately generates no random passwords.**
 
-Le mot de passe reel de PostgreSQL est fige par `initdb` a la **creation du volume
-de donnees** et n'est plus jamais relu depuis `POSTGRES_PASSWORD` ensuite. Un chart
-qui regenere le contenu du Secret a chaque `helm upgrade` laisserait donc une base
-intacte avec l'ancien mot de passe et une application configuree avec le nouveau :
-« authentification refusee » sur une base qui fonctionnait la veille, sans aucune
-modification apparente. Les mecanismes a base de `lookup` ne protegent pas de ce
-scenario (`lookup` rend une valeur vide pendant `helm template`, pendant
-`--dry-run`, et dans tout flux `helm template | kubectl apply`), et l'annotation
-`helm.sh/resource-policy: keep` ne protege que contre la *suppression*, jamais
-contre la *mise a jour* du contenu (elle laisse en plus le Secret orphelin apres
-`helm uninstall`, ce qui fait echouer la reinstallation suivante).
+The real PostgreSQL password is frozen by `initdb` at **data volume creation**
+and is never read from `POSTGRES_PASSWORD` again. A chart that regenerates the
+Secret content on every `helm upgrade` would leave the database intact with the
+old password and the application configured with the new one: "authentication
+refused" on a database that worked the day before, with no apparent change.
+Mechanisms based on `lookup` do not protect against this scenario (`lookup`
+returns an empty value during `helm template`, during `--dry-run`, and in any
+`helm template | kubectl apply` flow), and the `helm.sh/resource-policy: keep`
+annotation only protects against *deletion*, never against *updating* content
+(it also leaves the Secret orphaned after `helm uninstall`, causing the next
+reinstall to fail).
 
-Generer les mots de passe **une fois**, puis les conserver dans un fichier de
-valeurs local **exclu du depot git** :
+Generate passwords **once**, then keep them in a local values file **excluded
+from the git repository**:
 
 ```bash
 openssl rand -base64 32 | tr -d '/+=' | cut -c1-32   # PostgreSQL
@@ -60,7 +60,7 @@ openssl rand -base64 32 | tr -d '/+=' | cut -c1-32   # admin Grafana
 ```
 
 ```yaml
-# mes-valeurs.yaml - NE JAMAIS COMMITTER
+# my-values.yaml - NEVER COMMIT
 postgresql:
   auth:
     password: "..."
@@ -69,252 +69,247 @@ grafana:
     password: "..."
 ```
 
-Variante sans mot de passe dans un fichier de valeurs : creer les Secrets a la
-main et les referencer via `postgresql.auth.existingSecret` (cles `username` et
-`password`) et `grafana.admin.existingSecret` (cles `admin-user` et
+Variant without password in a values file: create the Secrets manually and
+reference them via `postgresql.auth.existingSecret` (keys `username` and
+`password`) and `grafana.admin.existingSecret` (keys `admin-user` and
 `admin-password`).
 
-Si rien n'est fourni, `helm template` et `helm install` echouent avec un message
-explicite. C'est le comportement voulu : mieux vaut un refus au premier jour
-qu'une panne d'authentification au premier `helm upgrade`.
+If nothing is provided, `helm template` and `helm install` fail with an explicit
+message. This is the intended behavior: better to refuse on day one than an
+authentication failure on the first `helm upgrade`.
 
-**Changer `postgresql.auth.password` apres le premier deploiement ne change pas
-le mot de passe dans la base.** Il faut d'abord `ALTER USER garminator WITH
-PASSWORD '...';` sur l'instance, puis mettre a jour la valeur.
+**Changing `postgresql.auth.password` after the first deployment does not change
+the password in the database.** First run `ALTER USER garminator WITH
+PASSWORD '...';` on the instance, then update the value.
 
 ## Installation
 
 ```bash
-helm lint deploy/helm/garminator -f mes-valeurs.yaml
+helm lint deploy/helm/garminator -f my-values.yaml
 
 helm install garminator deploy/helm/garminator \
   --namespace garminator \
   --create-namespace \
-  -f mes-valeurs.yaml \
-  --set ingest.image.repository=ghcr.io/VOTRE_ORG/garminator \
+  -f my-values.yaml \
+  --set ingest.image.repository=ghcr.io/YOUR_ORG/garminator \
   --set ingest.image.tag=0.1.0
 ```
 
-Paramètres à revoir avant un premier déploiement réel (voir `values.yaml`, commenté) :
+Parameters to review before a real first deployment (see `values.yaml`, commented):
 
-- `ingest.image.repository` / `ingest.image.tag` — image publiée par la CI (lot L0) sur GHCR.
+- `ingest.image.repository` / `ingest.image.tag` -- image published by CI (batch L0) on GHCR.
 - `postgresql.persistence.storageClassName`, `fitArchive.persistence.storageClassName`,
-  `grafana.persistence.storageClassName` — StorageClass du cluster homelab (vide = StorageClass
-  par défaut du cluster).
-- Les tailles de volumes (`*.persistence.size`), à ajuster à l'historique réel de l'athlète
-  (backfill depuis 2025-04-03, lot L10).
-- `backup.schedule` et `backup.retention` si le rythme hebdomadaire par défaut ne convient pas.
+  `grafana.persistence.storageClassName` -- StorageClass of the homelab cluster (empty = cluster
+  default StorageClass).
+- Volume sizes (`*.persistence.size`), to adjust to the athlete's actual history
+  (backfill from 2025-04-03, batch L10).
+- `backup.schedule` and `backup.retention` if the default weekly rhythm does not suit.
 
-## Le sondage Garmin (CronJob `scheduler`)
+## Garmin polling (CronJob `scheduler`)
 
-C'est le seul objet du chart qui appelle Garmin Connect. Il remplace la boucle de
-sondage qui n'a jamais existé dans le Deployment `ingest` — celui-ci ne sert que
-l'endpoint d'upload manuel.
+This is the only chart object that calls Garmin Connect. It replaces the polling
+loop that never existed in the `ingest` Deployment -- that one only serves the
+manual upload endpoint.
 
 ```bash
-# Déclencher un passage immédiat, sans attendre la cadence planifiée
-kubectl create job -n garminator --from=cronjob/garminator-scheduler sondage-manuel
+# Trigger an immediate run, without waiting for the scheduled cadence
+kubectl create job -n garminator --from=cronjob/garminator-scheduler manual-poll
 
-# Suivre le run en cours
+# Follow the current run
 kubectl logs -n garminator -l app.kubernetes.io/component=scheduler --tail=100 -f
 ```
 
-Clés `values.yaml` (`scheduler.*`) : `enabled`, `schedule` (défaut `0 5 * * *`),
-`maxWindowsPerEndpoint` (défaut `60`, borne le nombre de fenêtres — donc de requêtes —
-par passage), `activityFiles` (à `false`, ajoute `--no-activity-files` : sondage JSON
-seul, sans télécharger les .FIT/.TCX), et `endpoints`, qui doit rester aligné sur
-`DEFAULT_ENDPOINTS` côté code (`tests/test_config_coherence.py` le vérifie).
+`values.yaml` keys (`scheduler.*`): `enabled`, `schedule` (default `0 5 * * *`),
+`maxWindowsPerEndpoint` (default `60`, limits the number of windows -- and thus
+requests -- per run), `activityFiles` (set to `false` to add `--no-activity-files`:
+JSON polling alone, without downloading .FIT/.TCX), and `endpoints`, which must
+remain aligned with `DEFAULT_ENDPOINTS` on the code side (`tests/test_config_coherence.py`
+verifies it).
 
-Le rattrapage historique n'a pas de Job dédié : ce même CronJob consomme les fenêtres
-restantes passage après passage, depuis `ingest.config.backfillStartDate`. Le CronJob
-`ops-backfill-status` en publie l'avancement, en lecture seule.
+Historical catchup has no dedicated Job: this same CronJob consumes remaining
+windows run after run, from `ingest.config.backfillStartDate`. The CronJob
+`ops-backfill-status` publishes its progress, read-only.
 
-`concurrencyPolicy: Forbid` et `backoffLimit: 0` sont délibérés : deux passages
-simultanés, ou un réessai immédiat après échec, multiplieraient les authentifications
-SSO sur le même compte — c'est exactement ce qui fait bloquer un compte Garmin Connect.
+`concurrencyPolicy: Forbid` and `backoffLimit: 0` are deliberate: two simultaneous
+runs or an immediate retry after failure would multiply SSO authentications on the
+same account -- this is exactly what causes a Garmin Connect account to be blocked.
 
-### Transformation `raw` → `core` (`transform`)
+### Transformation `raw` -> `core` (`transform`)
 
-Le CronJob `transform` (clés `transform.*`, défaut `15 5 * * *`) décode les fichiers
-archivés et écrit les lignes `core.*` dont les vues `mart.*` dérivent. Il est planifié
-**entre** le sondage (`0 5`) et le rafraîchissement des vues (`30 5`), et cet ordre est
-une exigence : rafraîchir avant la transformation réussit — en recopiant du vide — et
-laisse les tableaux de bord blancs sans le moindre signal d'erreur.
-`tests/test_config_coherence.py` refuse toute valeur qui romprait cet ordre.
+The `transform` CronJob (keys `transform.*`, default `15 5 * * *`) decodes archived
+files and writes `core.*` rows from which `mart.*` views derive. It is scheduled
+**between** polling (`0 5`) and view refresh (`30 5`), and this order is a requirement:
+refreshing before transformation succeeds -- by recopying emptiness -- and leaves
+dashboards blank with no error signal. `tests/test_config_coherence.py` refuses any
+value that would break this order.
 
-Le PVC d'archivage y est monté au **même `mountPath`** que dans le CronJob de sondage
-(`storage_path` est un chemin absolu enregistré en base) et en `readOnly: true` : la
-transformation lit l'archive, elle ne la modifie jamais.
+The archive PVC is mounted at the **same `mountPath`** as in the polling CronJob
+(`storage_path` is an absolute path stored in the database) and as `readOnly: true`:
+transformation reads the archive, never modifies it.
 
-`transform.batchLimit` (défaut `200`, aligné sur le défaut du code) borne le nombre de
-fichiers par passage. Chaque activité étant commitée individuellement, un passage
-interrompu ne perd que le fichier en cours. Voir la section 10 du `RUNBOOK` pour la
-lecture des codes de sortie — notamment le fait qu'un fichier **reporté** (résumé Garmin
-pas encore ingéré) n'est pas une erreur.
+`transform.batchLimit` (default `200`, aligned with code default) limits the number of
+files per run. Since each activity is committed individually, a run interrupted loses
+only the current file. See section 10 of `RUNBOOK` for reading exit codes -- notably
+that a **deferred** file (Garmin summary not yet ingested) is not an error.
 
-**Prérequis** : `core.athlete` et `core.threshold` doivent être amorcés à la main
-(`deploy/seed/athlete.sql.example`), sinon ce Job s'arrête en code 2 sans rien écrire.
+**Prerequisites**: `core.athlete` and `core.threshold` must be seeded manually
+(`deploy/seed/athlete.sql.example`), otherwise this Job exits with code 2 without
+writing anything.
 
-### Réconciliation PVC ↔ base (`ops-reconcile`)
+### PVC <-> database reconciliation (`ops-reconcile`)
 
-Le CronJob `ops-reconcile` (clés `opsReconcile.*`, défaut `0 7 * * *`, soit après le
-sondage et le rafraîchissement) compare l'inventaire de `raw.fit_file` au contenu réel
-du volume d'archivage. Il **ne supprime rien et n'écrit rien** : le PVC y est monté en
-`readOnly: true`, ce qui n'est pas une convention mais une garantie du kubelet.
+The `ops-reconcile` CronJob (keys `opsReconcile.*`, default `0 7 * * *`, i.e., after
+polling and refresh) compares the `raw.fit_file` inventory to the actual content of
+the archive volume. It **deletes nothing and writes nothing**: the PVC is mounted as
+`readOnly: true`, which is not a convention but a kubelet guarantee.
 
-Les deux anomalies ne sont pas symétriques, et le code de sortie s'en tient à celle qui
-compte : une **ligne sans fichier** (interdite par la règle d'atomicité de
-`migrations/002_raw.sql`) fait échouer le Job ; un **fichier orphelin** le laisse en
-succès, délibérément — un Job qui échoue pour un fichier inutilisé finit par n'être plus
-lu, et c'est l'autre alerte qu'on ne peut pas se permettre de manquer.
+The two anomalies are not symmetric, and the exit code is limited to the one that
+matters: a **row without file** (forbidden by the atomicity rule in
+`migrations/002_raw.sql`) fails the Job; an **orphan file** leaves it in success,
+deliberately -- a Job that fails over an unused file eventually stops being read, and
+that is the other alert we cannot afford to miss.
 
-`opsReconcile.deep: true` recalcule le sha256 de chaque fichier au lieu de comparer sa
-taille : cela attrape une corruption à taille constante, au prix d'une relecture
-intégrale du volume. À réserver au diagnostic. Procédure et remédiation :
-[`docs/RUNBOOK.md`](../../../docs/RUNBOOK.md) §9.
+`opsReconcile.deep: true` recalculates the sha256 of each file instead of comparing
+size: this catches constant-size corruption, at the cost of a full volume re-read.
+Reserve for diagnostics. Procedure and remediation:
+[`docs/RUNBOOK.md`](../../../docs/RUNBOOK.md) section 9.
 
-## Accès aux services (port-forward)
+## Service access (port-forward)
 
-Aucun des services n'est exposé hors du cluster. Depuis un poste avec accès au
-cluster :
+None of the services are exposed outside the cluster. From a station with cluster
+access:
 
 ```bash
-# Grafana (interface web)
+# Grafana (web interface)
 kubectl port-forward -n garminator svc/garminator-grafana 3000:3000
-# puis http://localhost:3000 - identifiant admin : celui que vous avez fourni
-# dans `grafana.admin.password`, relisible depuis le Secret si besoin :
+# then http://localhost:3000 - admin credential: the one you provided
+# in `grafana.admin.password`, readable from the Secret if needed:
 kubectl get secret -n garminator garminator-grafana \
   -o jsonpath='{.data.admin-password}' | base64 -d; echo
 
-# Endpoint d'upload manuel de fichiers .FIT (lot L7)
+# Manual .FIT file upload endpoint (batch L7)
 kubectl port-forward -n garminator svc/garminator-ingest 8080:8080
 
-# PostgreSQL, pour une requête ponctuelle (psql, DBeaver, ...)
+# PostgreSQL, for ad-hoc queries (psql, DBeaver, ...)
 kubectl port-forward -n garminator svc/garminator-postgresql 5432:5432
 ```
 
-Les Services sont contraints a `ClusterIP` : le chart **refuse** de rendre
-`NodePort` ou `LoadBalancer` (message d'erreur explicite), puisqu'il n'y a pas de
-TLS et que l'exigence est un acces strictement local.
+Services are constrained to `ClusterIP`: the chart **refuses** to render
+`NodePort` or `LoadBalancer` (explicit error message), since there is no
+TLS and the requirement is strictly local access.
 
-Le mot de passe PostgreSQL applicatif (compte `garminator`, distinct du compte
-Garmin) se récupère de la même façon :
+The PostgreSQL application password (account `garminator`, distinct from the
+Garmin account) is retrieved the same way:
 
 ```bash
 kubectl get secret -n garminator garminator-postgresql \
   -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
-## Volumes persistants
+## Persistent volumes
 
-Trois PVC :
+Three PVCs:
 
-| PVC | Contenu | Notes |
+| PVC | Content | Notes |
 |---|---|---|
-| `<release>-postgresql` (via `volumeClaimTemplates` du StatefulSet) | données PostgreSQL | `PGDATA` dans le sous-répertoire `pgdata`, jamais à la racine du volume |
-| `<release>-fit-archive` | fichiers `.FIT` archivés (`fit-files/`), **token store Garmin** (`garmin-tokens/`), dumps PostgreSQL (`postgres-backups/`) | volume unique à trois sous-répertoires (`subPath`), pour rester à trois PVC |
-| `<release>-grafana` | données Grafana (dashboards édités en base, plugins, etc.) | optionnel, désactivable via `grafana.persistence.enabled: false` |
+| `<release>-postgresql` (via StatefulSet `volumeClaimTemplates`) | PostgreSQL data | `PGDATA` in `pgdata` subdirectory, never at volume root |
+| `<release>-fit-archive` | archived `.FIT` files (`fit-files/`), **Garmin token store** (`garmin-tokens/`), PostgreSQL dumps (`postgres-backups/`) | single volume with three subdirectories (`subPath`), to remain at three PVCs |
+| `<release>-grafana` | Grafana data (dashboards edited at rest, plugins, etc.) | optional, can be disabled via `grafana.persistence.enabled: false` |
 
-**Attention `ReadWriteOnce`** : le PVC `fit-archive` est monte a la fois par le pod
-d'ingestion et par le pod du `CronJob` de sauvegarde. Avec le mode d'acces
-`ReadWriteOnce` par defaut, les deux pods doivent tourner **sur le meme noeud** ;
-sur un cluster multi-noeuds, le Job de sauvegarde resterait indefiniment `Pending`.
-Sur un homelab mono-noeud, c'est sans consequence. Sinon, passer
-`fitArchive.persistence.accessModes` a `ReadWriteMany` (StorageClass compatible
-requise) ou separer les dumps sur leur propre PVC.
+**Beware `ReadWriteOnce`**: the `fit-archive` PVC is mounted both by the ingest
+pod and by the backup `CronJob` pod. With the default `ReadWriteOnce` access mode,
+both pods must run **on the same node**; on a multi-node cluster, the backup Job
+would remain indefinitely `Pending`. On a single-node homelab, there is no issue.
+Otherwise, change `fitArchive.persistence.accessModes` to `ReadWriteMany`
+(compatible StorageClass required) or separate dumps to their own PVC.
 
-Les pods qui partagent ce PVC utilisent **le meme `fsGroup`** (celui de
-`ingest.securityContext.fsGroup`, 10001 par defaut). C'est indispensable : le
-kubelet applique `fsGroup` recursivement au volume a chaque montage, et deux
-valeurs differentes s'ecraseraient mutuellement - l'ingestion perdrait le droit
-d'ecrire son archive FIT et son token store apres le premier passage de la
-sauvegarde.
+Pods sharing this PVC use **the same `fsGroup`** (that of
+`ingest.securityContext.fsGroup`, default 10001). This is essential: kubelet
+applies `fsGroup` recursively to the volume on each mount, and two different
+values would overwrite each other -- ingest would lose write permission to its
+FIT archive and token store after the first backup run.
 
-Le pod d'ingestion tourne avec `readOnlyRootFilesystem: true`. Les seuls chemins
-inscriptibles sont donc le PVC `fit-archive` (archive FIT + token store) et un
-`emptyDir` monte sur `/tmp` (borne par `ingest.tmpDirSizeLimit`). Les variables
-`HOME`, `TMPDIR`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` et `PYTHONPYCACHEPREFIX`
-sont redirigees vers `/tmp` pour cette raison, et `PYTHONDONTWRITEBYTECODE=1`
-evite toute tentative d'ecriture de `.pyc` dans `site-packages` (lecture seule).
-Toute nouvelle dependance qui ecrirait ailleurs doit etre ajoutee a cette liste.
+The ingest pod runs with `readOnlyRootFilesystem: true`. The only writable paths
+are therefore the `fit-archive` PVC (FIT archive + token store) and an `emptyDir`
+mounted on `/tmp` (bounded by `ingest.tmpDirSizeLimit`). Variables `HOME`,
+`TMPDIR`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` and `PYTHONPYCACHEPREFIX` are
+redirected to `/tmp` for this reason, and `PYTHONDONTWRITEBYTECODE=1` prevents
+any attempt to write `.pyc` to `site-packages` (read-only). Any new dependency
+that would write elsewhere must be added to this list.
 
-Le token store Garmin (`GARMINTOKENS`, variable d'environnement lue par
-`garminator-ingest`) est **persistant** : sans cela, chaque redémarrage du pod
-d'ingestion referait une authentification SSO complète auprès de Garmin, ce qui
-expose un compte sans 2FA au blocage (voir le principe n°1 du plan macro et
-issue #233).
+The Garmin token store (`GARMINTOKENS`, environment variable read by
+`garminator-ingest`) is **persistent**: without it, each ingest pod restart
+would trigger a complete SSO authentication with Garmin, exposing an account
+without 2FA to lockout (see principle #1 of the macro plan and issue #233).
 
-## Restauration depuis une sauvegarde
+## Restoration from a backup
 
-Le `CronJob` `<release>-postgresql-backup` exécute `pg_dump --format=custom`
-chaque semaine (par défaut dimanche 03h00, `backup.schedule`) vers
-`<pvc fit-archive>/postgres-backups/`, avec rotation simple (`backup.retention`
-dumps conservés).
+The `<release>-postgresql-backup` `CronJob` runs `pg_dump --format=custom`
+every week (default Sunday 03:00, `backup.schedule`) to
+`<pvc fit-archive>/postgres-backups/`, with simple rotation (`backup.retention`
+dumps kept).
 
-Trois garanties du script de sauvegarde :
+Three guarantees of the backup script:
 
-- `pg_dump` n'est **pas** place dans un tube : son code de retour remonte
-  directement et `set -e` fait echouer le Job. Un dump vide echoue aussi
-  explicitement. Une sauvegarde qui echoue en silence est pire que pas de
-  sauvegarde - surveiller `kubectl get jobs -n garminator`.
-- Le dump est ecrit sous `.dump.part` puis renomme : un dump interrompu ne porte
-  jamais le nom definitif, n'est jamais compte par la rotation et ne peut jamais
-  etre choisi pour une restauration.
-- La rotation n'utilise ni `ls -1t`, ni `tail`, ni `xargs -r` : les noms portent
-  un horodatage UTC de largeur fixe, donc l'ordre lexicographique du glob est
-  l'ordre chronologique. Aucune dependance a une option GNU dont la presence
-  n'est pas garantie dans le busybox d'une image alpine.
+- `pg_dump` is **not** piped: its exit code comes back directly and `set -e`
+  fails the Job. An empty dump also fails explicitly. A silent backup failure is
+  worse than no backup -- monitor `kubectl get jobs -n garminator`.
+- The dump is written as `.dump.part` then renamed: an interrupted dump never
+  bears the final name, is never counted by rotation and can never be chosen for
+  restoration.
+- Rotation uses neither `ls -1t` nor `tail` nor `xargs -r`: names carry fixed-width
+  UTC timestamps, so lexicographic glob order is chronological order. No dependency
+  on GNU options whose presence is not guaranteed in alpine image busybox.
 
-Pour restaurer manuellement un dump (à exécuter en dehors des heures d'ingestion,
-idéalement après avoir mis `ingest.replicaCount: 0` le temps de l'opération) :
+To manually restore a dump (run outside ingestion hours, ideally after setting
+`ingest.replicaCount: 0` for the duration of the operation):
 
 ```bash
-# 1. Lister les dumps disponibles, via un pod temporaire monté sur le PVC.
+# 1. List available dumps, via a temporary pod mounted on the PVC.
 kubectl run -n garminator restore-shell --rm -it --restart=Never \
   --image=postgres:16-alpine \
   --overrides='{"spec":{"containers":[{"name":"restore-shell","image":"postgres:16-alpine","command":["sh"],"stdin":true,"tty":true,"volumeMounts":[{"name":"fit-archive","mountPath":"/backups","subPath":"postgres-backups"}]}],"volumes":[{"name":"fit-archive","persistentVolumeClaim":{"claimName":"garminator-fit-archive"}}]}}' \
   -- ls -la /backups
 
-# 2. Copier le dump choisi hors du cluster (ou l'utiliser directement depuis
-#    un pod avec accès réseau à PostgreSQL), puis restaurer :
+# 2. Copy the chosen dump out of the cluster (or use it directly from
+#    a pod with network access to PostgreSQL), then restore:
 kubectl port-forward -n garminator svc/garminator-postgresql 5432:5432 &
 pg_restore --host=localhost --port=5432 \
   --username=garminator --dbname=garminator \
   --clean --if-exists \
-  chemin/vers/garminator-YYYYMMDDTHHMMSSZ.dump
+  path/to/garminator-YYYYMMDDTHHMMSSZ.dump
 ```
 
-**Cohérence dump / PVC (lot L10) :** un `pg_dump` seul ne restaure que l'état de
-PostgreSQL, pas les fichiers `.FIT` archivés ni le token store Garmin. Pour une
-restauration complète cohérente à un même instant, prenez un instantané (snapshot)
-du PVC `fit-archive` **au même moment** que le `pg_dump` — sinon la base peut
-référencer des fichiers FIT absents de l'archive restaurée, ou l'inverse. La
-procédure d'exploitation détaillée est du ressort du lot L10.
+**Dump / PVC consistency (batch L10):** a `pg_dump` alone restores only PostgreSQL
+state, not archived `.FIT` files or the Garmin token store. For a complete consistent
+restoration at the same instant, take a snapshot of the `fit-archive` PVC **at the same
+time** as the `pg_dump` -- otherwise the database may reference FIT files absent from
+the restored archive, or vice versa. The detailed operational procedure is the scope of
+batch L10.
 
-## NetworkPolicy (optionnelle)
+## NetworkPolicy (optional)
 
-Désactivée par défaut (`networkPolicy.enabled: false`) : dans un homelab, le
-réseau du cluster est généralement déjà de confiance, et une NetworkPolicy mal
-réglée peut bloquer silencieusement le poll Garmin (sortie HTTPS) sans qu'aucun
-Service ne le signale. Si activée, elle limite PostgreSQL aux pods du Release,
-Grafana à une sortie unique vers PostgreSQL, et l'ingestion à PostgreSQL + DNS +
-HTTPS sortant (nécessaire pour joindre l'API Garmin).
+Disabled by default (`networkPolicy.enabled: false`): in a homelab, the cluster
+network is generally already trusted, and a misconfigured NetworkPolicy can
+silently block Garmin polling (HTTPS outbound) without any Service signaling it.
+If enabled, it limits PostgreSQL to Release pods, Grafana to a single outbound
+to PostgreSQL, and ingestion to PostgreSQL + DNS + outbound HTTPS (necessary to
+reach the Garmin API).
 
-## Tableaux de bord Grafana (lot L9)
+## Grafana dashboards (batch L9)
 
-La ConfigMap `<release>-grafana-dashboards` est créée **vide** par ce chart et
-montée dans `/var/lib/grafana/dashboards`, avec le provider de provisioning déjà
-en place (`/etc/grafana/provisioning/dashboards`). Le lot L9 n'a qu'à y ajouter
-des clés `*.json` (ou fournir sa propre ConfigMap via
-`grafana.dashboards.configMapName`) — aucune modification de ce chart n'est
-nécessaire pour publier de nouveaux dashboards.
+The `<release>-grafana-dashboards` ConfigMap is created **empty** by this chart
+and mounted at `/var/lib/grafana/dashboards`, with the provisioning provider
+already in place (`/etc/grafana/provisioning/dashboards`). Batch L9 only needs to
+add `*.json` keys to it (or provide its own ConfigMap via
+`grafana.dashboards.configMapName`) -- no chart modification is necessary to
+publish new dashboards.
 
-## Validation hors ligne
+## Offline validation
 
-Ce chart est conçu pour être entièrement validé sans toucher à un cluster :
+This chart is designed to be fully validated without touching a cluster:
 
-Trois jeux de valeurs de reference sont fournis dans `ci/` (mots de passe de test,
-jamais deployes) :
+Three reference value sets are provided in `ci/` (test passwords, never deployed):
 
 ```bash
 for v in deploy/helm/garminator/ci/*.yaml; do
@@ -323,21 +318,21 @@ for v in deploy/helm/garminator/ci/*.yaml; do
 done
 ```
 
-- `ci/01-defaut-values.yaml` - configuration par defaut, secrets fournis.
-- `ci/02-secrets-externes-values.yaml` - tous les Secrets preexistants, NetworkPolicy activee.
-- `ci/03-minimal-values.yaml` - sans Grafana, sans sauvegarde, sans persistance.
+- `ci/01-defaut-values.yaml` - default configuration, secrets provided.
+- `ci/02-secrets-externes-values.yaml` - all pre-existing Secrets, NetworkPolicy enabled.
+- `ci/03-minimal-values.yaml` - without Grafana, without backup, without persistence.
 
-Sans fichier de valeurs, `helm template` **echoue volontairement** (mots de passe
-non fournis, voir plus haut).
+Without a values file, `helm template` **fails deliberately** (passwords not provided,
+see above).
 
-Validation de schema Kubernetes (`kubeconform`) : a executer cote athlete, l'outil
-n'est pas installe dans l'environnement des agents et son installation demanderait
-un acces reseau.
+Kubernetes schema validation (`kubeconform`): to be run on the athlete's side; the
+tool is not installed in the agent environment and its installation would require
+network access.
 
 ```bash
-helm template garminator deploy/helm/garminator -f mes-valeurs.yaml \
+helm template garminator deploy/helm/garminator -f my-values.yaml \
   | kubeconform -strict -summary
 ```
 
-Aucune commande `helm install`, `helm upgrade` ou `kubectl apply` n'est exécutée
-par les agents qui développent ce dépôt (principe n°5 du plan macro).
+No `helm install`, `helm upgrade` or `kubectl apply` commands are executed by the
+agents developing this repository (principle #5 of the macro plan).

@@ -1,5 +1,5 @@
-"""Tests de :mod:`garminator.scheduler.store`, contre une connexion DB en mémoire
-(:class:`tests.scheduler.fakes.FakePollDB`) -- aucun PostgreSQL réel."""
+"""Tests for :mod:`garminator.scheduler.store`, against an in-memory DB connection
+(:class:`tests.scheduler.fakes.FakePollDB`) -- no real PostgreSQL."""
 
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ from garminator.scheduler.store import (
 from tests.scheduler.fakes import FakePollDB
 
 
-def test_load_window_states_est_vide_sans_ligne() -> None:
+def test_load_window_states_empty_without_rows() -> None:
     db = FakePollDB()
 
     assert load_window_states(db, endpoint="get_activities") == {}
 
 
-def test_begin_window_cree_une_ligne_in_progress_et_incremente_attempts() -> None:
+def test_begin_window_creates_in_progress_row_and_increments_attempts() -> None:
     db = FakePollDB()
 
     begin_window(db, endpoint="get_activities", window_date=date(2026, 8, 20), ingest_run_id=7)
@@ -32,11 +32,11 @@ def test_begin_window_cree_une_ligne_in_progress_et_incremente_attempts() -> Non
     states = load_window_states(db, endpoint="get_activities")
     state = states[date(2026, 8, 20)]
     assert state.status == "in_progress"
-    assert state.attempts == 2  # deuxième tentative -- pas remis à zéro
+    assert state.attempts == 2  # second attempt -- not reset to zero
     assert db.commit_count == 2
 
 
-def test_begin_window_est_isole_par_endpoint() -> None:
+def test_begin_window_is_isolated_by_endpoint() -> None:
     db = FakePollDB()
 
     begin_window(db, endpoint="get_activities", window_date=date(2026, 8, 20), ingest_run_id=1)
@@ -44,7 +44,7 @@ def test_begin_window_est_isole_par_endpoint() -> None:
     assert load_window_states(db, endpoint="get_sleep_data") == {}
 
 
-def test_complete_window_marque_done_et_efface_la_derniere_erreur() -> None:
+def test_complete_window_marks_done_and_clears_last_error() -> None:
     db = FakePollDB()
     begin_window(db, endpoint="get_activities", window_date=date(2026, 8, 20), ingest_run_id=1)
     fail_window(
@@ -55,12 +55,12 @@ def test_complete_window_marque_done_et_efface_la_derniere_erreur() -> None:
 
     state = load_window_states(db, endpoint="get_activities")[date(2026, 8, 20)]
     assert state.status == "done"
-    # Contre-épreuve : sans le SET last_error = NULL, l'erreur du run précédent
-    # resterait affichée à côté d'un succès plus récent.
+    # Sanity check: without SET last_error = NULL, the error from previous run
+    # would still show alongside a more recent success.
     assert state.last_error is None
 
 
-def test_fail_window_marque_failed_avec_le_message() -> None:
+def test_fail_window_marks_failed_with_message() -> None:
     db = FakePollDB()
     begin_window(db, endpoint="get_activities", window_date=date(2026, 8, 20), ingest_run_id=1)
 
@@ -71,7 +71,7 @@ def test_fail_window_marque_failed_avec_le_message() -> None:
     assert state.last_error == "429"
 
 
-def test_has_payload_been_seen_faux_avant_tout_enregistrement() -> None:
+def test_has_payload_been_seen_false_before_recording() -> None:
     db = FakePollDB()
 
     assert not has_payload_been_seen(
@@ -83,7 +83,7 @@ def test_has_payload_been_seen_faux_avant_tout_enregistrement() -> None:
     )
 
 
-def test_record_puis_has_payload_been_seen_devient_vrai() -> None:
+def test_record_then_has_payload_been_seen_becomes_true() -> None:
     db = FakePollDB()
     sha = b"\x01" * 32
 
@@ -104,9 +104,9 @@ def test_record_puis_has_payload_been_seen_devient_vrai() -> None:
     )
 
 
-def test_has_payload_been_seen_discrimine_par_hash() -> None:
-    """Falsifiabilité : un contenu différent (renommage, sport corrigé) ne doit jamais
-    être confondu avec l'ancien -- c'est ce qui permet la réingestion légitime."""
+def test_has_payload_been_seen_discriminates_by_hash() -> None:
+    """Falsifiability: different content (rename, sport corrected) must never
+    be confused with the old one -- this is what allows legitimate reingestion."""
     db = FakePollDB()
     record_payload_seen(
         db,
@@ -125,7 +125,7 @@ def test_has_payload_been_seen_discrimine_par_hash() -> None:
     )
 
 
-def test_record_payload_seen_est_idempotent_sans_erreur_de_doublon() -> None:
+def test_record_payload_seen_is_idempotent_without_duplicate_error() -> None:
     db = FakePollDB()
     sha = b"\x03" * 32
 
@@ -136,13 +136,13 @@ def test_record_payload_seen_est_idempotent_sans_erreur_de_doublon() -> None:
         db, endpoint="e", scope_date=date(2026, 8, 20), scope_key=None, payload_sha256=sha
     )
 
-    key = ("e", date(2026, 8, 20), "", sha)  # scope_key=None normalisé en '' (défaut DDL)
-    assert db.payload_seen[key] == 2  # compteur de republications, pas de doublon de ligne
+    key = ("e", date(2026, 8, 20), "", sha)  # scope_key=None normalized to '' (DDL default)
+    assert db.payload_seen[key] == 2  # republication counter, not row duplicate
 
 
-def test_scope_key_none_est_normalise_en_chaine_vide() -> None:
-    """``raw.payload_seen.scope_key`` est NOT NULL (participe à la clé primaire) ; None
-    doit être normalisé vers le même défaut '' que le DDL, jamais laissé tel quel."""
+def test_scope_key_none_is_normalized_to_empty_string() -> None:
+    """``raw.payload_seen.scope_key`` is NOT NULL (part of primary key) ; None
+    must be normalized to the same default '' as DDL, never left as-is."""
     db = FakePollDB()
 
     record_payload_seen(
@@ -153,7 +153,7 @@ def test_scope_key_none_est_normalise_en_chaine_vide() -> None:
     assert params[2] == ""
 
 
-def test_load_window_states_reflete_bien_le_type_publie() -> None:
+def test_load_window_states_reflects_published_type() -> None:
     db = FakePollDB()
     begin_window(db, endpoint="e", window_date=date(2026, 8, 20), ingest_run_id=None)
 

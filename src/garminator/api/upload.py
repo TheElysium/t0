@@ -1,44 +1,47 @@
-"""Endpoint HTTP d'envoi manuel d'un fichier FIT/TCX/ZIP (lot L7).
+"""HTTP endpoint for manual FIT/TCX/ZIP upload (L7 batch).
 
-Accès prévu LOCAL uniquement pour l'instant (décision produit assumée, cf. rapport de
-fin de lot) : ni Ingress, ni TLS, ni authentification ne sont mis en place ici. Ce
-module ne fait AUCUNE hypothèse de format d'après l'extension du nom de fichier annoncé
-par le client HTTP ni d'après une éventuelle URL : tout le sniffing est délégué à
-:mod:`garminator.api.ingest` / :mod:`garminator.fit.archive`, qui ne regardent que le
-contenu.
+Currently LOCAL access only (documented product decision, see batch end report): no
+Ingress, TLS, or authentication in place here. This module makes NO assumptions about
+format from the filename extension announced by the HTTP client or from any URL: all
+sniffing is delegated to :mod:`garminator.api.ingest` / :mod:`garminator.fit.archive`,
+which only look at content.
 
-Table de correspondance erreur -> statut HTTP, volontairement explicite (pas de
-« 500 » générique pour un cas prévu) :
+Error -> HTTP status mapping, deliberately explicit (no generic "500" for expected
+cases):
 
-- :class:`~garminator.api.errors.PayloadTooLargeError` -> 413 (corps de requête trop
-  volumineux).
-- :class:`~garminator.api.errors.HostileArchiveError` -> 422 (archive ZIP au motif
-  dangereux : chemin d'échappement ou bombe de décompression).
-- :class:`~garminator.fit.errors.ArchiveError` -> 422 (contenu non reconnu comme FIT ni
-  TCX, archive ZIP vide/à plusieurs membres/invalide).
-- Parsing échoué après archivage réussi -> 422 également, mais le corps de la réponse
-  indique explicitement que le fichier brut a bien été archivé (aucune perte), pour ne
-  jamais faire croire à un échec total quand seule l'ingestion l'est.
-- :class:`~garminator.garmin.raw_store.FitFileShaConflictError` -> 409 (conflit) : le
-  contenu envoyé est déjà associé en base à une AUTRE provenance (activité Garmin
-  réelle, ou envoi manuel distinct). Le fichier reste archivé sur le volume — voir le
-  détail du scénario dans la docstring de cette exception.
-- Toute autre exception : laissée remonter (500 par défaut de FastAPI) — un incident
-  réellement inattendu ne doit pas être maquillé en réponse « propre ».
+- :class:`~garminator.api.errors.PayloadTooLargeError` -> 413 (request body too large).
+- :class:`~garminator.api.errors.HostileArchiveError` -> 422 (ZIP archive with dangerous
+  pattern: path escape or decompression bomb).
+- :class:`~garminator.fit.errors.ArchiveError` -> 422 (content not recognized as FIT or
+  TCX, ZIP archive empty/multi-member/invalid).
+- Parsing failed after successful archive -> 422 also, but response body explicitly
+  states that raw file was archived (no loss), to never suggest total failure when only
+  ingestion failed.
+- :class:`~garminator.garmin.raw_store.FitFileShaConflictError` -> 409 (conflict):
+  uploaded content already associated in database to a DIFFERENT source (real Garmin
+  activity, or distinct manual upload). File stays archived on disk — see exception
+  docstring for scenario details.
+- Any other exception: allowed to propagate (FastAPI default 500) — a truly unexpected
+  incident must not be masked as a "clean" response.
 
-``python-multipart`` est requis à l'exécution par ``File(...)`` de FastAPI : absent du
-venv de ce dépôt au moment de l'écriture de ce lot (voir rapport de fin de lot). Ce
-module reste néanmoins écrit et importable normalement — seul l'appel réel de la route
-avec un vrai corps ``multipart/form-data`` en a besoin.
+``python-multipart`` is required at runtime by FastAPI's ``File(...)``: absent from
+this repository's venv at batch write time (see batch end report). This module is still
+written and importable normally — only the actual route call with real ``multipart/
+form-data`` body needs it.
 """
 
 from __future__ import annotations
 
-# `Path` reste un import reel (pas seulement sous TYPE_CHECKING) : FastAPI resout les
-# annotations `Annotated[Path, Depends(...)]` a l'execution via get_type_hints(), qui a
-# besoin de `Path` dans l'espace de noms du module.
+# EVERY name appearing in a route or dependency annotation below must be imported at
+# runtime, never under TYPE_CHECKING. FastAPI resolves annotations through
+# get_type_hints(); when that raises NameError it does NOT fail loudly -- it falls back
+# to treating the parameter as an untyped query parameter, so every request answers 422
+# "Field required" for a parameter that was meant to be injected. That is exactly what
+# `DBConnection` under TYPE_CHECKING caused. Guarded by
+# test_route_annotations_resolve_at_runtime.
+from collections.abc import Iterator  # noqa: TC003
 from pathlib import Path  # noqa: TC003
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import Annotated, cast
 
 import psycopg
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -47,52 +50,42 @@ from pydantic import BaseModel
 from garminator.api.errors import HostileArchiveError, PayloadTooLargeError, UploadError
 from garminator.api.ingest import DEFAULT_MAX_UPLOAD_BYTES, ingest_upload
 from garminator.fit.errors import ArchiveError
-from garminator.garmin.raw_store import FitFileShaConflictError
+from garminator.garmin.raw_store import DBConnection, FitFileShaConflictError
 from garminator.settings import get_settings
-
-if TYPE_CHECKING:
-    # Importé pour le seul `cast` ci-dessous : `DBConnection` est un protocole, il n'a
-    # aucune existence à l'exécution. Même convention que garminator.transform.__main__.
-    from collections.abc import Iterator
-
-    from garminator.garmin.raw_store import DBConnection
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
-#: Taille d'un morceau de lecture pendant le streaming du corps de requête. Choisie
-#: petite (1 Mio) pour que la borne de taille (voir :mod:`garminator.api.ingest`) coupe
-#: rapidement un envoi excessif, sans avoir à matérialiser tout le corps en mémoire
-#: avant de s'en apercevoir.
+#: Size of one read chunk during request body streaming. Chosen small (1 MiB) so the
+#: size bound (see :mod:`garminator.api.ingest`) cuts excessive uploads quickly, without
+#: materializing the entire body in memory first.
 _READ_CHUNK_BYTES = 1024 * 1024
 
 
 def get_upload_dest_dir() -> Path:
-    """Dépendance FastAPI par défaut : répertoire d'archivage lu depuis les settings.
+    """Default FastAPI dependency: archive directory read from settings.
 
-    Surchargeable en test via ``app.dependency_overrides`` (voir ``tests/api/``), pour
-    ne jamais dépendre de variables d'environnement Garmin/PostgreSQL dans un test qui
-    ne teste que l'archivage d'un envoi.
+    Overridable in tests via ``app.dependency_overrides`` (see ``tests/api/``), to never
+    depend on Garmin/PostgreSQL environment variables in a test that only tests upload
+    archiving.
     """
     return get_settings().fit_archive_path
 
 
 def get_upload_db_conn() -> Iterator[DBConnection]:
-    """Dépendance FastAPI par défaut : connexion PostgreSQL réelle, une par requête.
+    """Default FastAPI dependency: real PostgreSQL connection, one per request.
 
-    Générateur plutôt que simple retour, pour que FastAPI ferme la connexion après la
-    requête quel que soit son issue (succès, 4xx, exception non prévue) — un
-    ``finally`` explicite plutôt qu'espérer que le garbage collector s'en charge, ce qui
-    laisserait une connexion PostgreSQL ouverte par envoi sous charge.
+    Generator rather than simple return, so FastAPI closes the connection after the
+    request regardless of outcome (success, 4xx, unexpected exception) — explicit
+    ``finally`` rather than relying on garbage collector, which would leave PostgreSQL
+    connections open under upload load.
 
-    Surchargeable en test via ``app.dependency_overrides`` (voir ``tests/api/``), pour
-    injecter une doublure en mémoire sans jamais se connecter à un PostgreSQL réel —
-    nécessaire ici puisqu'aucune instance PostgreSQL n'existe dans cet environnement de
-    développement (voir le rapport de fin de lot).
+    Overridable in tests via ``app.dependency_overrides`` (see ``tests/api/``), to inject
+    in-memory stub without ever connecting to real PostgreSQL — necessary here since no
+    PostgreSQL instance exists in this development environment (see batch end report).
 
-    ``cast`` plutôt qu'un ``psycopg.Connection`` renvoyé tel quel : même convention que
-    ``garminator.transform.__main__`` / ``garminator.ops.__main__`` — mypy refuse de
-    rapprocher la méthode ``cursor`` SURCHARGÉE de psycopg d'un protocole structurel qui
-    ne l'est pas.
+    ``cast`` rather than ``psycopg.Connection`` returned as-is: same convention as
+    ``garminator.transform.__main__`` / ``garminator.ops.__main__`` — mypy refuses to
+    equate psycopg's OVERLOADED ``cursor`` method with a structural protocol that isn't.
     """
     conn = psycopg.connect(get_settings().postgres_dsn.get_secret_value())
     try:
@@ -102,7 +95,7 @@ def get_upload_db_conn() -> Iterator[DBConnection]:
 
 
 class ParsedSummaryOut(BaseModel):
-    """Reflet HTTP de :class:`garminator.api.ingest.ParsedSummary`."""
+    """HTTP reflection of :class:`garminator.api.ingest.ParsedSummary`."""
 
     n_samples: int
     n_laps: int
@@ -112,13 +105,12 @@ class ParsedSummaryOut(BaseModel):
 
 
 class UploadResponse(BaseModel):
-    """Corps de réponse d'un envoi traité, succès d'ingestion ou non.
+    """Response body of a processed upload, ingestion success or not.
 
-    ``status`` vaut ``"ok"`` quand l'archivage ET le parsing ont réussi, ``"archived_but_unparsed"``
-    quand seul l'archivage a réussi (le fichier brut n'est PAS perdu, mais l'ingestion ne
-    peut pas continuer sans intervention). Jamais ``"ok"`` sans que ``parsed`` soit
-    renseigné : ce champ existe précisément pour qu'un appelant ne puisse pas confondre
-    les deux cas en ne lisant que le code HTTP.
+    ``status`` is ``"ok"`` when both archiving and parsing succeeded, ``"archived_but_unparsed"``
+    when only archiving succeeded (raw file is NOT lost, but ingestion cannot continue
+    without intervention). Never ``"ok"`` without ``parsed`` being set: this field exists
+    precisely so a caller cannot confuse the two cases by reading only the HTTP status.
     """
 
     status: str
@@ -131,14 +123,14 @@ class UploadResponse(BaseModel):
 
 
 async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
-    """Lit ``file`` par morceaux, coupant dès que ``max_bytes`` est dépassé.
+    """Read ``file`` in chunks, stopping as soon as ``max_bytes`` is exceeded.
 
-    Évite de matérialiser en mémoire un corps de requête déjà su excessif : contrairement
-    à un simple ``await file.read()`` suivi d'une vérification de taille après coup, la
-    lecture s'arrête au premier morceau qui fait franchir la borne.
+    Avoids materializing in memory a request body already known to be excessive:
+    unlike simple ``await file.read()`` followed by size check afterward, reading stops
+    at the first chunk that crosses the bound.
 
     Raises:
-        garminator.api.errors.PayloadTooLargeError: la taille cumulée dépasse ``max_bytes``.
+        garminator.api.errors.PayloadTooLargeError: cumulative size exceeds ``max_bytes``.
     """
     chunks: list[bytes] = []
     total = 0
@@ -149,8 +141,7 @@ async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
         total += len(chunk)
         if total > max_bytes:
             raise PayloadTooLargeError(
-                f"Envoi refusé : au moins {total} octets reçus, au-dessus de la borne "
-                f"({max_bytes})."
+                f"Upload rejected: at least {total} bytes received, above bound " f"({max_bytes})."
             )
         chunks.append(chunk)
     return b"".join(chunks)
@@ -158,15 +149,19 @@ async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
 
 @router.post("", response_model=UploadResponse, status_code=201)
 async def upload_activity_file(
-    file: Annotated[UploadFile, File(description="Fichier .fit, .tcx, ou archive .zip.")],
+    file: Annotated[UploadFile, File(description=".fit, .tcx, or .zip archive file.")],
     dest_dir: Annotated[Path, Depends(get_upload_dest_dir)],
     conn: Annotated[DBConnection, Depends(get_upload_db_conn)],
 ) -> UploadResponse:
-    """Reçoit un fichier FIT/TCX/ZIP, l'archive brut-d'abord, insère sa ligne
-    ``raw.fit_file`` (``garmin_activity_id=None``), puis tente de le parser."""
-    data = await _read_capped(file, DEFAULT_MAX_UPLOAD_BYTES)
-
+    """Receive a FIT/TCX/ZIP file, archive it first, insert its ``raw.fit_file`` row
+    (``garmin_activity_id=None``), then attempt parsing."""
+    # `_read_capped` is INSIDE the try: it is the first of the two places that raise
+    # PayloadTooLargeError, and the earlier one -- it stops at the chunk that crosses the
+    # bound, before the body is ever materialized. Left outside, an oversized upload
+    # escaped as an unhandled exception and answered 500 instead of the 413 this module
+    # documents.
     try:
+        data = await _read_capped(file, DEFAULT_MAX_UPLOAD_BYTES)
         outcome = ingest_upload(
             data, dest_dir, max_upload_bytes=DEFAULT_MAX_UPLOAD_BYTES, conn=conn
         )
@@ -178,13 +173,13 @@ async def upload_activity_file(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except FitFileShaConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except UploadError as exc:  # pragma: no cover - garde-fou si une sous-classe est ajoutée
+    except UploadError as exc:  # pragma: no cover - safeguard if a subclass is added
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    if outcome.fit_file_id is None:  # pragma: no cover - garde-fou, `conn` est fourni ci-dessus
+    if outcome.fit_file_id is None:  # pragma: no cover - safeguard, `conn` is provided above
         raise RuntimeError(
-            "ingest_upload a retourné fit_file_id=None alors qu'une connexion a été "
-            "fournie : incohérence interne entre cette route et garminator.api.ingest."
+            "ingest_upload returned fit_file_id=None even though a connection was "
+            "provided: internal inconsistency between this route and garminator.api.ingest."
         )
 
     parsed_out = (
@@ -210,8 +205,8 @@ async def upload_activity_file(
         fit_file_id=outcome.fit_file_id,
     )
     if outcome.parse_error is not None:
-        # Le fichier brut EST archivé (aucune perte) mais l'ingestion a échoué : ce
-        # n'est pas un succès, donc pas de 201 silencieux. Le corps ci-dessus reste
-        # transmis via `detail` pour que l'appelant sache que l'original est en sûreté.
+        # Raw file IS archived (no loss) but ingestion failed: this is not success, so no
+        # silent 201. Body above is still transmitted via `detail` so caller knows the
+        # original is safe.
         raise HTTPException(status_code=422, detail=response.model_dump())
     return response

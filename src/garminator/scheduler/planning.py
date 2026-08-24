@@ -1,25 +1,24 @@
-"""Planification pure des fenêtres de sondage (lot L6).
+"""Pure planning of polling windows (batch L6).
 
-Aucune fonction de ce module n'accède à la base ni au réseau : elles reçoivent l'état
-connu des fenêtres (tel que lu depuis ``raw.poll_window`` par
-:mod:`garminator.scheduler.store`) en argument et renvoient les dates à (re)sonder.
-C'est ce qui les rend testables sans PostgreSQL.
+No function in this module accesses the database or network: they receive the known state
+of windows (as read from ``raw.poll_window`` by :mod:`garminator.scheduler.store`)
+as argument and return dates to (re)poll. This is what makes them testable without PostgreSQL.
 
-Principe d'ordonnancement (cf. ``COMMENT ON TABLE raw.poll_window``, migration 009) :
-une fenêtre est due si
+Scheduling principle (cf. ``COMMENT ON TABLE raw.poll_window``, migration 009):
+a window is due if
 
-1. elle n'a jamais été tentée (rattrapage d'historique / nouvelle installation) ;
-2. sa dernière tentative a échoué (``failed``) -- on ne l'abandonne jamais silencieusement ;
-3. elle est bloquée ``in_progress`` depuis plus longtemps que ``stale_after`` -- résidu
-   d'un run interrompu (panne, ``OOMKilled``, ``SIGTERM`` de Kubernetes) : sans ce cas,
-   une panne au milieu d'un run laisserait la fenêtre indéfiniment coincée, jamais rejouée,
-   et l'activité correspondante serait perdue ;
-4. elle est ``done`` mais tombe dans la fenêtre glissante récente (``refresh_lookback_days``)
-   -- Garmin republie parfois une journée après coup (activité renommée, sport corrigé,
-   arrivée en retard), et l'idempotence ne doit pas empêcher cette réingestion légitime.
+1. it has never been tried (history catch-up / new install) ;
+2. its last attempt failed (``failed``) -- it is never silently abandoned ;
+3. it is stuck ``in_progress`` for longer than ``stale_after`` -- residue
+   of an interrupted run (crash, ``OOMKilled``, Kubernetes ``SIGTERM``) : without this case,
+   a crash mid-run would leave the window indefinitely stuck, never replayed,
+   and the corresponding activity would be lost ;
+4. it is ``done`` but falls in the recent sliding window (``refresh_lookback_days``)
+   -- Garmin sometimes republishes a day later (activity renamed, sport corrected,
+   late arrival), and idempotence must not prevent this legitimate reingestion.
 
-Une fenêtre ``done`` en dehors de la fenêtre glissante n'est JAMAIS due : c'est ce qui
-évite de retélécharger tout l'historique après une simple reprise.
+A ``done`` window outside the sliding window is NEVER due: this is what
+avoids redownloading the entire history after a simple restart.
 """
 
 from __future__ import annotations
@@ -31,21 +30,21 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-#: Valeurs autorisées par ``poll_window_status_ck`` (migration 009).
+#: Values allowed by ``poll_window_status_ck`` (migration 009).
 WindowStatusLiteral = Literal["pending", "in_progress", "done", "failed"]
 
-#: Fenêtre glissante par défaut resondée systématiquement même si déjà ``done`` :
-#: rattrape les republications tardives de Garmin sans repasser par tout l'historique.
+#: Default sliding window systematically re-polled even if already ``done`` :
+#: catches late Garmin republications without repassing through entire history.
 DEFAULT_REFRESH_LOOKBACK_DAYS = 3
 
-#: Durée par défaut au-delà de laquelle une fenêtre ``in_progress`` est considérée comme
-#: le résidu d'un run interrompu plutôt que d'un sondage réellement concurrent.
+#: Duration after which an ``in_progress`` window is considered
+#: residue of an interrupted run rather than truly concurrent polling.
 DEFAULT_STALE_IN_PROGRESS_AFTER = timedelta(hours=2)
 
 
 @dataclass(frozen=True, slots=True)
 class WindowState:
-    """État connu d'une fenêtre (endpoint, jour), tel que lu dans ``raw.poll_window``."""
+    """Known state of a window (endpoint, day), as read from ``raw.poll_window``."""
 
     status: WindowStatusLiteral
     attempts: int
@@ -54,13 +53,13 @@ class WindowState:
 
 
 def daily_range(start: date, end: date) -> list[date]:
-    """Toutes les dates de ``start`` à ``end`` incluses, ordre croissant.
+    """All dates from ``start`` to ``end`` inclusive, ascending order.
 
     Raises:
-        ValueError: si ``start`` est postérieur à ``end``.
+        ValueError: if ``start`` is after ``end``.
     """
     if start > end:
-        raise ValueError(f"start ({start}) doit être <= end ({end})")
+        raise ValueError(f"start ({start}) must be <= end ({end})")
     span = (end - start).days
     return [start + timedelta(days=offset) for offset in range(span + 1)]
 
@@ -74,18 +73,18 @@ def due_windows(
     refresh_lookback_days: int = DEFAULT_REFRESH_LOOKBACK_DAYS,
     stale_after: timedelta = DEFAULT_STALE_IN_PROGRESS_AFTER,
 ) -> list[date]:
-    """Détermine les fenêtres à (re)sonder, dans l'ordre chronologique croissant.
+    """Determines windows to (re)poll, in ascending chronological order.
 
-    L'ordre croissant est délibéré : un rattrapage d'historique après une longue panne
-    comble d'abord les plus vieux trous plutôt que de sonder le jour courant en boucle
-    tant que le passé n'est pas rattrapé.
+    Ascending order is deliberate: history catch-up after a long crash
+    fills oldest gaps first rather than polling current day in a loop
+    while the past is not caught up.
 
     Raises:
-        ValueError: si ``refresh_lookback_days`` est négatif, ou si ``history_start`` est
-            postérieur à ``today``.
+        ValueError: if ``refresh_lookback_days`` is negative, or if ``history_start`` is
+            after ``today``.
     """
     if refresh_lookback_days < 0:
-        raise ValueError("refresh_lookback_days doit être >= 0")
+        raise ValueError("refresh_lookback_days must be >= 0")
     refresh_floor = today - timedelta(days=refresh_lookback_days)
 
     due: list[date] = []

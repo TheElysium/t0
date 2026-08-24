@@ -1,12 +1,12 @@
-"""Tests de :mod:`garminator.scheduler.activity_files` (lot L12).
+"""Tests for :mod:`garminator.scheduler.activity_files` (batch L12).
 
-Aucun réseau, aucun PostgreSQL réel : ``_FakeDownloader`` (ci-dessous) satisfait
-``activity_files.OriginalFileDownloader`` et ``_FakeFitFileDB`` satisfait
-``garminator.garmin.raw_store.DBConnection``, toutes deux dédiées à ce fichier --
-``tests/scheduler/fakes.py`` (existant, non modifié) simule ``raw.poll_window`` /
-``raw.payload_seen``, pas ``raw.fit_file``, donc n'est pas réutilisable ici. Les octets
-FIT/TCX/ZIP sont synthétiques, construits à la main comme dans ``tests/fit/test_archive.py``
--- jamais un extrait des fichiers réels de l'athlète.
+No network, no real PostgreSQL: ``_FakeDownloader`` (below) satisfies
+``activity_files.OriginalFileDownloader`` and ``_FakeFitFileDB`` satisfies
+``garminator.garmin.raw_store.DBConnection``, both dedicated to this file—
+``tests/scheduler/fakes.py`` (existing, unmodified) simulates ``raw.poll_window`` /
+``raw.payload_seen``, not ``raw.fit_file``, so is not reusable here. FIT/TCX/ZIP
+bytes are synthetic, hand-constructed like in ``tests/fit/test_archive.py``—never
+an excerpt from the athlete's actual files.
 """
 
 from __future__ import annotations
@@ -32,16 +32,16 @@ from garminator.scheduler.activity_files import (
 if TYPE_CHECKING:
     from garminator.garmin.raw_store import DBConnection as _RawStoreDBConnection
 
-# Signature FIT minimale valide, identique dans l'esprit à tests/fit/test_archive.py :
-# après un en-tête de 8 octets, la chaîne ".FIT" aux octets 8-11.
+# Minimal valid FIT signature, same spirit as tests/fit/test_archive.py: after an
+# 8-byte header, the string ".FIT" at bytes 8-11.
 _FAKE_FIT = b"\x0e\x10\xc0\x00\x00\x00\x00\x00.FIT" + b"\x00" * 20
 _FAKE_FIT_V2 = (
     b"\x0e\x10\xc0\x00\x00\x00\x00\x00.FIT" + b"\x01" * 40
-)  # contenu DIFFERENT, "plus complet"
+)  # DIFFERENT content, "more complete"
 _FAKE_TCX = b'<?xml version="1.0"?><TrainingCenterDatabase/>'
-_GARBAGE = b"ceci n'est ni un FIT ni un TCX"
+_GARBAGE = b"this is neither FIT nor TCX"
 
-_SENTINEL_DL_FMT = object()  # tient lieu de garminconnect.Garmin.ActivityDownloadFormat.ORIGINAL
+_SENTINEL_DL_FMT = object()  # placeholder for garminconnect.Garmin.ActivityDownloadFormat.ORIGINAL
 
 
 def _zip_bytes(entries: dict[str, bytes]) -> bytes:
@@ -53,13 +53,13 @@ def _zip_bytes(entries: dict[str, bytes]) -> bytes:
 
 
 def _stem_suffix(content: bytes) -> str:
-    """Extrait de sha256 attendu dans le nom de fichier -- voir activity_files.py."""
+    """Expected sha256 excerpt in the filename—see activity_files.py."""
     return hashlib.sha256(content).hexdigest()[:12]
 
 
 @dataclass
 class _FakeDownloader:
-    """Satisfait ``activity_files.OriginalFileDownloader``, sans réseau."""
+    """Satisfies ``activity_files.OriginalFileDownloader``, no network."""
 
     outcomes: dict[str, Any] = field(default_factory=dict)
     calls: list[tuple[str, Any, IngestRunTracker | None]] = field(default_factory=list, init=False)
@@ -74,8 +74,8 @@ class _FakeDownloader:
         self.calls.append((activity_id, dl_fmt, tracker))
         outcome = self.outcomes[activity_id]
         if isinstance(outcome, BaseException):
-            # Reproduit le comportement réel de GarminClient.download_original : le
-            # tracker compte l'échec avant que l'exception ne remonte (voir client.py).
+            # Mimics the real behavior of GarminClient.download_original: the tracker
+            # records the failure before the exception propagates (see client.py).
             if tracker is not None:
                 tracker.record_error()
             raise outcome
@@ -105,10 +105,10 @@ class _FakeCursor:
         self._conn.executed.append(normalized)
 
         if normalized.startswith("SELECT fit_file_id, sha256, storage_path FROM raw.fit_file"):
-            # _latest_fit_file : ORDER BY downloaded_at DESC LIMIT 1 -- nos fakes n'ont
-            # pas d'horodatage réel, mais l'ordre d'ajout à `rows` EST l'ordre
-            # chronologique dans tous nos scénarios, donc le dernier ajouté qui
-            # correspond est "la plus récente version".
+            # _latest_fit_file: ORDER BY downloaded_at DESC LIMIT 1—our fakes have no
+            # real timestamp, but the order of addition to `rows` IS the chronological
+            # order in all our scenarios, so the last added matching row is "the latest
+            # version".
             (garmin_activity_id,) = params
             matches = [r for r in self._conn.rows if r.garmin_activity_id == garmin_activity_id]
             self._result = (
@@ -120,7 +120,7 @@ class _FakeCursor:
 
         if normalized.startswith("INSERT INTO raw.fit_file"):
             if self._conn.fail_insert:
-                raise RuntimeError("panne simulée de la base pendant INSERT raw.fit_file")
+                raise RuntimeError("simulated database failure during INSERT raw.fit_file")
             garmin_activity_id, storage_path, sha256, size_bytes = params
             existing = next((r for r in self._conn.rows if r.sha256 == sha256), None)
             if existing is not None:
@@ -148,7 +148,7 @@ class _FakeCursor:
             )
             return
 
-        raise AssertionError(f"_FakeCursor : requête inattendue -> {normalized}")
+        raise AssertionError(f"_FakeCursor: unexpected query → {normalized}")
 
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._result
@@ -162,7 +162,7 @@ class _FakeCursor:
 
 @dataclass
 class _FakeFitFileDB:
-    """Satisfait ``garminator.garmin.raw_store.DBConnection``, en mémoire."""
+    """Satisfies ``garminator.garmin.raw_store.DBConnection``, in-memory."""
 
     rows: list[_FitFileRow] = field(default_factory=list)
     executed: list[str] = field(default_factory=list)
@@ -177,14 +177,14 @@ class _FakeFitFileDB:
         self.commit_count += 1
 
 
-# Satisfait structurellement raw_store.DBConnection -- vérifié une fois ici plutôt que
-# de laisser mypy le redécouvrir silencieusement à chaque site d'appel.
+# Structurally satisfies raw_store.DBConnection—checked once here rather than let
+# mypy silently rediscover it at each call site.
 def _typecheck_fake_db_is_dbconnection(conn: _FakeFitFileDB) -> _RawStoreDBConnection:
     return conn
 
 
 _WINDOW_DATE = date(2026, 8, 20)
-_TODAY_AFTER_WINDOW = date(2026, 8, 21)  # fenêtre CLOSE : window_date < today
+_TODAY_AFTER_WINDOW = date(2026, 8, 21)  # CLOSED window: window_date < today
 
 
 def test_archive_activity_file_downloads_archives_and_inserts(tmp_path: Path) -> None:
@@ -206,20 +206,20 @@ def test_archive_activity_file_downloads_archives_and_inserts(tmp_path: Path) ->
     assert outcome.storage_path is not None
     assert outcome.storage_path.exists()
     assert outcome.storage_path.read_bytes() == _FAKE_FIT
-    # Arborescence AAAA/MM, activité retrouvable depuis son id sans consulter la base.
+    # YYYY/MM tree structure, activity retrievable from its id without consulting database.
     assert outcome.storage_path.parent == tmp_path / "2026" / "08"
     assert outcome.storage_path.name == f"activity-111-{_stem_suffix(_FAKE_FIT)}.fit"
     assert conn.commit_count == 1
     assert downloader.calls == [("111", _SENTINEL_DL_FMT, None)]
-    # Preuve positive PVC-avant-base : au moment précis où la ligne raw.fit_file a été
-    # insérée (juste après l'INSERT dans notre fake), le fichier existait déjà sur disque.
+    # Positive proof of PVC-before-database: at the exact moment the raw.fit_file row
+    # was inserted (right after the INSERT in our fake), the file already existed on disk.
     insert_index = next(
         i for i, q in enumerate(conn.executed) if q.startswith("INSERT INTO raw.fit_file")
     )
     assert conn.executed[insert_index] is not None
-    assert outcome.storage_path.exists()  # toujours vrai après coup, mais l'ordre est
-    # garanti par construction : archive_activity_file n'appelle insert_fit_file qu'après
-    # le retour de archive_download (voir _archive_and_insert).
+    assert outcome.storage_path.exists()  # always true in hindsight, but order is
+    # guaranteed by construction: archive_activity_file calls insert_fit_file only
+    # after archive_download returns (see _archive_and_insert).
 
 
 def test_archive_activity_file_tcx_content_is_archived(tmp_path: Path) -> None:
@@ -262,7 +262,7 @@ def test_archive_activity_file_zip_wrapped_content_is_extracted_and_archived(
     assert outcome.status == "archived"
     assert outcome.storage_path is not None
     assert outcome.storage_path.suffix == ".fit"
-    # Le ZIP a été désenveloppé : le contenu archivé est celui du membre FIT, pas le ZIP.
+    # The ZIP was unwrapped: the archived content is the FIT member's, not the ZIP.
     assert outcome.storage_path.read_bytes() == _FAKE_FIT
 
 
@@ -284,23 +284,22 @@ def test_archive_activity_file_closed_window_is_idempotent_no_redownload(tmp_pat
         conn,
         activity_id="111",
         window_date=_WINDOW_DATE,
-        today=_TODAY_AFTER_WINDOW,  # fenêtre CLOSE : window_date < today
+        today=_TODAY_AFTER_WINDOW,  # CLOSED window: window_date < today
         archive_root=tmp_path,
         dl_fmt=_SENTINEL_DL_FMT,
     )
 
     assert outcome.status == "already_present"
     assert outcome.fit_file_id == 42
-    assert downloader.calls == []  # AUCUN appel réseau : c'est le point de ce test.
+    assert downloader.calls == []  # NO network calls: that's the point of this test.
 
 
 def test_archive_activity_file_same_day_unchanged_content_is_already_present(
     tmp_path: Path,
 ) -> None:
-    # Fenêtre EN COURS (window_date == today) : le fichier EST retéléchargé, mais son
-    # contenu est identique à la version déjà connue -- pas de nouvelle ligne, pas de
-    # nouveau fichier, mais le réseau a bien été sollicité (contrairement au cas fenêtre
-    # close ci-dessus).
+    # CURRENT window (window_date == today): the file IS re-downloaded, but its content
+    # is identical to the already-known version—no new row, no new file, but the network
+    # was called (unlike the closed-window case above).
     downloader = _FakeDownloader(outcomes={"111": _FAKE_FIT})
     conn = _FakeFitFileDB()
     existing_path = tmp_path / "2026" / "08" / f"activity-111-{_stem_suffix(_FAKE_FIT)}.fit"
@@ -319,7 +318,7 @@ def test_archive_activity_file_same_day_unchanged_content_is_already_present(
         conn,
         activity_id="111",
         window_date=_WINDOW_DATE,
-        today=_WINDOW_DATE,  # fenêtre EN COURS
+        today=_WINDOW_DATE,  # CURRENT window
         archive_root=tmp_path,
         dl_fmt=_SENTINEL_DL_FMT,
     )
@@ -327,17 +326,16 @@ def test_archive_activity_file_same_day_unchanged_content_is_already_present(
     assert outcome.status == "already_present"
     assert outcome.fit_file_id == 42
     assert outcome.storage_path == existing_path
-    assert downloader.calls == [("111", _SENTINEL_DL_FMT, None)]  # le réseau A été appelé
-    assert len(conn.rows) == 1  # mais rien de neuf n'a été inséré
+    assert downloader.calls == [("111", _SENTINEL_DL_FMT, None)]  # network WAS called
+    assert len(conn.rows) == 1  # but nothing new was inserted
 
 
 def test_archive_activity_file_same_day_changed_content_is_refreshed(tmp_path: Path) -> None:
-    # BLOQUANT 1 (revue) : une activité encore en cours d'enregistrement chez Garmin au
-    # premier passage (fichier tronqué) doit être RATTRAPÉE quand la fenêtre est
-    # retraitée le même jour avec un fichier désormais plus complet -- pas verrouillée
-    # à vie sur la version tronquée. Avant la correction, `_existing_fit_file_id`
-    # renvoyait "already_present" dès la première ligne trouvée, sans jamais comparer le
-    # contenu ni retélécharger : ce test aurait échoué sur l'ancienne implémentation.
+    # BLOCKING 1 (review): an activity still uploading on Garmin on first pass (truncated
+    # file) must be CAUGHT UP when the window is re-processed the same day with a now
+    # more complete file—not locked forever on the truncated version. Before the fix,
+    # `_existing_fit_file_id` returned "already_present" on first row found, never
+    # comparing content or re-downloading: this test would have failed on the old version.
     downloader = _FakeDownloader(outcomes={"111": _FAKE_FIT_V2})
     conn = _FakeFitFileDB()
     old_path = tmp_path / "2026" / "08" / f"activity-111-{_stem_suffix(_FAKE_FIT)}.fit"
@@ -352,25 +350,25 @@ def test_archive_activity_file_same_day_changed_content_is_refreshed(tmp_path: P
             size_bytes=len(_FAKE_FIT),
         )
     )
-    conn.next_id = 42  # la ligne pré-existante ci-dessus a été insérée "avant" ce test
+    conn.next_id = 42  # the pre-existing row above was inserted "before" this test
 
     outcome = archive_activity_file(
         downloader,
         conn,
         activity_id="111",
         window_date=_WINDOW_DATE,
-        today=_WINDOW_DATE,  # fenêtre EN COURS : le jour même
+        today=_WINDOW_DATE,  # CURRENT window: same day
         archive_root=tmp_path,
         dl_fmt=_SENTINEL_DL_FMT,
     )
 
     assert outcome.status == "refreshed"
-    assert outcome.fit_file_id == 43  # nouvelle ligne, PAS 42
+    assert outcome.fit_file_id == 43  # new row, NOT 42
     assert outcome.storage_path is not None
-    assert outcome.storage_path != old_path  # nom qualifié par le nouveau contenu
+    assert outcome.storage_path != old_path  # filename qualified by new content
     assert outcome.storage_path.read_bytes() == _FAKE_FIT_V2
-    # L'ANCIEN fichier n'a PAS été écrasé -- il reste lisible et intact à son chemin
-    # d'origine : c'est précisément ce que le nom qualifié par sha256 doit garantir.
+    # The OLD file was NOT overwritten—it stays readable and intact at its original
+    # path: that is exactly what sha256-qualified naming must guarantee.
     assert old_path.exists()
     assert old_path.read_bytes() == _FAKE_FIT
     assert len(conn.rows) == 2
@@ -379,15 +377,15 @@ def test_archive_activity_file_same_day_changed_content_is_refreshed(tmp_path: P
 def test_archive_activity_file_zip_same_day_unchanged_content_is_already_present(
     tmp_path: Path,
 ) -> None:
-    # RÉGRESSION (défaut réel trouvé en revue) : en production Garmin sert une ARCHIVE ZIP,
-    # alors que `raw.fit_file.sha256` porte le sha du membre EXTRAIT. Le court-circuit
-    # "contenu inchangé" hachait l'enveloppe : il ne pouvait donc JAMAIS coïncider, et
-    # chaque activité du jour courant était réarchivée à chaque passage.
+    # REGRESSION (real bug found in review): in production Garmin serves a ZIP ARCHIVE,
+    # while `raw.fit_file.sha256` holds the sha of the EXTRACTED member. The
+    # "unchanged content" shortcut hashed the envelope: it could thus NEVER match, and
+    # every current-day activity was re-archived on every pass.
     #
-    # Le ZIP servi ici porte un NOM DE MEMBRE différent de celui du premier archivage :
-    # ses octets d'enveloppe diffèrent nécessairement, alors que le contenu utile est
-    # identique. Seule une comparaison sur le membre extrait peut conclure.
-    downloader = _FakeDownloader(outcomes={"111": _zip_bytes({"autre-nom.fit": _FAKE_FIT})})
+    # The ZIP served here has a different MEMBER NAME than the first archive: its
+    # envelope bytes necessarily differ, while the useful content is identical. Only
+    # a comparison on the extracted member can conclude.
+    downloader = _FakeDownloader(outcomes={"111": _zip_bytes({"other-name.fit": _FAKE_FIT})})
     conn = _FakeFitFileDB()
     existing_path = tmp_path / "2026" / "08" / f"activity-111-{_stem_suffix(_FAKE_FIT)}.fit"
     conn.rows.append(
@@ -405,20 +403,20 @@ def test_archive_activity_file_zip_same_day_unchanged_content_is_already_present
         conn,
         activity_id="111",
         window_date=_WINDOW_DATE,
-        today=_WINDOW_DATE,  # fenêtre EN COURS : le retéléchargement a bien lieu
+        today=_WINDOW_DATE,  # CURRENT window: re-download does happen
         archive_root=tmp_path,
         dl_fmt=_SENTINEL_DL_FMT,
     )
 
     assert outcome.status == "already_present"
     assert outcome.fit_file_id == 42
-    assert len(conn.rows) == 1  # rien de neuf inséré
-    assert not (tmp_path / "2026").exists()  # et RIEN de neuf écrit sur le PVC
+    assert len(conn.rows) == 1  # nothing new inserted
+    assert not (tmp_path / "2026").exists()  # and NOTHING new written to PVC
 
 
 def test_archive_activity_file_zip_same_day_changed_content_is_refreshed(tmp_path: Path) -> None:
-    # Contrepartie du test précédent : le désenveloppage ne doit pas rendre la comparaison
-    # aveugle aux vrais changements. Contenu réellement différent -> nouvelle version.
+    # Counterpart of previous test: unwrapping must not blind the comparison to real
+    # changes. Truly different content → new version.
     downloader = _FakeDownloader(outcomes={"111": _zip_bytes({"111.fit": _FAKE_FIT_V2})})
     conn = _FakeFitFileDB()
     old_path = tmp_path / "2026" / "08" / f"activity-111-{_stem_suffix(_FAKE_FIT)}.fit"
@@ -451,9 +449,9 @@ def test_archive_activity_file_zip_same_day_changed_content_is_refreshed(tmp_pat
 
 
 def test_archive_activity_file_zip_filename_stem_matches_stored_sha(tmp_path: Path) -> None:
-    # Le sha du NOM de fichier, celui vérifié après relecture, et celui inséré en base
-    # doivent être un seul et même nombre -- sinon un passage ultérieur écrit sur le PVC
-    # un fichier qu'aucune ligne `raw.fit_file` ne référence (orphelin silencieux).
+    # The sha in the FILENAME, the one verified after re-reading, and the one inserted
+    # in the database must be a single number—else a later pass writes a file on PVC
+    # that no `raw.fit_file` row references (silent orphan).
     downloader = _FakeDownloader(outcomes={"333": _zip_bytes({"333.fit": _FAKE_FIT})})
     conn = _FakeFitFileDB()
 
@@ -470,17 +468,17 @@ def test_archive_activity_file_zip_filename_stem_matches_stored_sha(tmp_path: Pa
     assert outcome.status == "archived"
     assert outcome.storage_path is not None
     (row,) = conn.rows
-    assert row.sha256 == hashlib.sha256(_FAKE_FIT).digest()  # le MEMBRE, pas le ZIP
+    assert row.sha256 == hashlib.sha256(_FAKE_FIT).digest()  # the MEMBER, not the ZIP
     assert outcome.storage_path.name == f"activity-333-{_stem_suffix(_FAKE_FIT)}.fit"
-    assert Path(row.storage_path) == outcome.storage_path  # aucun orphelin possible
+    assert Path(row.storage_path) == outcome.storage_path  # no orphan possible
 
 
 def test_archive_activity_file_invalid_zip_is_failed_and_counted(tmp_path: Path) -> None:
-    # L'extraction est la seule étape que `download_original` ne compte pas lui-même :
-    # son échec doit incrémenter le tracker (et ne rien laisser sur le PVC).
+    # Extraction is the only step that `download_original` does not count itself:
+    # its failure must increment the tracker (and leave nothing on PVC).
     downloader = _FakeDownloader(outcomes={"111": b"PK pas vraiment un zip"})
     conn = _FakeFitFileDB()
-    run_conn = _FakeFitFileDB()  # IngestRunTracker exige un DBConnection, non utilisé ici
+    run_conn = _FakeFitFileDB()  # IngestRunTracker requires a DBConnection, unused here
     tracker = IngestRunTracker(conn=run_conn, ingest_run_id=1)
 
     outcome = archive_activity_file(
@@ -501,7 +499,7 @@ def test_archive_activity_file_invalid_zip_is_failed_and_counted(tmp_path: Path)
 
 
 def test_pvc_before_db_download_failure_writes_nothing(tmp_path: Path) -> None:
-    downloader = _FakeDownloader(outcomes={"111": RuntimeError("429 simulé")})
+    downloader = _FakeDownloader(outcomes={"111": RuntimeError("simulated 429")})
     conn = _FakeFitFileDB()
 
     outcome = archive_activity_file(
@@ -515,9 +513,9 @@ def test_pvc_before_db_download_failure_writes_nothing(tmp_path: Path) -> None:
     )
 
     assert outcome.status == "failed"
-    assert outcome.error is not None and "429 simulé" in outcome.error
+    assert outcome.error is not None and "simulated 429" in outcome.error
     assert conn.rows == []
-    assert not (tmp_path / "2026").exists()  # rien n'a jamais atteint le PVC
+    assert not (tmp_path / "2026").exists()  # nothing ever reached PVC
 
 
 def test_pvc_before_db_archive_failure_writes_no_db_row(tmp_path: Path) -> None:
@@ -537,15 +535,15 @@ def test_pvc_before_db_archive_failure_writes_no_db_row(tmp_path: Path) -> None:
     assert outcome.status == "failed"
     assert conn.rows == []
     assert not any(q.startswith("INSERT INTO raw.fit_file") for q in conn.executed)
-    # Aucun fichier -- ni final, ni temporaire -- ne doit avoir été laissé.
+    # No file—neither final nor temporary—should have been left.
     dest_dir = tmp_path / "2026" / "08"
     assert not dest_dir.exists() or list(dest_dir.iterdir()) == []
 
 
 def test_pvc_before_db_insert_failure_leaves_orphan_file_on_disk(tmp_path: Path) -> None:
-    # Coeur de l'invariant du lot : un échec d'écriture EN BASE, survenant APRÈS un
-    # archivage réussi, ne doit jamais faire disparaître le fichier déjà écrit et
-    # vérifié sur le PVC -- il devient un orphelin récupérable, jamais une perte.
+    # Heart of the batch invariant: a database WRITE failure, occurring AFTER successful
+    # archiving, must never make a file already written and verified on PVC disappear—
+    # it becomes a recoverable orphan, never a loss.
     downloader = _FakeDownloader(outcomes={"111": _FAKE_FIT})
     conn = _FakeFitFileDB(fail_insert=True)
 
@@ -567,10 +565,10 @@ def test_pvc_before_db_insert_failure_leaves_orphan_file_on_disk(tmp_path: Path)
 
 
 def test_orphan_file_is_recovered_on_second_pass(tmp_path: Path) -> None:
-    # Suite directe du test précédent : une fois la panne base résolue, un second passage
-    # sur la MÊME activité doit retélécharger (aucune ligne en base encore), retomber sur
-    # le même contenu déjà présent sur le PVC (même sha256, donc même chemin), et cette
-    # fois insérer la ligne avec succès -- sans jamais dupliquer ni corrompre le fichier.
+    # Direct continuation of the previous test: once the database failure is resolved, a
+    # second pass on the SAME activity must re-download (no row in database yet), land on
+    # the same content already on PVC (same sha256, so same path), and this time insert
+    # the row successfully—without ever duplicating or corrupting the file.
     downloader = _FakeDownloader(outcomes={"111": _FAKE_FIT})
     conn = _FakeFitFileDB(fail_insert=True)
     first = archive_activity_file(
@@ -585,7 +583,7 @@ def test_orphan_file_is_recovered_on_second_pass(tmp_path: Path) -> None:
     assert first.status == "failed"
     assert conn.rows == []
 
-    conn.fail_insert = False  # la panne base est résolue avant le passage suivant
+    conn.fail_insert = False  # database failure is resolved before the next pass
     second = archive_activity_file(
         downloader,
         conn,
@@ -607,10 +605,10 @@ def test_orphan_file_is_recovered_on_second_pass(tmp_path: Path) -> None:
 
 
 def test_duplicate_content_across_activities_does_not_misattribute(tmp_path: Path) -> None:
-    # BLOQUANT 2 (revue), vu depuis activity_files.py : scénario multisport/brick où deux
-    # garmin_activity_id distincts servent EXACTEMENT le même contenu original. L'activité
-    # perdante ne doit ni se voir attribuer silencieusement le fit_file_id de l'autre, ni
-    # planter tout le traitement du jour -- elle obtient un statut dédié, explicite.
+    # BLOCKING 2 (review), seen from activity_files.py: multisport/brick scenario where
+    # two distinct garmin_activity_ids serve EXACTLY the same original content. The
+    # losing activity must neither be silently assigned the other's fit_file_id nor break
+    # all day processing—it gets a dedicated, explicit status.
     downloader = _FakeDownloader(outcomes={"111": _FAKE_FIT, "222": _FAKE_FIT})
     conn = _FakeFitFileDB()
 
@@ -637,17 +635,17 @@ def test_duplicate_content_across_activities_does_not_misattribute(tmp_path: Pat
     assert second.status == "duplicate_content"
     assert second.fit_file_id is None
     assert second.error is not None and "111" in second.error
-    # La ligne raw.fit_file reste attribuée à l'activité gagnante, jamais réattribuée.
+    # The raw.fit_file row stays attributed to the winning activity, never re-attributed.
     assert len(conn.rows) == 1
     assert conn.rows[0].garmin_activity_id == 111
 
 
 def test_authentication_error_propagates_uncaught_single_activity(tmp_path: Path) -> None:
-    # IMPORTANT 1 (revue) : une authentification refusée ne doit jamais être ravalée
-    # derrière un statut "failed" -- la propager est ce qui évite qu'un appelant en
-    # boucle sur des dizaines d'activités ne réessaie autant de fois, schéma qui fait
-    # bloquer un compte Garmin sans 2FA.
-    downloader = _FakeDownloader(outcomes={"111": GarminConnectAuthenticationError("refusé")})
+    # IMPORTANT 1 (review): a denied auth must never be swallowed
+    # behind a "failed" status—propagating it prevents a caller looping over dozens of
+    # activities from retrying that many times, a pattern that locks a Garmin account
+    # without 2FA.
+    downloader = _FakeDownloader(outcomes={"111": GarminConnectAuthenticationError("denied")})
     conn = _FakeFitFileDB()
 
     with pytest.raises(GarminConnectAuthenticationError):
@@ -664,11 +662,11 @@ def test_authentication_error_propagates_uncaught_single_activity(tmp_path: Path
 
 
 def test_authentication_error_propagates_uncaught_through_day_loop(tmp_path: Path) -> None:
-    # Même exigence, mais au niveau de archive_activities_for_day : le filet défensif
-    # "except Exception" de la boucle ne doit PAS ravaler ce que
-    # archive_activity_file a délibérément laissé remonter.
+    # Same requirement, but at the archive_activities_for_day level: the defensive
+    # "except Exception" catch in the loop must NOT swallow what
+    # archive_activity_file deliberately let bubble up.
     downloader = _FakeDownloader(
-        outcomes={"111": _FAKE_FIT, "222": GarminConnectAuthenticationError("refusé")}
+        outcomes={"111": _FAKE_FIT, "222": GarminConnectAuthenticationError("denied")}
     )
     conn = _FakeFitFileDB()
 
@@ -682,19 +680,18 @@ def test_authentication_error_propagates_uncaught_through_day_loop(tmp_path: Pat
             archive_root=tmp_path,
             dl_fmt=_SENTINEL_DL_FMT,
         )
-    # La première activité, traitée avant l'échec d'authentification, a bien été
-    # archivée : l'interruption survient au moment de l'erreur, pas avant.
+    # The first activity, processed before the auth failure, was indeed archived:
+    # interruption happens at the error moment, not before.
     assert len(conn.rows) == 1
 
 
 def test_tracker_records_error_on_archive_stage_failure(tmp_path: Path) -> None:
-    # IMPORTANT 2 (revue) : sans ceci, un run entièrement en échec au stade archivage/
-    # insertion se clôturerait quand même "ok" (ingest_run.status), car
-    # IngestRunTracker.errors ne compterait que les échecs réseau déjà comptés par
-    # download_original lui-même.
+    # IMPORTANT 2 (review): without this, a run entirely failed at archive/insert stage
+    # would still close "ok" (ingest_run.status), since IngestRunTracker.errors would
+    # only count network failures already counted by download_original itself.
     downloader = _FakeDownloader(outcomes={"111": _GARBAGE})
     conn = _FakeFitFileDB()
-    run_conn = _FakeFitFileDB()  # IngestRunTracker exige un DBConnection, non utilisé ici
+    run_conn = _FakeFitFileDB()  # IngestRunTracker requires a DBConnection, unused here
     tracker = IngestRunTracker(conn=run_conn, ingest_run_id=1)
 
     outcome = archive_activity_file(
@@ -761,14 +758,14 @@ def test_tracker_records_error_on_duplicate_content(tmp_path: Path) -> None:
     )
 
     assert outcome.status == "duplicate_content"
-    assert tracker.errors == 1  # seul l'échec de "222" compte -- "111" a réussi
+    assert tracker.errors == 1  # only "222"'s failure counts—"111" succeeded
 
 
 def test_archive_activities_for_day_isolates_failures(tmp_path: Path) -> None:
     downloader = _FakeDownloader(
         outcomes={
             "111": _FAKE_FIT,
-            "222": RuntimeError("panne réseau simulée"),
+            "222": RuntimeError("simulated network failure"),
             "333": _FAKE_FIT_V2,
         }
     )
@@ -790,10 +787,10 @@ def test_archive_activities_for_day_isolates_failures(tmp_path: Path) -> None:
     assert summary.refreshed == []
     assert summary.duplicate_content == []
     assert len(summary.outcomes) == 3
-    # Le journal opérateur mentionne bien les trois activités, succès et échec.
+    # Operator log mentions all three activities, success and failure.
     log_lines = summary.as_log_lines()
     assert len(log_lines) == 3
-    assert "ÉCHEC" in log_lines[1]
+    assert "FAILED" in log_lines[1]
     assert "222" in log_lines[1]
 
 
@@ -815,7 +812,7 @@ def test_archive_activities_for_day_populates_already_present(tmp_path: Path) ->
         conn,
         activity_ids=["111"],
         window_date=_WINDOW_DATE,
-        today=_TODAY_AFTER_WINDOW,  # fenêtre close : idempotence stricte, sans réseau
+        today=_TODAY_AFTER_WINDOW,  # closed window: strict idempotence, no network
         archive_root=tmp_path,
         dl_fmt=_SENTINEL_DL_FMT,
     )
@@ -833,14 +830,14 @@ def test_as_log_line_content_for_each_status() -> None:
         activity_id="4", status="refreshed", fit_file_id=10, storage_path=Path("/x/4.fit")
     )
     present = ActivityFileOutcome(activity_id="2", status="already_present", fit_file_id=3)
-    duplicate = ActivityFileOutcome(activity_id="5", status="duplicate_content", error="doublon")
-    failed = ActivityFileOutcome(activity_id="3", status="failed", error="boum")
+    duplicate = ActivityFileOutcome(activity_id="5", status="duplicate_content", error="duplicate")
+    failed = ActivityFileOutcome(activity_id="3", status="failed", error="boom")
 
-    assert "archivée" in archived.as_log_line()
-    assert "mise à jour" in refreshed.as_log_line()
-    assert "déjà archivée" in present.as_log_line()
-    assert "DUPLIQUÉ" in duplicate.as_log_line() and "doublon" in duplicate.as_log_line()
-    assert "ÉCHEC" in failed.as_log_line() and "boum" in failed.as_log_line()
+    assert "archived" in archived.as_log_line()
+    assert "updated" in refreshed.as_log_line()
+    assert "already archived" in present.as_log_line()
+    assert "DUPLICATE CONTENT" in duplicate.as_log_line() and "duplicate" in duplicate.as_log_line()
+    assert "FAILED" in failed.as_log_line() and "boom" in failed.as_log_line()
 
 
 def test_dest_dir_organized_by_year_month_from_window_date(tmp_path: Path) -> None:
@@ -862,9 +859,9 @@ def test_dest_dir_organized_by_year_month_from_window_date(tmp_path: Path) -> No
 
 
 def test_malformed_activity_id_fails_cleanly_without_raising(tmp_path: Path) -> None:
-    # IMPORTANT 3 (revue) : la conversion int(activity_id) est protégée UNE fois, en tête
-    # de archive_activity_file -- elle ne doit jamais lever hors de cette fonction, même
-    # appelée directement (pas seulement via archive_activities_for_day).
+    # IMPORTANT 3 (review): the int(activity_id) conversion is guarded ONCE, at the
+    # head of archive_activity_file—it must never raise outside this function, even
+    # called directly (not only via archive_activities_for_day).
     downloader = _FakeDownloader(outcomes={})
     conn = _FakeFitFileDB()
 
@@ -879,12 +876,12 @@ def test_malformed_activity_id_fails_cleanly_without_raising(tmp_path: Path) -> 
     )
 
     assert outcome.status == "failed"
-    assert downloader.calls == []  # jamais atteint le réseau
+    assert downloader.calls == []  # never reached network
 
 
 def test_unexpected_exception_in_activity_id_is_isolated(tmp_path: Path) -> None:
-    # "abc" n'est pas convertible en int : capturé proprement (voir test ci-dessus).
-    # archive_activities_for_day doit malgré tout continuer sur les activités suivantes.
+    # "abc" is not convertible to int: captured cleanly (see test above).
+    # archive_activities_for_day must nonetheless continue to the following activities.
     downloader = _FakeDownloader(outcomes={"999": _FAKE_FIT})
     conn = _FakeFitFileDB()
 

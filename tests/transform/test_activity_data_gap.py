@@ -1,8 +1,8 @@
-"""Trou de capteur de puissance : vérifie ``imputed_seconds``/``excised_seconds``/
-``data_quality`` (dérivés du seul canal puissance, cf. docstring de
-``core.activity.imputed_seconds`` dans migrations/004) et que les moyennes brutes
-(``avg_power``/``avg_power_nonzero``/``max_power``) restent calculées sur la série NON
-imputée, pour ne pas polluer le diagnostic roue-libre-vs-perte-capteur."""
+"""Power sensor gap: verifies ``imputed_seconds``/``excised_seconds``/``data_quality``
+(derived from power channel only, see ``core.activity.imputed_seconds`` docstring in
+migrations/004) and that raw averages (``avg_power``/``avg_power_nonzero``/``max_power``)
+remain calculated on the NON-imputed series, to avoid polluting the coasting-vs-sensor-loss
+diagnosis."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .conftest import (
     parsed_source,
 )
 
-_GAP_S = 40  # > max_interp_gap_s (3 s) -> imputation à 0, jamais une interpolation.
+_GAP_S = 40  # > max_interp_gap_s (3 s) -> impute to 0, never interpolate.
 
 
 def _bundle_with_gap() -> CoreActivityBundle:
@@ -41,33 +41,33 @@ def _bundle_with_gap() -> CoreActivityBundle:
     )
 
 
-class TestTrouDeCapteurPuissance:
-    def test_imputed_seconds_reflete_exactement_le_trou(self) -> None:
+class TestPowerSensorGap:
+    def test_imputed_seconds_reflects_exactly_the_gap(self) -> None:
         bundle = _bundle_with_gap()
         assert bundle.activity.imputed_seconds == _GAP_S
-        assert bundle.activity.excised_seconds == 0  # aucune pause déclarée par l'appelant.
+        assert bundle.activity.excised_seconds == 0  # no pause declared by caller.
 
-    def test_data_quality_degradee_a_poor_au_dela_de_10_pour_cent_impute(self) -> None:
+    def test_data_quality_degraded_to_poor_beyond_10_percent_imputed(self) -> None:
         bundle = _bundle_with_gap()
-        # 40 s imputées sur 60 s totales (10 + 40 + 10) = 66 % > seuil de 10 %.
+        # 40 s imputed out of 60 s total (10 + 40 + 10) = 66% > 10% threshold.
         assert bundle.activity.data_quality == "poor"
 
-    def test_moyennes_brutes_ignorent_les_secondes_imputees(self) -> None:
+    def test_raw_averages_ignore_imputed_seconds(self) -> None:
         bundle = _bundle_with_gap()
-        # Les 20 échantillons réels valent tous 200 W : la moyenne brute ne doit PAS
-        # être tirée vers le bas par les 40 s à 0 W injectées pour la régularisation.
+        # All 20 real samples are 200 W: raw average must NOT be pulled down
+        # by the 40 s at 0 W injected for regularization.
         assert bundle.activity.avg_power == 200.0
         assert bundle.activity.avg_power_nonzero == 200.0
         assert bundle.activity.max_power == 200.0
 
-    def test_np_watts_calcule_sur_la_serie_regularisee_donc_impactee_par_le_trou(self) -> None:
+    def test_np_watts_calculated_on_regularized_series_thus_impacted_by_gap(self) -> None:
         bundle = _bundle_with_gap()
-        # Contraste volontaire avec le test précédent : NP, lui, DOIT refléter le trou
-        # (c'est le canal régularisé qui alimente NP, par construction du lot L4).
+        # Intentional contrast with the prior test: NP MUST reflect the gap
+        # (it's the regularized channel that feeds NP, by batch L4 design).
         assert bundle.activity.np_watts is not None
         assert bundle.activity.np_watts < 200.0
 
-    def test_np_reliable_faux_sous_le_seuil_de_fiabilite_mais_pas_none(self) -> None:
+    def test_np_reliable_false_below_reliability_threshold_but_not_none(self) -> None:
         bundle = _bundle_with_gap()
-        # 60 s de série régularisée : >= window_s (30) mais < RELIABLE_THRESHOLD_S (300).
+        # 60 s of regularized series: >= window_s (30) but < RELIABLE_THRESHOLD_S (300).
         assert bundle.activity.np_reliable is False

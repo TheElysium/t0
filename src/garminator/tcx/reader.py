@@ -1,15 +1,13 @@
-"""Decodage d'un fichier TCX vers la structure intermediaire commune.
+"""Decode TCX file to shared intermediate structure.
 
-Seul module de ``garminator.tcx`` qui touche des octets/XML brut : mapping et
-modele travaillent sur des dictionnaires deja extraits. Meme frontiere que
-``garminator.fit.reader``.
+Only module in ``garminator.tcx`` touching raw bytes/XML: mapping and model work
+on extracted dicts. Same boundary as ``garminator.fit.reader``.
 
-Durcissement XML (decision discutable, voir rapport de fin de lot) : le projet
-n'a pas ``defusedxml`` en dependance (hors perimetre de ce lot d'y toucher).
-Ce module durcit donc ``xml.etree.ElementTree`` a la main via des callbacks
-expat qui refusent toute DOCTYPE et toute declaration d'entite -- protection
-contre les attaques XXE / bombe d'entites sur un fichier externe (le TCX est
-un import manuel de l'athlete, donc un contenu potentiellement non fiable).
+XML hardening (design choice, see batch end report): project has no ``defusedxml``
+dependency (out of scope to add). This module hardens ``xml.etree.ElementTree``
+manually via expat callbacks that reject all DOCTYPE and entity declarations—
+protection against XXE and entity bomb attacks on external file (TCX is manual
+athlete import, potentially untrusted content).
 """
 
 from __future__ import annotations
@@ -31,31 +29,28 @@ _NS = {"tcd": TCD_NAMESPACE, "tpx": TPX_NAMESPACE}
 
 def _reject(*_args: object, **_kwargs: object) -> None:
     raise TcxParseError(
-        "DOCTYPE ou declaration d'entite XML refusee (protection anti-XXE) : " "fichier TCX rejete."
+        "DOCTYPE or XML entity declaration refused (XXE protection): TCX file rejected."
     )
 
 
 def _parse_xml_secure(data: bytes) -> ET.Element:
-    """Parse le XML en refusant toute DOCTYPE/entite externe (durcissement anti-XXE).
+    """Parse XML rejecting all DOCTYPE/external entities (XXE hardening).
 
-    ``defusedxml`` n'est pas une dependance du projet (hors perimetre de ce lot
-    de modifier ``pyproject.toml`` -- voir rapport final). A defaut, on
-    reproduit sa protection minimale a la main via ``xml.parsers.expat``
-    directement : ``ET.XMLParser().parser`` n'expose plus le parseur expat
-    sous-jacent dans cet environnement (verifie : ``dir(ET.XMLParser())`` ne
-    contient pas ``parser``), donc on pilote ``xml.parsers.expat.ParserCreate()``
-    a la main, avec un ``ET.TreeBuilder`` comme cible, plutot que de passer par
-    le wrapper ``ET.XMLParser``. Toute declaration de DOCTYPE ou d'entite fait
-    lever :class:`TcxParseError` avant qu'elle ne soit resolue, ce qui
-    neutralise a la fois l'expansion d'entites recursive (bombe) et la lecture
-    de ressource externe (XXE).
+    ``defusedxml`` not a project dependency (out of scope to modify ``pyproject.toml``
+    — see final report). Instead, minimal protection reproduced manually via
+    ``xml.parsers.expat`` directly: ``ET.XMLParser().parser`` no longer exposes
+    underlying expat parser in this environment (verified: ``dir(ET.XMLParser())``
+    has no ``parser``), so we drive ``xml.parsers.expat.ParserCreate()`` manually
+    with ``ET.TreeBuilder`` target, rather than wrapper ``ET.XMLParser``. Any
+    DOCTYPE or entity declaration raises :class:`TcxParseError` before resolution,
+    neutralizing both recursive entity expansion (bomb) and external resource read
+    (XXE).
     """
     target = ET.TreeBuilder()
-    # Separateur "}" + _fixname : reproduit exactement le comportement de
-    # ET.XMLParser (cf. xml.etree.ElementTree.XMLParser.__init__/_fixname)
-    # pour que les tags rendus au TreeBuilder restent en notation Clark
-    # ("{namespace}tag"), condition necessaire pour que ``root.findall``
-    # avec ``_NS`` continue de fonctionner comme avant.
+    # Separator "}" + _fixname: exactly reproduces ET.XMLParser behavior
+    # (cf. xml.etree.ElementTree.XMLParser.__init__/_fixname) so tags passed to
+    # TreeBuilder stay in Clark notation ("{namespace}tag"), required for
+    # ``root.findall`` with ``_NS`` to keep working.
     expat_parser = xml.parsers.expat.ParserCreate(None, "}")
     names: dict[str, str] = {}
 
@@ -74,10 +69,10 @@ def _parse_xml_secure(data: bytes) -> ET.Element:
     def _end(tag: str) -> None:
         target.end(_fixname(tag))
 
-    # Les callbacks expat ont chacun une signature differente (DOCTYPE, entite interne,
-    # entite non analysee, reference externe) ; `_reject` les couvre toutes via
-    # *args/**kwargs (elle leve avant meme de regarder ses arguments). Seul le stub de
-    # `ExternalEntityRefHandler` impose une signature stricte incompatible avec mypy.
+    # Expat callbacks each have different signatures (DOCTYPE, internal entity,
+    # unparsed entity, external reference); `_reject` covers all via *args/**kwargs
+    # (raises before even inspecting arguments). Only `ExternalEntityRefHandler` stub
+    # has strict signature incompatible with mypy.
     expat_parser.StartDoctypeDeclHandler = _reject
     expat_parser.EntityDeclHandler = _reject
     expat_parser.UnparsedEntityDeclHandler = _reject
@@ -92,11 +87,11 @@ def _parse_xml_secure(data: bytes) -> ET.Element:
     except TcxParseError:
         raise
     except xml.parsers.expat.ExpatError as exc:
-        raise TcxParseError(f"XML TCX malforme : {exc}") from exc
+        raise TcxParseError(f"Malformed TCX XML: {exc}") from exc
 
     root = target.close()
     if root is None:
-        raise TcxParseError("XML TCX vide ou sans element racine.")
+        raise TcxParseError("TCX XML empty or missing root element.")
     return root
 
 
@@ -117,12 +112,11 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 def _extract_trackpoint(tp: ET.Element) -> dict[str, Any]:
-    """Extrait un ``Trackpoint`` XML vers un dict a cles normalisees.
+    """Extract XML Trackpoint to dict with normalized keys.
 
-    Ne remplit que ce que le fichier contient reellement : structure mesuree
-    sur ``bike.tcx`` (addendum), seuls Time/Cadence/Watts sont presents, mais
-    ce lecteur reste generique pour les futurs TCX qui porteraient FC,
-    distance, altitude ou position.
+    Only fills what file actually contains: structure measured on ``bike.tcx``
+    (addendum)—only Time/Cadence/Watts present, but reader stays generic for
+    future TCX files carrying heart rate, distance, altitude, or position.
     """
     point: dict[str, Any] = {"time": _parse_time(_text(tp, "tcd:Time"))}
 
@@ -145,9 +139,8 @@ def _extract_trackpoint(tp: ET.Element) -> dict[str, Any]:
     if lon is not None:
         point["longitude_degrees"] = lon
 
-    # Cadence : soit directement sous Trackpoint (velo, TCD standard), soit
-    # sous Extensions/TPX (variante Garmin) -- la premiere source presente
-    # l'emporte.
+    # Cadence: either directly under Trackpoint (bike, standard TCD) or under
+    # Extensions/TPX (Garmin variant)—first present source wins.
     cadence = _text(tp, "tcd:Cadence")
     if cadence is None:
         cadence = _text(tp, "tcd:Extensions/tpx:TPX/tpx:Cadence")
@@ -162,23 +155,28 @@ def _extract_trackpoint(tp: ET.Element) -> dict[str, Any]:
 
 
 def decode_tcx(data: bytes, *, activity_id: int) -> ParsedActivitySource:
-    """Decode un fichier TCX (contenu deja lu en memoire) en :class:`ParsedActivitySource`.
+    """Decode TCX file (content already in memory) to :class:`ParsedActivitySource`.
 
-    Le TCX n'a pas de message ``session`` (addendum SS2.2) : ``session`` vaut
-    toujours ``None`` en sortie, et les tours/longueurs restent des listes
-    vides -- rien n'est invente pour combler l'absence de resume natif.
+    TCX has no ``session`` message (addendum §2.2): ``session`` always ``None``
+    on output, and laps/lengths stay empty lists—nothing invented to fill native
+    summary absence.
 
     Raises:
-        TcxParseError: XML malforme, DOCTYPE/entite refusee, ou aucun
-            trackpoint exploitable (sans ``Time``) dans le fichier.
+        TcxParseError: Malformed XML, DOCTYPE/entity rejected, or no usable
+            trackpoint (with ``Time``) in file.
     """
     root = _parse_xml_secure(data)
+    # `.//tcd:Activity` rather than a fixed `Activities/Activity` path: tolerates the
+    # same structural variation `.//tcd:Trackpoint` below already tolerates, for one
+    # attribute read rather than a whole new traversal.
+    activity_element = root.find(".//tcd:Activity", _NS)
+    tcx_sport = activity_element.get("Sport") if activity_element is not None else None
     trackpoints = root.findall(".//tcd:Trackpoint", _NS)
 
     points = [_extract_trackpoint(tp) for tp in trackpoints]
     points_with_time = [p for p in points if p.get("time") is not None]
     if trackpoints and not points_with_time:
-        raise TcxParseError("Aucun Trackpoint TCX avec Time exploitable : fichier rejete.")
+        raise TcxParseError("No usable TCX Trackpoint with Time: file rejected.")
 
     start_time = points_with_time[0]["time"] if points_with_time else None
 
@@ -198,9 +196,10 @@ def decode_tcx(data: bytes, *, activity_id: int) -> ParsedActivitySource:
         swim_lengths=[],
         session=None,
         start_time=start_time,
+        tcx_sport=tcx_sport,
     )
 
 
 def decode_tcx_file(path: Path, *, activity_id: int) -> ParsedActivitySource:
-    """Variante de :func:`decode_tcx` qui lit le fichier depuis le disque."""
+    """Variant of :func:`decode_tcx` that reads the file from disk."""
     return decode_tcx(path.read_bytes(), activity_id=activity_id)

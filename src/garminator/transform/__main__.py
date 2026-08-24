@@ -1,28 +1,27 @@
-"""CLI de transformation : ``python -m garminator.transform [--limit N] [--retry-failed]``.
+"""Transform CLI: ``python -m garminator.transform [--limit N] [--retry-failed]``.
 
-Même patron que :mod:`garminator.ops.__main__` et :mod:`garminator.db.__main__` : un
-``argparse`` sans dépendance, un DSN résolu par ``--dsn`` OU la variable
-d'environnement ``GARMINATOR_POSTGRES_DSN``, et ``configure_logging()`` en toute
-première instruction pour que même une erreur de configuration soit horodatée.
+Same pattern as :mod:`garminator.ops.__main__` and :mod:`garminator.db.__main__`: a
+dependency-free ``argparse``, a DSN resolved from ``--dsn`` OR the
+``GARMINATOR_POSTGRES_DSN`` environment variable, and ``configure_logging()`` as the
+very first statement so that even a configuration error is timestamped.
 
-Rappel sur ``--dsn``, identique à celui d'``ops`` : un DSN passé en argument apparaît en
-clair dans la liste des processus, mot de passe compris. Les manifests injectent donc la
-variable d'environnement depuis un ``secretKeyRef`` ; ``--dsn`` n'est là que pour un
-usage interactif sur le poste de l'opérateur.
+Same ``--dsn`` caveat as in ``ops``: a DSN passed as an argument shows up in clear text
+in the process list, password included. Manifests therefore inject the environment
+variable from a ``secretKeyRef``; ``--dsn`` exists only for interactive use on the
+operator's machine.
 
-CODES DE SORTIE, ET POURQUOI CE DÉCOUPAGE.
+EXIT CODES, AND WHY THEY ARE SPLIT THIS WAY.
 
-- ``0`` : passage nominal, y compris avec des fichiers REPORTÉS. Un fichier dont le
-  résumé Garmin n'est pas encore ingéré est un état transitoire attendu ; le compter
-  comme un échec ferait échouer le CronJob presque chaque nuit, et un CronJob qui échoue
-  toutes les nuits est un CronJob qu'on cesse de regarder.
-- ``1`` : au moins un fichier en échec. L'incident est déjà consigné dans
-  ``raw.fit_file.parse_error`` et le code de sortie sert uniquement à le rendre visible
-  sans lire les logs.
-- ``2`` : le passage n'a pas pu commencer (DSN absent, base injoignable,
-  ``core.athlete`` non peuplée ou ambiguë).
-  Distinct de ``1`` parce que rien n'a été tenté : c'est une erreur de configuration, pas
-  une donnée fautive.
+- ``0``: nominal pass, including DEFERRED files. A file whose Garmin summary is not
+  ingested yet is an expected transient state; counting it as a failure would fail the
+  CronJob almost every night, and a CronJob that fails every night is a CronJob nobody
+  looks at any more.
+- ``1``: at least one file failed. The incident is already recorded in
+  ``raw.fit_file.parse_error``; the exit code only makes it visible without reading the
+  logs.
+- ``2``: the pass could not start (missing DSN, unreachable database, ``core.athlete``
+  empty or ambiguous). Distinct from ``1`` because nothing was attempted: this is a
+  configuration error, not bad data.
 """
 
 from __future__ import annotations
@@ -42,8 +41,8 @@ from garminator.transform.runner import (
 )
 
 if TYPE_CHECKING:
-    # Importé pour le seul `cast` ci-dessous : `DBConnection` est un protocole, il n'a
-    # aucune existence à l'exécution.
+    # Imported solely for the `cast` below: `DBConnection` is a protocol with no
+    # runtime existence.
     from garminator.transform.runner import DBConnection
 
 
@@ -51,17 +50,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m garminator.transform",
         description=(
-            "Transforme les fichiers .FIT/.TCX archivés et non encore parsés "
-            "(raw.fit_file) en lignes core.* exploitables par les vues mart et Grafana."
+            "Transform archived, not-yet-parsed .FIT/.TCX files (raw.fit_file) into "
+            "core.* rows usable by the mart views and Grafana."
         ),
     )
     parser.add_argument(
         "--dsn",
         default=None,
         help=(
-            "DSN PostgreSQL. À défaut, lu depuis GARMINATOR_POSTGRES_DSN. Préférez la "
-            "variable d'environnement : un DSN passé ici apparaît en clair dans la "
-            "liste des processus."
+            "PostgreSQL DSN. Otherwise read from GARMINATOR_POSTGRES_DSN. Prefer the "
+            "environment variable: a DSN passed here shows up in clear text in the "
+            "process list."
         ),
     )
     parser.add_argument(
@@ -69,9 +68,9 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_BATCH_LIMIT,
         help=(
-            f"Nombre maximal de fichiers traités par passage (défaut {DEFAULT_BATCH_LIMIT}). "
-            "Plusieurs passages courts valent mieux qu'un long qu'une éviction de pod "
-            "ramènerait à zéro."
+            f"Maximum number of files handled per pass (default {DEFAULT_BATCH_LIMIT}). "
+            "Several short passes beat one long pass that a pod eviction would reset to "
+            "zero."
         ),
     )
     parser.add_argument(
@@ -79,18 +78,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Athlète auquel rattacher les activités. À défaut, l'unique ligne de "
-            "core.athlete ; si la table est vide ou en contient plusieurs, le passage "
-            "s'arrête plutôt que de deviner."
+            "Athlete the activities are attached to. Otherwise the single core.athlete "
+            "row; if the table is empty or holds several, the pass stops rather than "
+            "guessing."
         ),
     )
     parser.add_argument(
         "--retry-failed",
         action="store_true",
         help=(
-            "Rejoue aussi les fichiers portant déjà un parse_error. À n'utiliser "
-            "qu'APRÈS avoir corrigé la cause (correspondance de sport manquante, "
-            "décodeur bugué) : sans cela ils échoueraient à l'identique."
+            "Also replay files that already carry a parse_error. Use only AFTER fixing "
+            "the cause (missing sport mapping, buggy decoder): otherwise they fail "
+            "identically."
         ),
     )
     return parser
@@ -102,36 +101,35 @@ def main(argv: list[str] | None = None) -> int:
     try:
         dsn = resolve_dsn(args.dsn)
     except MigrationError as exc:
-        print(f"Erreur : {exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
 
     try:
         conn = connect(dsn)
     except psycopg.OperationalError as exc:
-        # Base injoignable (redemarrage, PVC pas encore monte, mot de passe tourne).
-        # Sans cette capture l'exception remonte et Python sort en 1, que l'exploitant
-        # lit comme "un fichier a echoue" -- il chercherait un fichier fautif qui
-        # n'existe pas, alors qu'aucun fichier n'a ete touche.
-        print(f"Erreur : connexion a PostgreSQL impossible -- {exc}", file=sys.stderr)
+        # Database unreachable (restart, PVC not mounted yet, password rotated).
+        # Without this catch the exception propagates and Python exits 1, which the
+        # operator reads as "a file failed" -- they would hunt for a faulty file that
+        # does not exist, when in fact no file was touched at all.
+        print(f"Error: cannot connect to PostgreSQL -- {exc}", file=sys.stderr)
         return 2
 
     try:
         try:
             report = transform_pending_files(
-                # Protocole structurel volontairement minimal, fait pour injecter une
-                # doublure en test. Une vraie `psycopg.Connection` le satisfait à
-                # l'exécution, mais mypy refuse de rapprocher sa méthode `cursor`
-                # SURCHARGÉE d'un protocole qui ne l'est pas ; élargir le protocole
-                # reviendrait à y recopier les surcharges de psycopg, ce qui lui ferait
-                # perdre sa raison d'être.
+                # Deliberately minimal structural protocol, meant to let tests inject a
+                # double. A real `psycopg.Connection` satisfies it at runtime, but mypy
+                # refuses to match its OVERLOADED `cursor` method against a protocol that
+                # is not; widening the protocol would mean copying psycopg's overloads
+                # into it, defeating its purpose.
                 cast("DBConnection", conn),
                 athlete_id=args.athlete_id,
                 limit=args.limit,
                 retry_failed=args.retry_failed,
             )
         except ValueError as exc:
-            # Typiquement core.athlete vide ou ambiguë : rien n'a été tenté.
-            print(f"Erreur : {exc}", file=sys.stderr)
+            # Typically core.athlete empty or ambiguous: nothing was attempted.
+            print(f"Error: {exc}", file=sys.stderr)
             return 2
     finally:
         conn.close()
@@ -140,5 +138,5 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if report.failed else 0
 
 
-if __name__ == "__main__":  # pragma: no cover -- point d'entrée
+if __name__ == "__main__":  # pragma: no cover -- entry point
     raise SystemExit(main())

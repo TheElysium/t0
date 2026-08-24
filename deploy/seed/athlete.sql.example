@@ -1,79 +1,78 @@
--- GABARIT d'amorçage de `core.athlete` et `core.threshold`.
+-- Template for seeding `core.athlete` and `core.threshold`.
 --
--- POURQUOI CE N'EST PAS UNE MIGRATION. Les valeurs ci-dessous sont des données
--- personnelles : poids, fréquences cardiaques, seuils physiologiques. Une migration est
--- committée, poussée sur GitHub et rejouée à l'identique partout ; ce gabarit reste un
--- gabarit, on le copie hors du dépôt avant de le remplir. C'est le même raisonnement
--- que pour les fichiers .FIT originaux, qui portent des traces GPS : le dépôt contient
--- la PROCÉDURE, jamais la donnée.
+-- WHY THIS IS NOT A MIGRATION. The values below are personal data: weight,
+-- heart rates, physiological thresholds. A migration is committed, pushed to GitHub
+-- and replayed identically everywhere; this template stays a template, you copy it
+-- out of the repository before filling it in. Same reasoning as for original .FIT
+-- files, which carry GPS traces: the repository contains the PROCEDURE, never the data.
 --
---   cp deploy/seed/athlete.sql.example ~/garminator-seed.sql   # HORS du dépôt
+--   cp deploy/seed/athlete.sql.example ~/garminator-seed.sql   # OUT of repo
 --   $EDITOR ~/garminator-seed.sql
 --   psql "$GARMINATOR_POSTGRES_DSN" -f ~/garminator-seed.sql
 --
--- POURQUOI C'EST OBLIGATOIRE. `python -m garminator.transform` refuse de deviner
--- l'athlète : sur une `core.athlete` vide il s'arrête en code 2 sans rien écrire. Et
--- sans ligne de `core.threshold`, aucun TSS n'est jamais calculé -- les activités
--- seraient bien enregistrées, mais toute la charge d'entraînement resterait NULL.
+-- WHY THIS IS MANDATORY. `python -m garminator.transform` refuses to guess
+-- the athlete: on an empty `core.athlete` it exits with code 2 without writing anything.
+-- And without a `core.threshold` row, no TSS is ever calculated -- activities would be
+-- recorded, but all training load would remain NULL.
 --
--- Le fichier est enveloppé dans une transaction : en cas d'erreur en cours de route,
--- rien n'est inséré et il peut être relancé tel quel après correction.
+-- The file is wrapped in a transaction: if anything goes wrong partway through,
+-- nothing is inserted and it can be rerun as-is after fixing.
 
 BEGIN;
 
--- `sex` n'est pas cosmétique : il sélectionne le coefficient du TRIMP de Banister
--- (0.64/1.92 homme, 0.86/1.67 femme). `birth_date` peut rester NULL, aucun calcul ne
--- le lit aujourd'hui.
+-- `sex` is not cosmetic: it selects the Banister TRIMP coefficient
+-- (0.64/1.92 male, 0.86/1.67 female). `birth_date` can remain NULL, no calculation
+-- reads it today.
 INSERT INTO core.athlete (display_name, sex, home_timezone)
-VALUES ('<prénom>', '<male|female>', 'Europe/Paris');
+VALUES ('<first_name>', '<male|female>', 'Europe/Paris');
 
--- Les quatre lignes ci-dessous supposent que l'INSERT précédent a produit
--- `athlete_id = 1`, ce qui est le cas sur une base neuve. Après un échec partiel, la
--- séquence IDENTITY a pu avancer : vérifier avec `SELECT athlete_id FROM core.athlete;`
--- et ajuster.
+-- The four lines below assume the previous INSERT produced
+-- `athlete_id = 1`, which is the case on a fresh database. After partial failure,
+-- the IDENTITY sequence may have advanced: check with `SELECT athlete_id FROM core.athlete;`
+-- and adjust.
 --
--- `validity` est un intervalle semi-ouvert [début, fin). La borne haute absente désigne
--- le seuil COURANT ; `<début>` est typiquement la date de début d'historique
--- (`ingest.config.backfillStartDate` du chart Helm).
+-- `validity` is a half-open interval [start, end). The missing upper bound designates
+-- the CURRENT threshold; `<start>` is typically the history start date
+-- (`ingest.config.backfillStartDate` from the Helm chart).
 --
--- RÈGLE ABSOLUE POUR LA SUITE : ne JAMAIS corriger un seuil par UPDATE. Fermer la
--- période en cours et en ouvrir une nouvelle. Un UPDATE réécrirait rétroactivement tout
--- l'historique de CTL sans qu'aucune contrainte ne proteste. La contrainte d'exclusion
--- GiST garantit seulement l'absence de recouvrement entre deux périodes.
+-- ABSOLUTE RULE GOING FORWARD: NEVER fix a threshold by UPDATE. Close the current
+-- period and open a new one. An UPDATE would retroactively rewrite all CTL history
+-- without any constraint objecting. The GiST exclusion constraint only guarantees no
+-- overlap between two periods.
 
--- VÉLO. `ftp_watts` = puissance mécanique mesurée. `rftp_watts` et `css_m_s` sont
--- interdits ici par contrainte CHECK : les échelles de puissance vélo et course ne sont
--- pas comparables. `power_source` documente l'origine de la mesure (`garmin_native`,
--- `stryd`, `powermeter_<modèle>`, `home_trainer`) ; en changer DOIT clore la période.
+-- BIKE. `ftp_watts` = measured mechanical power. `rftp_watts` and `css_m_s` are
+-- forbidden here by CHECK constraint: bike and run power scales are not comparable.
+-- `power_source` documents measurement origin (`garmin_native`, `stryd`,
+-- `powermeter_<model>`, `home_trainer`); changing it MUST close the period.
 INSERT INTO core.threshold
   (athlete_id, discipline, validity, ftp_watts, power_source, source, note)
 VALUES
-  (1, 'bike', '[<début>,)', <ftp_watts>, '<power_source>', 'manual', NULL);
+  (1, 'bike', '[<start>,)', <ftp_watts>, '<power_source>', 'manual', NULL);
 
--- COURSE. `ftp_pace_s_per_km` = allure seuil en SECONDES par kilomètre (4:30/km = 270).
--- `rftp_watts` est la puissance course modélisée par Garmin : la laisser NULL tant
--- qu'elle n'a pas été réellement testée. NULL signifie « inconnu » et fait basculer le
--- calcul sur l'allure ; une valeur inventée produirait des TSS faux mais crédibles.
+-- RUN. `ftp_pace_s_per_km` = threshold pace in SECONDS per kilometer (4:30/km = 270).
+-- `rftp_watts` is run power modeled by Garmin: leave NULL until it has been
+-- actually tested. NULL means "unknown" and makes the calculation fall back to pace;
+-- a made-up value would produce false but plausible TSS.
 INSERT INTO core.threshold
   (athlete_id, discipline, validity, ftp_pace_s_per_km, rftp_watts, power_source, source, note)
 VALUES
-  (1, 'run', '[<début>,)', <allure_seuil_s_par_km>, NULL, '<power_source>', 'manual', NULL);
+  (1, 'run', '[<start>,)', <threshold_pace_s_per_km>, NULL, '<power_source>', 'manual', NULL);
 
--- NATATION. `css_m_s` = vitesse critique en MÈTRES PAR SECONDE (1:50/100 m = 0.909091).
--- Mettre `css_estimated = true` si la valeur vient du repli « 1000 m CLM x 0.97 » et non
--- d'un vrai double test 200/400 m : Grafana distingue les deux, un sTSS bâti sur une CSS
--- estimée n'a pas le même statut.
+-- SWIM. `css_m_s` = critical speed in METERS PER SECOND (1:50/100 m = 0.909091).
+-- Set `css_estimated = true` if the value comes from the "1000 m TT x 0.97" fallback
+-- rather than a real 200/400 m double test: Grafana distinguishes the two, sTSS based
+-- on estimated CSS does not have the same status.
 INSERT INTO core.threshold
   (athlete_id, discipline, validity, css_m_s, css_estimated, source, note)
 VALUES
-  (1, 'swim', '[<début>,)', <css_m_s>, <true|false>, 'manual', NULL);
+  (1, 'swim', '[<start>,)', <css_m_s>, <true|false>, 'manual', NULL);
 
--- COMMUN À TOUTES LES DISCIPLINES. C'est cette ligne, et elle seule, que le calcul de
--- hrTSS et de TRIMP consulte pour les fréquences cardiaques : sans elle, aucune charge
--- de repli n'est calculable pour les séances sans puissance.
+-- COMMON TO ALL DISCIPLINES. This row, and only this one, is what hrTSS and TRIMP
+-- calculation consults for heart rates: without it, no fallback load is calculable
+-- for sessions without power.
 INSERT INTO core.threshold
   (athlete_id, discipline, validity, lthr_bpm, hr_max_bpm, hr_rest_bpm, weight_kg, source)
 VALUES
-  (1, 'all', '[<début>,)', <lthr>, <fc_max>, <fc_repos>, <poids_kg>, 'manual');
+  (1, 'all', '[<start>,)', <lthr>, <hr_max>, <hr_rest>, <weight_kg>, 'manual');
 
 COMMIT;

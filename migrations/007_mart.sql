@@ -1,16 +1,16 @@
--- Migration 007: vues matérialisées mart.*
--- Source : research/05-schema-postgres.md §3.6.
--- Lot L1 (garminator) -- ne pas modifier la DDL manuellement hors migration.
+-- Migration 007: materialized views mart.*
+-- Source: research/05-postgres-schema.md section 3.6.
+-- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
 
--- CORRECTIF APPLIQUÉ EN REVUE (seul écart assumé au texte littéral du §3.6) :
--- la vue de référence du document projette b.distance_m_swim dans la branche swim de
--- intensity_factor, alors que la CTE base ne projette aucune distance. Telle quelle, la
--- migration échoue à la création : « column b.distance_m_swim does not exist », et la chaîne
--- 001..007 n'est donc pas applicable en une passe. Le document prescrit lui-même la correction
--- dans son « avertissement d'honnêteté » (§3.6) : « elle référence b.distance_m_swim qui doit
--- être ajouté à la CTE base (a.distance_m) ». C'est exactement ce qui est fait ici : ajout de
--- a.distance_m à base, et usage de b.distance_m dans la branche swim. Aucune colonne de sortie
--- de la vue n'est modifiée.
+-- CORRECTION APPLIED IN REVIEW (only deviation assumed from section 3.6 literal text):
+-- the reference view in the document projects b.distance_m_swim in the swim branch of
+-- intensity_factor, whereas the base CTE projects no distance. As written, the
+-- migration fails on creation: "column b.distance_m_swim does not exist", and the chain
+-- 001..007 is thus not applicable in one pass. The document prescribes the correction itself
+-- in its "honesty warning" (section 3.6): "it references b.distance_m_swim which must
+-- be added to the base CTE (a.distance_m)". This is exactly what is done here: adding
+-- a.distance_m to base, and using b.distance_m in the swim branch. No output column
+-- of the view is modified.
 CREATE MATERIALIZED VIEW mart.activity_load AS
 WITH base AS (
     SELECT a.activity_id, a.athlete_id, a.sport_code, s.discipline,
@@ -25,9 +25,9 @@ WITH base AS (
              ON th.athlete_id = a.athlete_id
             AND th.discipline = s.discipline
             AND th.validity @> a.local_date
-     WHERE a.is_parent = false          -- ne jamais compter le parent multisport
+     WHERE a.is_parent = false          -- never count the multisport parent
 ),
--- hrTSS : produit scalaire histogramme x coefficients de zone.
+-- hrTSS: dot product of histogram x zone coefficients.
 hrtss AS (
     SELECT h.activity_id,
            sum(h.seconds / 3600.0 * z.tss_per_hour) AS hr_tss,
@@ -42,7 +42,7 @@ hrtss AS (
 )
 SELECT b.activity_id, b.athlete_id, b.sport_code, b.discipline, b.local_date,
        b.threshold_id, b.data_quality, b.needs_manual_rpe,
-       -- IF par discipline, chacun rapporté à SON seuil.
+       -- IF by discipline, each relative to ITS threshold.
        CASE
          WHEN b.discipline = 'bike' AND b.np_watts IS NOT NULL AND b.ftp_watts  > 0
               THEN b.np_watts / b.ftp_watts
@@ -58,7 +58,7 @@ SELECT b.activity_id, b.athlete_id, b.sport_code, b.discipline, b.local_date,
 
 CREATE UNIQUE INDEX activity_load_pk ON mart.activity_load (activity_id);
 COMMENT ON MATERIALIZED VIEW mart.activity_load IS
-  'Charge et intensité par activité, recalculées depuis les seuils EN VIGUEUR À LA DATE de chaque séance. L''index UNIQUE n''est pas décoratif : il est la condition sine qua non du REFRESH MATERIALIZED VIEW CONCURRENTLY, qui évite de verrouiller Grafana pendant le rafraîchissement. Le filtre is_parent = false empêche le double comptage des enchaînements multisport.';
+  'Load and intensity per activity, recalculated from thresholds IN EFFECT ON THE DATE of each session. The UNIQUE index is not decorative: it is the sine qua non condition for REFRESH MATERIALIZED VIEW CONCURRENTLY, which avoids locking Grafana during refresh. The is_parent = false filter prevents double-counting multisport sequences.';
 
 
 CREATE MATERIALIZED VIEW mart.daily_load AS
@@ -77,7 +77,7 @@ SELECT a.athlete_id,
 
 CREATE UNIQUE INDEX daily_load_pk ON mart.daily_load (athlete_id, local_date);
 COMMENT ON MATERIALIZED VIEW mart.daily_load IS
-  'Charge journalière, base de la récursion PMC. Le FILTER sur scale = ''tss'' est une protection structurelle : il rend impossible d''additionner par mégarde un TRIMP (échelle ~170/h au seuil) à des TSS (échelle 100/h au seuil) — erreur explicitement mise en garde en 04 §5.1. has_estimated_load remonte à Grafana qu''au moins une séance du jour a une charge estimée (FC ou RPE) et non mesurée.';
+  'Daily load, basis of PMC recursion. The FILTER on scale = ''tss'' is a structural safeguard: it makes it impossible to accidentally add a TRIMP (scale ~170/h at threshold) to TSS (scale 100/h at threshold) -- an error explicitly warned against in 04 section 5.1. has_estimated_load signals to Grafana that at least one session of the day has estimated load (HR or RPE) not measured.';
 
 
 CREATE MATERIALIZED VIEW mart.pmc AS
@@ -119,9 +119,9 @@ SELECT athlete_id, local_date, tss,
 
 CREATE UNIQUE INDEX pmc_pk ON mart.pmc (athlete_id, local_date);
 COMMENT ON MATERIALIZED VIEW mart.pmc IS
-  'Performance Management Chart : CTL (42 j), ATL (7 j), TSB. QUATRE DÉCISIONS INSCRITES DANS CETTE VUE, toutes issues de 04. (1) Variante alpha = 1/42 et 1/7 simple, et non la forme exponentielle exacte : les deux existent dans la littérature, celle-ci est retenue et documentée (04 §6.2). (2) Calendrier DENSE par generate_series : sans lui, un jour de repos serait absent et la décroissance ne se produirait pas — le CTL serait mécaniquement surestimé (04 §6.4). (3) TSB = CTL_veille - ATL_veille, la convention de référence ; tsb_same_day est exposé EN PLUS car de nombreux outils utilisent l''autre et l''écart déroute (04 §6.3). (4) Récursion CTE et non forme close : la forme close fait intervenir (1-alpha)^-j, qui atteint ~1,3e19 à 5 ans et perd toute précision en double (04 §6.7).';
+  'Performance Management Chart: CTL (42 d), ATL (7 d), TSB. FOUR DECISIONS INSCRIBED IN THIS VIEW, all from 04. (1) Alpha variant = simple 1/42 and 1/7, not exact exponential form: both exist in literature, this one is retained and documented (04 section 6.2). (2) DENSE calendar by generate_series: without it, a rest day would be missing and decay would not occur -- CTL would be mechanically overestimated (04 section 6.4). (3) TSB = previous-day CTL - previous-day ATL, the reference convention; tsb_same_day is exposed IN ADDITION because many tools use the other and the difference puzzles (04 section 6.3). (4) CTE recursion not closed form: closed form involves (1-alpha)^-j, reaching ~1.3e19 in 5 years and losing all precision in double (04 section 6.7).';
 COMMENT ON COLUMN mart.pmc.ctl_reliable IS
-  'false sur les 180 PREMIERS JOURS suivant le seed. VÉRIFIÉ 04 §6.5 : la valeur d''amorçage domine encore le CTL pendant plusieurs mois, et un CTL affiché en croissance sur cette période est un artefact d''initialisation, pas une progression d''entraînement. Grafana doit griser cette plage plutôt que de la masquer.';
+  'false for the first 180 DAYS following the seed. VERIFIED 04 section 6.5: the seed value still dominates CTL for several months, and CTL displayed as growth over this period is an initialization artifact, not training progression. Grafana should gray out this range rather than hide it.';
 
 
 CREATE MATERIALIZED VIEW mart.power_curve_best AS
@@ -134,7 +134,7 @@ SELECT DISTINCT ON (pc.kind, pc.duration_s)
 
 CREATE UNIQUE INDEX power_curve_best_pk ON mart.power_curve_best (kind, duration_s);
 COMMENT ON MATERIALIZED VIEW mart.power_curve_best IS
-  'Courbe record tous temps, par nature de courbe. DISTINCT ON exploite directement l''index core.activity_power_curve_best_idx. La colonne activity_id répond à la question réellement posée par l''athlète : « quel jour ai-je fait ce record ? ». Les fenêtres à cheval sur une pause sont exclues (04 §8.3). Une courbe record sur période glissante se dérive de la même table en ajoutant un filtre sur local_date : elle n''a pas besoin de sa propre vue matérialisée.';
+  'All-time record curve, by curve type. DISTINCT ON directly exploits the core.activity_power_curve_best_idx index. The activity_id column answers the athlete''s real question: "what day did I set this record?". Windows spanning a pause are excluded (04 section 8.3). A record curve over a sliding period is derived from the same table by adding a local_date filter: it does not need its own materialized view.';
 
 
 CREATE MATERIALIZED VIEW mart.hr_zone_time AS
@@ -153,12 +153,12 @@ SELECT h.activity_id, a.local_date, a.sport_code,
 
 CREATE UNIQUE INDEX hr_zone_time_pk ON mart.hr_zone_time (activity_id, zone_code);
 COMMENT ON MATERIALIZED VIEW mart.hr_zone_time IS
-  'Temps par zone de FC, DÉRIVÉ et non stocké. C''est la contrepartie visible du choix de l''histogramme à 1 bpm : corriger un LTHR ou redéfinir les bornes de zones se propage à tout l''historique par un simple REFRESH, sans réingestion d''aucune activité.';
+  'Time per HR zone, DERIVED not stored. This is the visible counterpart to the choice of 1 bpm histogram: correcting an LTHR or redefining zone bounds propagates to the entire history by simple REFRESH, without re-ingesting any activity.';
 
 
 CREATE MATERIALIZED VIEW mart.activity_wide AS
 SELECT a.activity_id, a.local_date, a.start_time_local, a.sport_code,
-       sp.label_fr AS sport, a.name, a.duration_s, a.distance_m,
+       sp.label AS sport, a.name, a.duration_s, a.distance_m,
        a.avg_hr, a.max_hr, a.avg_power, a.np_watts, a.np_reliable,
        a.ascent_m, a.data_quality, a.needs_manual_rpe,
        max(m.value) FILTER (WHERE m.metric = 'tss'  AND m.is_canonical) AS tss,
@@ -172,8 +172,8 @@ SELECT a.activity_id, a.local_date, a.start_time_local, a.sport_code,
   JOIN core.sport sp ON sp.sport_code = a.sport_code
   LEFT JOIN core.activity_metric m ON m.activity_id = a.activity_id
  WHERE a.is_parent = false
- GROUP BY a.activity_id, sp.label_fr;
+ GROUP BY a.activity_id, sp.label;
 
 CREATE UNIQUE INDEX activity_wide_pk ON mart.activity_wide (activity_id);
 COMMENT ON MATERIALIZED VIEW mart.activity_wide IS
-  'Vue LARGE d''une ligne par activité, destinée aux tables Grafana. Concrétise le motif « table étroite en écriture, vue large en lecture » : core.activity_metric reste normalisé et extensible, tandis que Grafana consomme un format tabulaire sans pivot côté tableau de bord. tss_method est exposé volontairement — savoir qu''un TSS vient de la FC et non de la puissance change son interprétation.';
+  'WIDE view of one row per activity, intended for Grafana tables. Materializes the "narrow table for writing, wide view for reading" pattern: core.activity_metric remains normalized and extensible, while Grafana consumes a tabular format without pivoting on the dashboard. tss_method is deliberately exposed -- knowing a TSS comes from HR not power changes its interpretation.';

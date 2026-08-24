@@ -15,7 +15,7 @@ Two invariants anchor this module:
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path  # noqa: TC003 — pydantic doit résoudre le type à l'exécution
+from pathlib import Path  # noqa: TC003 — pydantic must resolve type at runtime
 
 from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,25 +47,25 @@ class Settings(BaseSettings):
     # PostgreSQL. SecretStr because DSN contains database password in cleartext.
     # Callers use .get_secret_value().
     postgres_dsn: SecretStr = Field(
-        description="DSN de connexion PostgreSQL (ex. postgresql://user:pass@host:5432/db).",
+        description="PostgreSQL connection DSN (e.g. postgresql://user:pass@host:5432/db).",
     )
 
     # Persisted Garmin session. Unprefixed name: garminconnect 0.3.2 reads
     # os.getenv("GARMINTOKENS") directly, no default path.
     garmin_tokens_path: Path = Field(
         validation_alias="GARMINTOKENS",
-        description="Répertoire où sont persistés les jetons de session Garmin.",
+        description="Directory where Garmin session tokens are persisted.",
     )
 
     fit_archive_path: Path = Field(
-        description="Répertoire (PVC) où sont archivés les fichiers .FIT originaux.",
+        description="Directory (PVC) where original .FIT files are archived.",
     )
 
     garmin_username: SecretStr = Field(
-        description="Identifiant (e-mail) du compte Garmin Connect.",
+        description="Garmin Connect account identifier (email).",
     )
     garmin_password: SecretStr = Field(
-        description="Mot de passe du compte Garmin Connect.",
+        description="Garmin Connect account password.",
     )
 
     # Scheduler (batch L11). Default matches
@@ -76,14 +76,14 @@ class Settings(BaseSettings):
     # a dependency at that point.
     history_start: date = Field(
         default=date(2025, 4, 3),
-        description="Date de début du rattrapage historique du sondage planifié.",
+        description="Start date for historical catchup of scheduled poll.",
     )
     refresh_lookback_days: int = Field(
         default=3,
         ge=0,
         description=(
-            "Nombre de jours resondés systématiquement même si déjà 'done', pour "
-            "rattraper une republication tardive de Garmin."
+            "Number of days systematically re-polled even if already 'done', "
+            "to catch Garmin's late republication."
         ),
     )
 
@@ -117,7 +117,7 @@ def get_settings() -> Settings:
             for error in exc.errors()
         )
         raise SettingsError(
-            "Configuration invalide, le service refuse de démarrer. "
-            f"Variables en cause : {causes}. "
-            "Les valeurs sont volontairement omises de ce message."
+            "Invalid configuration, service refuses to start. "
+            f"Offending variables: {causes}. "
+            "Values intentionally omitted from this message."
         ) from None

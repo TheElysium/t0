@@ -1,8 +1,8 @@
 {
-  "uid": "garminator-puissance",
-  "title": "Courbe puissance-durée",
-  "description": "Meilleures moyennes glissantes tous temps depuis mart.power_curve_best, axe des durées logarithmique. La date du record (mart.power_curve_best.local_date, dérivée de l'activité qui l'a produit) est visible en table sous le graphique.",
-  "tags": ["garminator", "puissance"],
+  "uid": "garminator-power",
+  "title": "Power-duration curve",
+  "description": "All-time best rolling averages from mart.power_curve_best, logarithmic duration axis. The record date (mart.power_curve_best.local_date, derived from the activity that produced it) is visible in the table below the chart.",
+  "tags": ["garminator", "power"],
   "timezone": "browser",
   "editable": true,
   "schemaVersion": 39,
@@ -27,8 +27,8 @@
     {
       "id": 1,
       "type": "xychart",
-      "title": "Courbe record — $kind",
-      "description": "Meilleure valeur soutenue par durée (mart.power_curve_best), une ligne par (kind, duration_s), NON fusionnée entre disciplines (COMMENT ON COLUMN mart.power_curve_best.kind : bike_power et run_power ne sont pas comparables). Axe des durées (duration_s) en échelle logarithmique.",
+      "title": "Record curve — $kind",
+      "description": "Best sustained value per duration (mart.power_curve_best), one row per (kind, duration_s), NOT merged across disciplines (COMMENT ON COLUMN mart.power_curve_best.kind: bike_power and run_power are not comparable). Duration axis (duration_s) on a logarithmic scale.",
       "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
       "options": {
         "seriesMapping": "manual",
@@ -64,8 +64,8 @@
     {
       "id": 2,
       "type": "table",
-      "title": "Détail — record et date",
-      "description": "mart.power_curve_best.local_date répond à « quel jour ai-je fait ce record ? » (COMMENT ON MATERIALIZED VIEW mart.power_curve_best).",
+      "title": "Detail — record and date",
+      "description": "mart.power_curve_best.local_date answers \"which day did I set this record?\" (COMMENT ON MATERIALIZED VIEW mart.power_curve_best).",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 12 },
       "fieldConfig": { "defaults": {}, "overrides": [] },
       "targets": [
@@ -73,7 +73,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT c.duration_s AS \"Durée (s)\", c.value AS \"Valeur\", c.local_date AS \"Date du record\", c.activity_id AS \"Activité\" FROM mart.power_curve_best c WHERE c.kind = '$kind' ORDER BY c.duration_s"
+          "rawSql": "SELECT c.duration_s AS \"Duration (s)\", c.value AS \"Value\", c.local_date AS \"Record date\", c.activity_id AS \"Activity\" FROM mart.power_curve_best c WHERE c.kind = '$kind' ORDER BY c.duration_s"
         }
       ]
     }

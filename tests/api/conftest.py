@@ -1,13 +1,13 @@
-"""Doublure de connexion PostgreSQL partagée par tests/api/.
+"""PostgreSQL connection stub shared by tests/api/.
 
-Modélise ``raw.fit_file`` au plus près du schéma réel (``migrations/002_raw.sql`` +
-``012_raw_fit_file_manual_upload.sql``), pas au plus près de ce qui est pratique à
-écrire : la contrainte ``UNIQUE (sha256)`` (``fit_file_sha_uq``) y est appliquée via le
-même couple de requêtes que :func:`garminator.garmin.raw_store.insert_fit_file` émet
-réellement (``INSERT ... ON CONFLICT (sha256) DO NOTHING RETURNING fit_file_id`` puis,
-sur conflit, une relecture par ``sha256``). Une doublure qui accepterait un second
-``INSERT`` pour un ``sha256`` déjà présent laisserait passer en test un cas que
-PostgreSQL refuserait réellement — c'est précisément le défaut à ne pas reproduire.
+Models ``raw.fit_file`` as close as possible to real schema (``migrations/002_raw.sql``
++ ``012_raw_fit_file_manual_upload.sql``), not as close as convenient to write: the
+``UNIQUE (sha256)`` constraint (``fit_file_sha_uq``) is applied via the same query pair
+that :func:`garminator.garmin.raw_store.insert_fit_file` actually emits
+(``INSERT ... ON CONFLICT (sha256) DO NOTHING RETURNING fit_file_id``, then on conflict,
+a read-back by ``sha256``). A stub accepting a second ``INSERT`` for an already-present
+``sha256`` would let a test pass that PostgreSQL would really refuse — precisely the
+defect not to reproduce.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ import pytest
 
 @dataclass
 class FitFileRow:
-    """Reflet minimal d'une ligne ``raw.fit_file``, pour les seules colonnes que
-    :func:`garminator.garmin.raw_store.insert_fit_file` lit ou écrit."""
+    """Minimal reflection of a ``raw.fit_file`` row, for only the columns that
+    :func:`garminator.garmin.raw_store.insert_fit_file` reads or writes."""
 
     fit_file_id: int
     garmin_activity_id: int | None
@@ -41,8 +41,8 @@ class FakeCursor:
         if normalized.startswith("INSERT INTO RAW.FIT_FILE"):
             garmin_activity_id, storage_path, sha256, size_bytes = params
             if sha256 in self._conn.rows_by_sha:
-                # ON CONFLICT (sha256) DO NOTHING : aucune ligne créée, RETURNING ne
-                # produit rien -- exactement ce que fetchone() doit refléter ici.
+                # ON CONFLICT (sha256) DO NOTHING: no row created, RETURNING produces
+                # nothing — exactly what fetchone() must reflect here.
                 self._result = []
                 return
             self._conn.next_id += 1
@@ -62,7 +62,7 @@ class FakeCursor:
                 [] if existing is None else [(existing.fit_file_id, existing.garmin_activity_id)]
             )
         else:
-            raise AssertionError(f"Requête SQL non modélisée par cette doublure : {normalized!r}")
+            raise AssertionError(f"SQL query not modeled by this stub: {normalized!r}")
 
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._result[0] if self._result else None
@@ -76,7 +76,7 @@ class FakeCursor:
 
 @dataclass
 class FakeRawStoreConnection:
-    """Doublure de :class:`garminator.garmin.raw_store.DBConnection`."""
+    """Stub for :class:`garminator.garmin.raw_store.DBConnection`."""
 
     rows_by_sha: dict[bytes, FitFileRow] = field(default_factory=dict)
     next_id: int = 0
@@ -92,8 +92,8 @@ class FakeRawStoreConnection:
     def preload(
         self, *, sha256: bytes, garmin_activity_id: int | None, storage_path: str = "/preexisting"
     ) -> FitFileRow:
-        """Simule une ligne ``raw.fit_file`` déjà présente avant l'appel testé --
-        pour reproduire un conflit sur ``sha256`` (voir ``FitFileShaConflictError``)."""
+        """Simulate a ``raw.fit_file`` row already present before the tested call — to
+        reproduce a ``sha256`` conflict (see ``FitFileShaConflictError``)."""
         self.next_id += 1
         row = FitFileRow(
             fit_file_id=self.next_id,

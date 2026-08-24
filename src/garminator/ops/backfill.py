@@ -1,25 +1,24 @@
-"""Suivi et pilotage du rattrapage historique depuis ``history_start`` (lot L10).
+"""Tracking and steering of historical backfill from ``history_start`` (batch L10).
 
-Ce module ne réimplémente RIEN de :mod:`garminator.scheduler` : il compose
-``garminator.scheduler.store.load_window_states`` (lecture de l'état persisté) et
-``garminator.scheduler.planning.due_windows`` (calcul pur des fenêtres dues) --
-exactement les deux fonctions que :func:`garminator.scheduler.service.run_scheduled_poll`
-utilise en interne -- pour produire un compte-rendu de progression. Il n'invente aucune
-notion de « fenêtre restante » différente de celle déjà définie par L6.
+This module reimplements NOTHING from :mod:`garminator.scheduler`: it composes
+``garminator.scheduler.store.load_window_states`` (reading persisted state) and
+``garminator.scheduler.planning.due_windows`` (pure calculation of due windows) --
+exactly the two functions that :func:`garminator.scheduler.service.run_scheduled_poll`
+uses internally -- to produce a progress report. It invents no notion of
+"remaining window" different from the one already defined by L6.
 
-Ce module ne sait PAS interroger Garmin. Amorcer réellement le rattrapage (appeler
-``fetch_window`` pour de vrai) suppose un adaptateur qui traduise le nom d'un des ~130
-endpoints ``garminconnect`` vers l'appel réel de :class:`garminator.garmin.client.
-GarminClient` -- cet adaptateur, et la liste des endpoints à sonder, n'existent nulle
-part ailleurs dans le dépôt à ce jour (aucun point d'entrée de service ne câble
-:mod:`garminator.scheduler` à :mod:`garminator.garmin` -- voir le rapport de fin de
-lot). Deviner cette liste ou ce câblage ici serait inventer un contrat que ce lot n'a
-pas les moyens de vérifier. :func:`run_backfill_cycle` ci-dessous reste donc un simple
-relais typé vers :func:`garminator.scheduler.service.run_scheduled_poll`, prêt à être
-appelé par ce futur point d'entrée avec un vrai ``fetch_window`` -- SANS aucune logique
-propre à dupliquer plus tard. En attendant ce câblage, l'exploitation dispose de
-:func:`backfill_progress`, qui répond seule à la question réellement posée en
-exploitation : « combien de fenêtres restent, et depuis quand ? ».
+This module does NOT know how to query Garmin. Actually bootstrapping backfill (calling
+``fetch_window`` for real) requires an adapter that translates one of the ~130
+``garminconnect`` endpoint names to the real call of :class:`garminator.garmin.client.
+GarminClient` -- this adapter and the list of endpoints to poll do not exist anywhere
+else in the repo to date (no service entry point wires :mod:`garminator.scheduler` to
+:mod:`garminator.garmin` -- see batch end report). Guessing this list or wiring here would
+invent a contract that this batch cannot verify. :func:`run_backfill_cycle` below thus
+remains a simple typed relay to :func:`garminator.scheduler.service.run_scheduled_poll`,
+ready to be called by that future entry point with a real ``fetch_window`` --
+WITHOUT any logic of its own to duplicate later. Until that wiring, operations has
+:func:`backfill_progress`, which alone answers the actual operational question:
+"how many windows remain, and since when?".
 """
 
 from __future__ import annotations
@@ -45,43 +44,41 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import date, timedelta
 
-#: Début réel de l'historique disponible pour l'athlète (cf. brief L10). Distinct de
-#: ``garminator.scheduler.planning`` (qui ne fixe aucune date par défaut : la date de
-#: début est un paramètre d'appel, pas une constante de planification) -- c'est un fait
-#: de PRODUIT (le compte Garmin de l'athlète n'a pas d'historique exploitable avant
-#: cette date), pas un choix d'algorithme.
+#: Actual start of available history for the athlete (cf. brief L10). Distinct from
+#: ``garminator.scheduler.planning`` (which sets no default date: history start is a
+#: call parameter, not a planning constant) -- this is a PRODUCT fact (athlete's Garmin
+#: account has no usable history before this date), not an algorithm choice.
 DEFAULT_HISTORY_START_ISO = "2025-04-03"
 
 
 @dataclass(frozen=True, slots=True)
 class EndpointBackfillProgress:
-    """Progression du rattrapage pour un endpoint, sur ``[history_start, today]``."""
+    """Backfill progress for an endpoint over ``[history_start, today]``."""
 
     endpoint: str
     total_days: int
     done: int
     due: int
-    #: Sous-ensemble de ``due`` : fenêtres n'ayant jamais été tentées.
+    #: Subset of ``due``: windows never attempted.
     never_attempted: int
-    #: Sous-ensemble de ``due`` : fenêtres en échec (rejouées automatiquement).
+    #: Subset of ``due``: failed windows (auto-retried).
     failed: int
-    #: Sous-ensemble de ``due`` : fenêtres ``in_progress`` périmées (run interrompu).
+    #: Subset of ``due``: stale ``in_progress`` windows (run interrupted).
     stale_in_progress: int
-    #: Plus ancienne fenêtre due, ``None`` si aucune (rattrapage terminé pour cet
-    #: endpoint, à la fraîcheur de la fenêtre glissante près).
+    #: Oldest due window, ``None`` if none (backfill complete for this endpoint,
+    #: modulo sliding window freshness).
     oldest_due: date | None
 
     @property
     def is_caught_up(self) -> bool:
-        """``True`` si aucune fenêtre n'est due -- le rattrapage historique de cet
-        endpoint est terminé (il resondera seulement la fenêtre glissante récente)."""
+        """True if no windows are due -- historical backfill for this endpoint is
+        complete (will only resound the recent sliding window)."""
         return self.due == 0
 
 
 @dataclass(frozen=True, slots=True)
 class BackfillProgress:
-    """Compte-rendu de progression sur plusieurs endpoints, produit par
-    :func:`backfill_progress`."""
+    """Progress report over multiple endpoints, produced by :func:`backfill_progress`."""
 
     history_start: date
     today: date
@@ -106,16 +103,15 @@ def backfill_progress(
     refresh_lookback_days: int = DEFAULT_REFRESH_LOOKBACK_DAYS,
     stale_after: timedelta = DEFAULT_STALE_IN_PROGRESS_AFTER,
 ) -> BackfillProgress:
-    """Calcule la progression du rattrapage historique pour chaque endpoint.
+    """Compute backfill progress for each endpoint.
 
-    Idempotent et sans effet de bord : lit ``raw.poll_window`` (via
-    :func:`~garminator.scheduler.store.load_window_states`), ne modifie jamais rien.
-    Réexécutable à volonté -- exactement ce qu'exige un point de contrôle
-    d'exploitation.
+    Idempotent and side-effect free: reads ``raw.poll_window`` (via
+    :func:`~garminator.scheduler.store.load_window_states`), never modifies anything.
+    Re-executable at will -- exactly what an ops checkpoint requires.
 
-    ``due`` (et ses sous-catégories) réutilise :func:`~garminator.scheduler.planning.
-    due_windows` telle quelle : ce sont EXACTEMENT les fenêtres qu'un
-    :func:`~garminator.scheduler.service.run_scheduled_poll` traiterait au prochain run.
+    ``due`` (and its subcategories) reuse :func:`~garminator.scheduler.planning.
+    due_windows` as-is: these are EXACTLY the windows that a
+    :func:`~garminator.scheduler.service.run_scheduled_poll` would handle on next run.
     """
     active_now = now if now is not None else datetime.now(UTC)
     total_days = len(daily_range(history_start, today))
@@ -162,18 +158,17 @@ def run_backfill_cycle(
     stale_after: timedelta = DEFAULT_STALE_IN_PROGRESS_AFTER,
     max_windows_per_endpoint: int | None = None,
 ) -> RunSummary:
-    """Relais typé vers :func:`garminator.scheduler.service.run_scheduled_poll`.
+    """Typed relay to :func:`garminator.scheduler.service.run_scheduled_poll`.
 
-    Existe pour donner au backfill un point d'entrée nommé et documenté dans
-    :mod:`garminator.ops`, sans dupliquer la moindre ligne de logique de planification
-    ou de reprise -- tout est délégué. La seule différence avec un appel direct à
-    ``run_scheduled_poll`` est la valeur par défaut de ``max_windows_per_endpoint`` :
-    ``None`` ici (non bornée) plutôt que
-    :data:`garminator.scheduler.service.DEFAULT_MAX_WINDOWS_PER_ENDPOINT` (60), car un
-    rattrapage explicitement déclenché par un opérateur (ce Job, pas le sondage
-    périodique) a vocation à traiter tout le reliquat en un passage plutôt qu'à
-    s'étaler sur plusieurs cycles de 60 fenêtres. Un appelant qui préfère la borne
-    habituelle peut la repasser explicitement.
+    Exists to give backfill a named, documented entry point in :mod:`garminator.ops`,
+    without duplicating any planning or recovery logic -- all delegated. The only
+    difference from a direct call to ``run_scheduled_poll`` is the default for
+    ``max_windows_per_endpoint``: ``None`` here (unbounded) rather than
+    :data:`garminator.scheduler.service.DEFAULT_MAX_WINDOWS_PER_ENDPOINT` (60),
+    because a backfill explicitly triggered by an operator (this Job, not periodic
+    polling) should process the entire remainder in one pass rather than spread over
+    multiple cycles of 60 windows. A caller preferring the usual bound can pass it
+    explicitly.
     """
     return run_scheduled_poll(
         conn,

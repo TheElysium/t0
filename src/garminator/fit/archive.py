@@ -2,9 +2,9 @@
 
 Atomicity rule (migrations/002_raw.sql, ``raw.fit_file`` comment): file written AND
 verified on volume BEFORE corresponding DB row written. Module stops at first half
-(write + verify)—never touches DB (see scope note in batch end report). Order nonetheless
+(write + verify)--never touches DB (see scope note in batch end report). Order nonetheless
 keeps caller safe: if :func:`archive_bytes` raises, NO file left on volume (temp name
-cleaned), so caller must never insert row—no file, no row inserted.
+cleaned), so caller must never insert row--no file, no row inserted.
 
 Single entry point for both formats: Garmin "original" download returns ZIP archive
 with ``.fit`` or ``.tcx`` content (addendum §2.3). :func:`archive_download` sniffs
@@ -41,7 +41,7 @@ class ArchivedFile:
 
     Field names intentionally match ``raw.fit_file`` (migrations/002_raw.sql):
     ``sha256``, ``size_bytes``. ``source_format`` has no dedicated column in current
-    frozen DDL—encoded in ``storage_path`` extension to stay recoverable without schema change.
+    frozen DDL--encoded in ``storage_path`` extension to stay recoverable without schema change.
     """
 
     storage_path: Path
@@ -85,7 +85,7 @@ def _read_member_capped(
 
     Why not ``archive.read(member)``: decompresses entire member to memory BEFORE any
     check. Metadata pre-inspection doesn't protect: ``ZipInfo.file_size`` is DECLARED
-    in central header, unauthenticated—archive can claim 1 KB, deliver gigabytes.
+    in central header, unauthenticated--archive can claim 1 KB, deliver gigabytes.
     ``zipfile`` only notices at end, memory already consumed. Reading in chunks is
     the only real guard.
 
@@ -102,9 +102,9 @@ def _read_member_capped(
             total += len(chunk)
             if total > max_uncompressed_bytes:
                 raise ArchiveError(
-                    f"Archive ZIP refusée : le membre « {member.filename} » dépasse "
-                    f"{max_uncompressed_bytes} octets décompressés (taille annoncée : "
-                    f"{member.file_size}). Signature d'une bombe de décompression."
+                    f"ZIP archive rejected: member '{member.filename}' exceeds "
+                    f"{max_uncompressed_bytes} decompressed bytes (declared size: "
+                    f"{member.file_size}). Signature of a decompression bomb."
                 )
             chunks.append(chunk)
     return b"".join(chunks)
@@ -124,15 +124,15 @@ def _extract_single_member(
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             members = [info for info in archive.infolist() if not info.is_dir()]
             if len(members) == 0:
-                raise ArchiveError("Archive ZIP vide : aucun fichier à archiver.")
+                raise ArchiveError("Empty ZIP archive: no file to archive.")
             if len(members) > 1:
                 names = ", ".join(m.filename for m in members)
                 raise ArchiveError(
-                    f"Archive ZIP à {len(members)} fichiers, un seul attendu : {names}."
+                    f"ZIP archive has {len(members)} files, exactly one expected: {names}."
                 )
             return _read_member_capped(archive, members[0], max_uncompressed_bytes)
     except zipfile.BadZipFile as exc:
-        raise ArchiveError(f"Archive ZIP invalide : {exc}") from exc
+        raise ArchiveError(f"Invalid ZIP archive: {exc}") from exc
 
 
 def archive_bytes(
@@ -156,7 +156,7 @@ def archive_bytes(
     source_format = sniff_format(data)
     if source_format is None:
         raise ArchiveError(
-            "Contenu non reconnu comme FIT ni TCX (signature absente) : archivage refusé."
+            "Content recognized as neither FIT nor TCX (no signature): archiving refused."
         )
 
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -172,14 +172,14 @@ def archive_bytes(
         written = tmp_path.read_bytes()
         if len(written) != len(data):
             raise ArchiveError(
-                f"Taille relue ({len(written)}) différente de la taille source "
-                f"({len(data)}) : écriture suspecte, rejetée."
+                f"Re-read size ({len(written)}) differs from source size "
+                f"({len(data)}): suspicious write, rejected."
             )
         digest = hashlib.sha256(written).digest()
         if expected_sha256 is not None and digest != expected_sha256:
             raise ArchiveError(
-                "sha256 recalculé après écriture ne correspond pas au sha256 attendu : "
-                "fichier rejeté, aucune ligne ne doit être insérée."
+                "sha256 recomputed after write does not match the expected sha256: "
+                "file rejected, no row must be inserted."
             )
         os.replace(tmp_path, final_path)
     except BaseException:
@@ -200,7 +200,7 @@ def extract_payload(
     """Bytes actually archivable from Garmin download: ZIP member or ``data``.
 
     Public (not internal to ``archive_download``) because caller needs to hash THIS content
-    before deciding if worth archiving—exactly :mod:`garminator.scheduler.activity_files`
+    before deciding if worth archiving--exactly :mod:`garminator.scheduler.activity_files`
     case, comparing download sha256 against latest version in DB (``raw.fit_file.sha256``).
     But that column holds sha of EXTRACTED member, what ``archive_bytes`` calculates post-reread.
     Hashing ZIP envelope instead can never match: comparison fails systematically, idempotence
@@ -232,7 +232,7 @@ def archive_download(
     fmt = sniff_format(payload)
     if fmt is None:
         raise ArchiveError(
-            "Contenu du téléchargement non reconnu comme FIT ni TCX : archivage refusé."
+            "Downloaded content recognized as neither FIT nor TCX: archiving refused."
         )
     return archive_bytes(
         payload, dest_dir, f"{filename_stem}.{fmt}", expected_sha256=expected_sha256

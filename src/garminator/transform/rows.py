@@ -1,34 +1,28 @@
-"""Miroirs des tables ``core.*`` produites par ce lot (migrations 004 et 005).
+"""Mirrors of the ``core.*`` tables produced by this stage (migrations 004 and 005).
 
-Convention reprise sans dérogation de ``garminator.fit.archive.ArchivedFile`` et de
-``garminator.load.activity_load.ActivityMetricRow`` : un champ, une colonne, même nom,
-pour que le passage vers un ``INSERT`` (hors périmètre de ce lot) soit une simple
-projection, sans transformation cachée. ``NULL`` est une valeur SIGNIFIANTE dans ce
-schéma (« non calculable », jamais confondue avec 0 — cf. le commentaire de
-``core.activity_metric.value`` dans migrations/005_core_series.sql) : aucune fonction
-de ce paquet ne doit remplacer un ``None`` légitime par 0.
+Convention inherited without deviation from ``garminator.fit.archive.ArchivedFile`` and
+``garminator.load.activity_load.ActivityMetricRow``: one field, one column, same name,
+so that turning a row into an ``INSERT`` is a plain projection with no hidden
+transformation. ``NULL`` is a MEANINGFUL value in this schema ("not computable", never
+conflated with 0 — see the comment on ``core.activity_metric.value`` in
+migrations/005_core_series.sql): no function here may replace a legitimate ``None``
+with 0.
 
-Trois tables du DDL n'ont volontairement PAS de nouvelle dataclasse ici :
+Three DDL tables deliberately get no new dataclass here:
 
-- ``core.sample`` / ``core.activity_lap`` / ``core.swim_length`` sont déjà
-  représentées, nommément colonne pour colonne, par ``garminator.fit.model.SampleRow``
-  / ``LapRow`` / ``SwimLengthRow`` (le docstring de ce module l'affirme explicitement :
-  « Les champs collent nommément aux colonnes des tables core.sample /
-  core.activity_lap / core.swim_length »). Les redéfinir ici dupliquerait exactement
-  ce que le lot précédent a déjà produit dans l'intention explicite d'être réutilisé
-  tel quel — le même principe que la consigne de réutiliser ``ActivityMetricRow``
-  plutôt que de la recopier.
-- ``core.activity_metric`` est représentée par ``garminator.load.activity_load.
-  ActivityMetricRow``, réexportée ici pour la même raison (réutilisation explicitement
-  demandée).
+- ``core.sample`` / ``core.activity_lap`` / ``core.swim_length`` are already mirrored,
+  column for column, by ``garminator.fit.model.SampleRow`` / ``LapRow`` /
+  ``SwimLengthRow``. Redefining them would duplicate what the previous stage produced
+  with the explicit intent of being reused as-is.
+- ``core.activity_metric`` is mirrored by
+  ``garminator.load.activity_load.ActivityMetricRow``, re-exported here for the same
+  reason.
 
-``core.device`` et ``core.sample_derived`` ONT une dataclasse ci-dessous (le DDL des
-deux tables est cité comme source de vérité de ce lot) mais ``build_core_rows``
-(``garminator.transform.activity``) ne les peuple pas : voir le rapport de fin de lot
-pour la justification (aucun message FIT ``device_info`` n'est décodé par le lot L3
-actuel ; peupler ``sample_derived`` correctement exigerait de figer une convention
-d'alignement seconde par seconde qui n'est pas requise par les vues ``mart`` actuelles
-et dépasse le périmètre de ce lot).
+``core.device`` and ``core.sample_derived`` DO get a dataclass below, but
+``build_core_rows`` (``garminator.transform.activity``) does not populate them: the L3
+stage decodes no ``device_info`` FIT message, and populating ``sample_derived``
+correctly would require freezing a second-by-second alignment convention that the
+current ``mart`` views do not need.
 """
 
 from __future__ import annotations
@@ -56,7 +50,7 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class DeviceRow:
-    """Miroir de ``core.device``. Non peuplée par ce lot (cf. docstring du module)."""
+    """Mirror of ``core.device``. Not populated here (see module docstring)."""
 
     manufacturer: str | None = None
     product: str | None = None
@@ -67,11 +61,11 @@ class DeviceRow:
 
 @dataclass(frozen=True, slots=True)
 class ActivityRow:
-    """Miroir de ``core.activity``. Voir migrations/004_core_activity.sql.
+    """Mirror of ``core.activity``. See migrations/004_core_activity.sql.
 
-    ``ingested_at`` / ``updated_at`` sont absents à dessein : leurs colonnes portent
-    ``DEFAULT now()`` en base, et ce lot ne connaît pas l'instant d'écriture (qui
-    n'existe qu'au moment de l'``INSERT``, hors périmètre de ce lot).
+    ``ingested_at`` / ``updated_at`` are deliberately absent: their columns carry
+    ``DEFAULT now()`` in the database, and the write instant only exists at ``INSERT``
+    time.
     """
 
     activity_id: int
@@ -114,11 +108,15 @@ class ActivityRow:
     summary_sha256: bytes | None = None
     name: str | None = None
     needs_manual_rpe: bool = False
+    source: str = "garmin"
+    """``core.activity.source`` (migration 014): ``'garmin'`` or ``'manual'``. Defaulted
+    to ``'garmin'`` so every existing caller that does not know about manual uploads
+    keeps building a valid row unchanged."""
 
 
 @dataclass(frozen=True, slots=True)
 class SampleDerivedRow:
-    """Miroir de ``core.sample_derived``. Non peuplée par ce lot (cf. docstring du module)."""
+    """Mirror of ``core.sample_derived``. Not populated here (see module docstring)."""
 
     activity_id: int
     t: datetime
@@ -132,7 +130,7 @@ class SampleDerivedRow:
 
 @dataclass(frozen=True, slots=True)
 class ActivityHrHistogramRow:
-    """Miroir d'une ligne de ``core.activity_hr_histogram`` (résolution 1 bpm)."""
+    """Mirror of one ``core.activity_hr_histogram`` row (1 bpm resolution)."""
 
     activity_id: int
     hr_bpm: int
@@ -141,9 +139,9 @@ class ActivityHrHistogramRow:
 
 @dataclass(frozen=True, slots=True)
 class ActivityPowerCurveRow:
-    """Miroir d'une ligne de ``core.activity_power_curve``.
+    """Mirror of one ``core.activity_power_curve`` row.
 
-    ``kind`` doit être l'une des valeurs de la contrainte ``apc_kind_ck`` :
+    ``kind`` must be one of the values allowed by the ``apc_kind_ck`` constraint:
     ``bike_power`` / ``run_power`` / ``run_speed`` / ``swim_speed`` / ``heart_rate``.
     """
 
@@ -156,12 +154,10 @@ class ActivityPowerCurveRow:
 
 @dataclass(frozen=True, slots=True)
 class CoreActivityBundle:
-    """Tout ce que produit ``build_core_rows`` pour UNE activité, prêt pour l'écriture.
+    """Everything ``build_core_rows`` produces for ONE activity, ready to be written.
 
-    ``samples`` / ``laps`` / ``swim_lengths`` sont des ``SampleRow`` / ``LapRow`` /
-    ``SwimLengthRow`` de ``garminator.fit.model`` (cf. docstring du module :
-    réutilisées telles quelles, jamais redéfinies). ``sample_derived`` est toujours
-    vide dans ce lot (voir docstring du module).
+    ``samples`` / ``laps`` / ``swim_lengths`` are ``garminator.fit.model`` types reused
+    as-is. ``sample_derived`` is always empty (see module docstring).
     """
 
     activity: ActivityRow

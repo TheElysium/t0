@@ -1,7 +1,7 @@
 {
   "uid": "garminator-wellness",
-  "title": "Wellness — sommeil, HRV, FC repos, poids",
-  "description": "Bien-être journalier depuis core.daily_wellness et core.sleep_session (schéma 006). Colonnes nullable (COMMENT ON TABLE core.daily_wellness) : les trous ne sont pas des zéros.",
+  "title": "Wellness — sleep, HRV, resting HR, weight",
+  "description": "Daily wellness from core.daily_wellness and core.sleep_session (schema 006). Nullable columns (COMMENT ON TABLE core.daily_wellness): gaps are not zeros.",
   "tags": ["garminator", "wellness"],
   "timezone": "browser",
   "editable": true,
@@ -31,7 +31,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "FC de repos / HRV",
+      "title": "Resting HR / HRV",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 2 } },
@@ -42,14 +42,14 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT w.local_date::timestamp AS time, w.resting_hr AS \"FC repos (bpm)\", w.hrv_last_night_avg AS \"HRV nuit (ms)\" FROM core.daily_wellness w WHERE w.athlete_id = $athlete_id AND $__timeFilter(w.local_date) ORDER BY w.local_date"
+          "rawSql": "SELECT w.local_date::timestamp AS time, w.resting_hr AS \"Resting HR (bpm)\", w.hrv_last_night_avg AS \"HRV overnight (ms)\" FROM core.daily_wellness w WHERE w.athlete_id = $athlete_id AND $__timeFilter(w.local_date) ORDER BY w.local_date"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Poids",
+      "title": "Weight",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 2 }, "unit": "kg" },
@@ -60,15 +60,15 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT w.local_date::timestamp AS time, w.weight_kg AS \"Poids (kg)\" FROM core.daily_wellness w WHERE w.athlete_id = $athlete_id AND w.weight_kg IS NOT NULL AND $__timeFilter(w.local_date) ORDER BY w.local_date"
+          "rawSql": "SELECT w.local_date::timestamp AS time, w.weight_kg AS \"Weight (kg)\" FROM core.daily_wellness w WHERE w.athlete_id = $athlete_id AND w.weight_kg IS NOT NULL AND $__timeFilter(w.local_date) ORDER BY w.local_date"
         }
       ]
     },
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Phases de sommeil",
-      "description": "core.sleep_session est clé par la date de RÉVEIL (wake_date) et non de coucher (COMMENT ON TABLE core.sleep_session).",
+      "title": "Sleep stages",
+      "description": "core.sleep_session is keyed by the WAKE date (wake_date), not the bedtime date (COMMENT ON TABLE core.sleep_session).",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 17 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal", "group": "A" } }, "unit": "s" },
@@ -79,14 +79,14 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.wake_date::timestamp AS time, s.deep_s AS \"Profond (s)\", s.light_s AS \"Léger (s)\", s.rem_s AS \"Paradoxal (s)\", s.awake_s AS \"Éveil (s)\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND $__timeFilter(s.wake_date) ORDER BY s.wake_date"
+          "rawSql": "SELECT s.wake_date::timestamp AS time, s.deep_s AS \"Deep (s)\", s.light_s AS \"Light (s)\", s.rem_s AS \"REM (s)\", s.awake_s AS \"Awake (s)\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND $__timeFilter(s.wake_date) ORDER BY s.wake_date"
         }
       ]
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Score de sommeil",
+      "title": "Sleep score",
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "min": 0, "max": 100 },
@@ -97,7 +97,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.wake_date::timestamp AS time, s.sleep_score AS \"Score de sommeil\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND $__timeFilter(s.wake_date) ORDER BY s.wake_date"
+          "rawSql": "SELECT s.wake_date::timestamp AS time, s.sleep_score AS \"Sleep score\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND $__timeFilter(s.wake_date) ORDER BY s.wake_date"
         }
       ]
     },
@@ -115,7 +115,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT w.local_date::timestamp AS time, w.body_battery_high AS \"Body Battery max\", w.body_battery_low AS \"Body Battery min\", w.avg_stress AS \"Stress moyen\" FROM core.daily_wellness w WHERE w.athlete_id = $athlete_id AND $__timeFilter(w.local_date) ORDER BY w.local_date"
+          "rawSql": "SELECT w.local_date::timestamp AS time, w.body_battery_high AS \"Body Battery max\", w.body_battery_low AS \"Body Battery min\", w.avg_stress AS \"Average stress\" FROM core.daily_wellness w WHERE w.athlete_id = $athlete_id AND $__timeFilter(w.local_date) ORDER BY w.local_date"
         }
       ]
     }

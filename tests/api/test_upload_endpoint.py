@@ -1,11 +1,11 @@
-"""Tests HTTP de garminator.api.upload : la route d'envoi manuel, via le client de
-test de FastAPI (aucun serveur reel demarre).
+"""HTTP tests for garminator.api.upload: the manual upload route, via FastAPI's test
+client (no real server starts).
 
-Requiert ``python-multipart`` (pour que FastAPI puisse meme DEFINIR la route -- voir
-garminator/api/upload.py) et ``httpx`` (dependance du TestClient de starlette). Aucun
-des deux n'est installe dans le venv de ce depot au moment de l'ecriture de ce lot :
-tout ce module est saute proprement (``pytest.importorskip``) plutot que d'echouer --
-voir le rapport de fin de lot pour la liste des dependances a ajouter.
+Requires ``python-multipart`` (so FastAPI can even DEFINE the route — see
+garminator/api/upload.py) and ``httpx`` (starlette's TestClient dependency). Neither is
+installed in this repository's venv at batch write time: this entire module is skipped
+cleanly (``pytest.importorskip``) rather than failing — see batch end report for
+dependencies to add.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-pytest.importorskip("multipart", reason="python-multipart absent du venv (voir rapport de lot)")
-httpx = pytest.importorskip("httpx", reason="httpx absent du venv (voir rapport de lot)")
+pytest.importorskip("multipart", reason="python-multipart missing from venv (see batch report)")
+httpx = pytest.importorskip("httpx", reason="httpx missing from venv (see batch report)")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _VALID_TCX = b"""<?xml version="1.0"?>
-<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2">
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
   <Activities>
     <Activity Sport="Biking">
       <Lap StartTime="2026-08-01T06:00:00Z">
@@ -51,17 +51,17 @@ _VALID_TCX = b"""<?xml version="1.0"?>
 </TrainingCenterDatabase>
 """
 
-# Meme fixture inerte que tests/api/test_ingest.py : signature FIT reconnaissable mais
-# non decodable.
+# Same inert fixture as tests/api/test_ingest.py: FIT signature recognizable but not
+# decodable.
 _FAKE_FIT = b"\x0e\x10\xc0\x00\x00\x00\x00\x00.FIT" + b"\x00" * 20
 
 
 def _client(tmp_path: Path, conn: FakeRawStoreConnection | None = None) -> TestClient:
     app = create_app()
-    # Surcharge de dependance : le repertoire d'archivage vient de tmp_path, et la
-    # connexion base d'une doublure en memoire -- jamais des settings reelles (aucune
-    # variable d'environnement Garmin/PostgreSQL requise pour ces tests, et aucun
-    # PostgreSQL n'existe de toute facon dans cet environnement).
+    # Dependency override: archive directory comes from tmp_path, and database connection
+    # from an in-memory stub — never real settings (no Garmin/PostgreSQL environment
+    # variables required for these tests, and no PostgreSQL exists in this environment
+    # anyway).
     app.dependency_overrides[get_upload_dest_dir] = lambda: tmp_path
     app.dependency_overrides[get_upload_db_conn] = lambda: conn or FakeRawStoreConnection()
     return TestClient(app)
@@ -89,7 +89,7 @@ def test_upload_valid_tcx_returns_201_with_ok_status(tmp_path: Path) -> None:
     assert body["parsed"]["n_samples"] == 1
     assert body["parse_error"] is None
     assert isinstance(body["fit_file_id"], int)
-    # Preuve que l'archivage a reellement eu lieu sur le volume surcharge.
+    # Proof that archiving actually happened on the overridden disk volume.
     assert list(tmp_path.iterdir()) != []
 
 
@@ -99,8 +99,8 @@ def test_upload_zip_wrapped_tcx_is_sniffed_by_content_not_by_extension(
     client = _client(tmp_path)
     zip_data = _zip_bytes({"whatever.bin": _VALID_TCX})
 
-    # Le nom de fichier annonce ("archive.zip") ET le nom interne ("whatever.bin") sont
-    # tous deux trompeurs : seul le contenu doit determiner le format detecte.
+    # Announced filename ("archive.zip") AND internal member name ("whatever.bin") are
+    # both misleading: only content should determine detected format.
     response = client.post("/uploads", files={"file": ("archive.zip", zip_data, "application/zip")})
 
     assert response.status_code == 201
@@ -116,15 +116,14 @@ def test_upload_fit_shaped_but_undecodable_returns_422_but_reports_archiving(
         "/uploads", files={"file": ("activity.fit", _FAKE_FIT, "application/octet-stream")}
     )
 
-    # Contre-epreuve de "pas de succes mensonger" : un 201 ici serait faux (le parsing
-    # a bien echoue) -- le statut DOIT etre 422, pas 201, malgre un archivage reussi.
+    # Counterproof of "no false success": a 201 here would be wrong (parsing really
+    # failed) — status MUST be 422, not 201, despite successful archiving.
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert detail["status"] == "archived_but_unparsed"
     assert detail["source_format"] == "fit"
     assert detail["parse_error"] is not None
-    # Contre-epreuve de "pas de perte silencieuse" : le fichier brut est bien sur le
-    # volume malgre l'echec de parsing.
+    # Counterproof of "no silent loss": raw file is indeed on disk despite parse failure.
     assert list(tmp_path.iterdir()) != []
 
 
@@ -133,7 +132,7 @@ def test_upload_unrecognized_content_returns_422_with_no_side_effect(tmp_path: P
 
     response = client.post(
         "/uploads",
-        files={"file": ("mystery.bin", b"ni FIT ni TCX ni ZIP", "application/octet-stream")},
+        files={"file": ("mystery.bin", b"neither FIT nor TCX nor ZIP", "application/octet-stream")},
     )
 
     assert response.status_code == 422
@@ -147,7 +146,7 @@ def test_upload_empty_zip_is_rejected_explicitly(tmp_path: Path) -> None:
     response = client.post("/uploads", files={"file": ("empty.zip", zip_data, "application/zip")})
 
     assert response.status_code == 422
-    assert "vide" in response.json()["detail"]
+    assert "Empty ZIP" in response.json()["detail"]
 
 
 def test_upload_multi_member_zip_is_rejected_explicitly(tmp_path: Path) -> None:
@@ -157,7 +156,7 @@ def test_upload_multi_member_zip_is_rejected_explicitly(tmp_path: Path) -> None:
     response = client.post("/uploads", files={"file": ("multi.zip", zip_data, "application/zip")})
 
     assert response.status_code == 422
-    assert "fichiers" in response.json()["detail"]
+    assert "files" in response.json()["detail"]
 
 
 def test_upload_zip_with_path_escaping_member_is_rejected(tmp_path: Path) -> None:
@@ -173,9 +172,9 @@ def test_upload_zip_with_path_escaping_member_is_rejected(tmp_path: Path) -> Non
 def test_upload_oversized_payload_returns_413(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Envoyer reellement 200 Mio (borne par defaut) serait couteux pour ce seul test :
-    # on resserre la borne lue par la route (nom global regarde a l'appel, pas capture
-    # a la definition) plutot que d'agrandir le corps envoye.
+    # Actually sending 200 MiB (default bound) would be expensive for just this test:
+    # instead tighten the bound read by the route (global name looked up at call, not
+    # captured at definition) rather than enlarging the sent body.
     import garminator.api.upload as upload_module
 
     monkeypatch.setattr(upload_module, "DEFAULT_MAX_UPLOAD_BYTES", 8)
@@ -201,5 +200,26 @@ def test_upload_returns_409_when_content_already_belongs_to_another_activity(
     )
 
     assert response.status_code == 409
-    # Raw-first : le fichier reste archive malgre le conflit d'insertion, aucune perte.
+    # Archive-first: file stays archived despite insert conflict, no loss.
     assert list(tmp_path.iterdir()) != []
+
+
+def test_route_annotations_resolve_at_runtime() -> None:
+    """Every route and dependency annotation must be importable at runtime.
+
+    A name left under ``TYPE_CHECKING`` does not make FastAPI fail loudly: get_type_hints()
+    raises NameError, FastAPI falls back to treating the parameter as an untyped query
+    parameter, and every request answers 422 "Field required" for something that was never
+    meant to come from the query string. Shipping ``DBConnection`` under TYPE_CHECKING did
+    exactly that -- the module imported cleanly and the endpoint was dead.
+    """
+    import typing
+
+    from garminator.api import upload as upload_module
+
+    for func in (
+        upload_module.upload_activity_file,
+        upload_module.get_upload_db_conn,
+        upload_module.get_upload_dest_dir,
+    ):
+        typing.get_type_hints(func, include_extras=True)

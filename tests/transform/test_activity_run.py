@@ -1,6 +1,6 @@
-"""Course à pied avec puissance ET cardio, rFTP manquant (cf. seuils-athlete.md :
-« rFTP course manquant, jamais deviné »). Vérifie que le rTSS-puissance reste None sans
-jamais inventer de seuil, et que la résolution canonique retombe sur run_gap (GAP)."""
+"""Running with power AND heart rate, rFTP missing (athlete threshold reference:
+rFTP run missing, never guessed). Verifies that run-power rTSS remains None without
+ever inventing a threshold, and that canonical resolution falls back to run_gap (GAP)."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from .conftest import (
 )
 
 _DURATION_S = 600
-_SPEED_MPS = 4.0  # 250 s/km, plus lent que le seuil (4:30/km -> 3.70 m/s).
-_ALTITUDE_M = 100.0  # plat : pente lissée = 0, jamais None -> gap_applied vrai.
+_SPEED_MPS = 4.0  # 250 s/km, slower than threshold (4:30/km -> 3.70 m/s).
+_ALTITUDE_M = 100.0  # flat: smoothed gradient = 0, never None -> gap_applied true.
 
 
 def _run_bundle() -> CoreActivityBundle:
@@ -49,18 +49,18 @@ def _run_bundle() -> CoreActivityBundle:
     )
 
 
-class TestCourseAvecRftpManquant:
-    def test_run_power_tss_reste_none_sans_rftp_jamais_devine(self) -> None:
+class TestRunWithMissingRftp:
+    def test_run_power_tss_stays_none_without_rftp_never_guessed(self) -> None:
         bundle = _run_bundle()
         run_power_rows = [row for row in bundle.metrics if row.method_code == "run_power"]
         tss_row = next(row for row in run_power_rows if row.metric == "tss")
         assert tss_row.value is None
         assert tss_row.is_canonical is False
-        # Pas de ligne intensity_factor pour une méthode dont l'IntensityResult est None.
+        # No intensity_factor row for a method whose IntensityResult is None.
         if_rows = [row for row in run_power_rows if row.metric == "intensity_factor"]
         assert if_rows == [] or if_rows[0].value is None
 
-    def test_run_gap_devient_la_methode_canonique(self) -> None:
+    def test_run_gap_becomes_canonical_method(self) -> None:
         bundle = _run_bundle()
         tss_run_gap = next(
             row for row in bundle.metrics if row.metric == "tss" and row.method_code == "run_gap"
@@ -69,22 +69,22 @@ class TestCourseAvecRftpManquant:
         assert tss_run_gap.is_canonical is True
         assert bundle.activity.needs_manual_rpe is False
 
-    def test_gap_applique_car_pente_lissee_exploitable(self) -> None:
+    def test_gap_applied_because_smoothed_gradient_usable(self) -> None:
         bundle = _run_bundle()
         assert bundle.activity.ngp_speed_mps is not None
         assert bundle.activity.gap_applied is True
 
-    def test_ngp_proche_de_la_vitesse_reelle_sur_terrain_plat(self) -> None:
+    def test_ngp_close_to_actual_speed_on_flat_ground(self) -> None:
         bundle = _run_bundle()
         assert bundle.activity.ngp_speed_mps == _SPEED_MPS
 
-    def test_cardio_moyenne_et_maximum_calcules(self) -> None:
+    def test_heart_rate_average_and_maximum_calculated(self) -> None:
         bundle = _run_bundle()
         assert bundle.activity.avg_hr is not None
         assert bundle.activity.max_hr is not None
         assert bundle.activity.max_hr >= bundle.activity.avg_hr
 
-    def test_efficiency_factor_et_decoupling_utilisent_le_method_code_run_gap(self) -> None:
+    def test_efficiency_factor_and_decoupling_use_method_code_run_gap(self) -> None:
         bundle = _run_bundle()
         ef_row = next(row for row in bundle.metrics if row.metric == "efficiency_factor")
         decoupling_row = next(row for row in bundle.metrics if row.metric == "decoupling_pct")
@@ -94,11 +94,11 @@ class TestCourseAvecRftpManquant:
         assert decoupling_row.threshold_id is None
 
 
-class TestCourseSansVitesseNiDistance:
-    """Footing avec seulement la FC (montre sans GPS/foulée) : aucune vitesse -> pas
-    de GAP possible, jamais une valeur inventée à partir de rien."""
+class TestRunWithoutSpeedOrDistance:
+    """Run with only heart rate (watch without GPS/cadence): no speed -> no GAP
+    possible, never a value invented from nothing."""
 
-    def test_ngp_none_et_gap_non_applique_sans_vitesse(self) -> None:
+    def test_ngp_none_and_gap_not_applied_without_speed(self) -> None:
         samples = [make_sample(t, heart_rate=140) for t in range(60)]
         decoded = parsed_source(samples)
         bundle = build_core_rows(
@@ -112,7 +112,7 @@ class TestCourseSansVitesseNiDistance:
         )
         assert bundle.activity.ngp_speed_mps is None
         assert bundle.activity.gap_applied is False
-        # Toutes les méthodes de TSS course dépendent de la vitesse/puissance :
-        # aucune n'est calculable ici, seul hr_hrtss pourrait l'être (FC présente).
+        # All running TSS methods depend on speed/power: none is calculable here,
+        # only hr_hrtss could be (heart rate present).
         decoupling_rows = [row for row in bundle.metrics if row.metric == "decoupling_pct"]
         assert decoupling_rows == []

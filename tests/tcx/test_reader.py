@@ -1,9 +1,8 @@
-"""Tests de garminator.tcx.reader : decodage XML durci, robustesse.
+"""Tests of garminator.tcx.reader: hardened XML decoding, robustness.
 
-Fixtures utilisees ici sont soit construites en ligne (chaines XML minimales et
-entierement fictives), soit lues depuis tests/fixtures/tcx/synthetic_bike.tcx --
-un fichier synthetique fabrique pour ce lot, jamais derive de bike.tcx (l'original
-de l'athlete, exclu du depot).
+Fixtures used here are either built inline (minimal, entirely fictional XML strings)
+or read from tests/fixtures/tcx/synthetic_bike.tcx—synthetic file built for this
+batch, never derived from bike.tcx (athlete original, excluded from repo).
 """
 
 from __future__ import annotations
@@ -13,12 +12,28 @@ from pathlib import Path
 import pytest
 
 from garminator.fit.errors import TcxParseError
+from garminator.tcx.mapping import TCD_NAMESPACE, TPX_NAMESPACE
 from garminator.tcx.reader import decode_tcx, decode_tcx_file
+
+
+def test_tcd_namespace_matches_the_official_uri() -> None:
+    """The namespace constants are compared to literals, never to a fixture.
+
+    A wrong namespace does not raise: ElementTree simply matches nothing, so the
+    decoder returns an activity with zero samples and no start time. The repository
+    shipped ``TrainingCenterDatabasev2`` (missing the slash) and every TCX fixture was
+    written to match it, so the whole suite agreed with the reader while both were
+    wrong on real Garmin files. Hence a literal here: it is the only assertion a
+    fixture cannot follow into the error.
+    """
+    assert TCD_NAMESPACE == "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
+    assert TPX_NAMESPACE == "http://www.garmin.com/xmlschemas/ActivityExtension/v2"
+
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "tcx" / "synthetic_bike.tcx"
 
 _MINIMAL_TCX = b"""<?xml version="1.0"?>
-<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2">
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
   <Activities>
     <Activity Sport="Biking">
       <Lap StartTime="2026-08-01T06:00:00Z">
@@ -44,7 +59,7 @@ def test_decode_synthetic_fixture_produces_samples_with_only_cadence_and_watts()
     result = decode_tcx_file(_FIXTURE, activity_id=42)
 
     assert result.source_format == "tcx"
-    assert result.session is None  # pas de message session en TCX (addendum SS2.2)
+    assert result.session is None  # No session message in TCX (addendum SS2.2)
     assert result.laps == []
     assert result.swim_lengths == []
     assert len(result.samples) == 3
@@ -62,7 +77,7 @@ def test_decode_minimal_tcx() -> None:
 
 
 def test_decode_malformed_xml_raises_with_no_side_effect() -> None:
-    with pytest.raises(TcxParseError, match="malforme"):
+    with pytest.raises(TcxParseError, match="Malformed"):
         decode_tcx(b"<TrainingCenterDatabase><Unclosed>", activity_id=1)
 
 
@@ -82,8 +97,8 @@ def test_decode_rejects_doctype_declaration() -> None:
 
 
 def test_decode_rejects_entity_expansion_bomb() -> None:
-    # Bombe d'entites classique ("billion laughs"), tronquee a quelques niveaux :
-    # doit etre refusee avant toute expansion, pas seulement "lente".
+    # Classic entity bomb ("billion laughs"), truncated to a few levels: must be
+    # refused before any expansion, not merely "slow".
     bomb = (
         b'<?xml version="1.0"?>'
         b"<!DOCTYPE lolz [\n"
@@ -99,7 +114,7 @@ def test_decode_rejects_entity_expansion_bomb() -> None:
 def test_decode_tcx_without_any_trackpoint_yields_empty_samples() -> None:
     empty = (
         b'<?xml version="1.0"?>'
-        b'<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2">'
+        b'<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">'
         b"<Activities/></TrainingCenterDatabase>"
     )
     result = decode_tcx(empty, activity_id=1)

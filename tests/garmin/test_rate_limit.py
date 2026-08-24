@@ -19,8 +19,8 @@ def test_second_call_within_interval_sleeps_remaining_time() -> None:
     times = iter([100.0, 100.0, 100.5, 100.5])
     limiter = RateLimiter(min_interval_s=2.0, clock=lambda: next(times), sleep=sleeps.append)
 
-    limiter.wait()  # now=100.0, pas de sommeil, _last_call=100.0
-    limiter.wait()  # now=100.5, écart 0.5s < 2s -> dort 1.5s
+    limiter.wait()  # now=100.0, no sleep, _last_call=100.0
+    limiter.wait()  # now=100.5, ecart 0.5s < 2s -> dort 1.5s
 
     assert sleeps == [1.5]
 
@@ -31,6 +31,6 @@ def test_call_after_interval_elapsed_does_not_sleep() -> None:
     limiter = RateLimiter(min_interval_s=2.0, clock=lambda: next(times), sleep=sleeps.append)
 
     limiter.wait()  # now=100.0
-    limiter.wait()  # now=103.0, écart 3s >= 2s -> pas de sommeil
+    limiter.wait()  # now=103.0, gap 3s >= 2s -> no sleep
 
     assert sleeps == []

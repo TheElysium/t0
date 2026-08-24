@@ -1,20 +1,20 @@
-"""Exploitation en production du pipeline garminator (lot L10).
+"""Production ops for the garminator pipeline (batch L10).
 
-Ce paquet regroupe trois besoins d'exploitation distincts, chacun dans son propre module
-pour rester testable indépendamment :
+This package groups three distinct operational needs, each in its own module to remain
+testable independently:
 
-- :mod:`garminator.ops.refresh` -- rafraîchissement des vues matérialisées ``mart.*``,
-  dans l'ordre de dépendance imposé par les migrations 007/008.
-- :mod:`garminator.ops.backfill` -- suivi et pilotage du rattrapage historique, posé
-  SUR l'ordonnanceur du lot L6 (:mod:`garminator.scheduler`) sans en dupliquer la
-  logique de planification.
-- :mod:`garminator.ops.health` -- questions d'exploitation réelles (dernière ingestion
-  réussie, fenêtres en échec ou bloquées, fraîcheur des vues, trous de calendrier),
-  répondues depuis l'état réellement présent en base.
+- :mod:`garminator.ops.refresh` -- refresh of materialized views ``mart.*``,
+  in the dependency order imposed by migrations 007/008.
+- :mod:`garminator.ops.backfill` -- tracking and steering of historical backfill,
+  built ON top of the L6 scheduler (:mod:`garminator.scheduler`) without duplicating its
+  planning logic.
+- :mod:`garminator.ops.health` -- real operational questions (last successful ingestion,
+  failed or stuck windows, view freshness, calendar gaps), answered from the actual state
+  in the database.
 
-Comme :mod:`garminator.db.runner`, ces modules sont volontairement autonomes vis-à-vis
-de :mod:`garminator.settings` : ils lisent leur DSN indépendamment (variable
-d'environnement dédiée), sans exiger les identifiants Garmin.
+Like :mod:`garminator.db.runner`, these modules are intentionally autonomous with
+respect to :mod:`garminator.settings`: they read their DSN independently (dedicated
+environment variable), without requiring Garmin credentials.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
--- Migration 003: référentiels core (sport, load_method, threshold, hr_tss_coefficient, metric_method_priority, pmc_seed) -- seeds rendus idempotents (ON CONFLICT DO NOTHING, ajout explicite hors DDL figé)
--- Source : research/05-schema-postgres.md §3, transcrit tel quel (DDL figé).
--- Lot L1 (garminator) -- ne pas modifier la DDL manuellement hors migration.
+-- Migration 003: core reference tables (sport, load_method, threshold, hr_tss_coefficient, metric_method_priority, pmc_seed) -- seeds made idempotent (ON CONFLICT DO NOTHING, explicit addition outside frozen DDL)
+-- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
+-- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
 
 CREATE TABLE core.athlete (
     athlete_id     smallint    GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -14,16 +14,16 @@ CREATE TABLE core.athlete (
 );
 
 COMMENT ON TABLE core.athlete IS
-  'L''athlète. Mono-utilisateur en pratique, mais la clé étrangère est portée partout pour ne pas fermer la porte. sex n''est pas cosmétique : il sélectionne le coefficient du TRIMP de Banister (VÉRIFIÉ 04 §5.1, k=0.64/1.92 homme vs 0.86/1.67 femme) — 04 exige explicitement qu''il soit configurable et non codé en dur.';
+  'The athlete. Single-user in practice, but the foreign key is carried everywhere to leave the door open. sex is not cosmetic: it selects the Banister TRIMP coefficient (VERIFIED 04 section 5.1, k=0.64/1.92 male vs 0.86/1.67 female) -- 04 explicitly requires it to be configurable and not hardcoded.';
 COMMENT ON COLUMN core.athlete.home_timezone IS
-  'Identifiant IANA du fuseau de résidence. Sert UNIQUEMENT de valeur de repli quand le fuseau d''une activité ou d''une journée est indéterminable. La date locale de rattachement est toujours matérialisée à l''ingestion, jamais recalculée depuis ce champ dans une vue (cf. §7).';
+  'IANA identifier of the residence timezone. Serves ONLY as a fallback value when an activity''s or day''s timezone is indeterminable. The local attachment date is always materialized at ingestion, never recalculated from this field in a view (see section 7).';
 
 
 CREATE TABLE core.sport (
     sport_code      text     PRIMARY KEY,
     fit_sport       smallint NULL,
     fit_sub_sport   smallint NULL,
-    label_fr        text     NOT NULL,
+    label        text     NOT NULL,
     discipline      text     NOT NULL,
     is_indoor       boolean  NOT NULL DEFAULT false,
     produces_records boolean NOT NULL DEFAULT true,
@@ -31,45 +31,45 @@ CREATE TABLE core.sport (
 );
 
 COMMENT ON TABLE core.sport IS
-  'Table de correspondance entre le couple (sport, sub_sport) du profil FIT officiel et un code de sport canonique garminator. Ce N''EST PAS une simple table de libellés — elle porte deux informations décisionnelles : discipline (qui pilote la matrice de repli de charge, 04 §0.3) et is_indoor (qui force f(i)=1 dans le calcul de GAP, VÉRIFIÉ 04 §3.3.4 : « Tapis de course : pente non fiable »). Une simple colonne text libre sur core.activity ne permettrait pas d''exprimer ces règles de façon déclarative.';
+  'Correspondence table between the (sport, sub_sport) pair of the official FIT profile and a canonical garminator sport code. This is NOT a simple labels table -- it carries two decision-making pieces of information: discipline (which drives the load fallback matrix, 04 section 0.3) and is_indoor (which forces f(i)=1 in GAP calculation, VERIFIED 04 section 3.3.4: "Treadmill: gradient unreliable"). A simple free text column on core.activity would not allow these rules to be expressed declaratively.';
 COMMENT ON COLUMN core.sport.produces_records IS
-  'false pour les sports qui n''émettent pas de message FIT record par seconde (nage en piscine). Sert au dimensionnement et aux tests de non-régression sur le volume de core.sample.';
+  'false for sports that do not emit a FIT record message per second (pool swimming). Used for sizing and non-regression tests on core.sample volume.';
 
-INSERT INTO core.sport (sport_code, label_fr, discipline, is_indoor, produces_records) VALUES
-  ('running',        'Course à pied',        'run',   false, true),
+INSERT INTO core.sport (sport_code, label, discipline, is_indoor, produces_records) VALUES
+  ('running',        'Running',              'run',   false, true),
   ('trail_running',  'Trail',                'run',   false, true),
-  ('treadmill',      'Course sur tapis',     'run',   true,  true),
-  ('cycling',        'Cyclisme',             'bike',  false, true),
-  ('virtual_cycling','Cyclisme virtuel',     'bike',  true,  true),
-  ('lap_swimming',   'Natation en piscine',  'swim',  true,  false),
-  ('open_water',     'Natation en eau libre','swim',  false, true),
-  ('hiking',         'Randonnée',            'other', false, true),
-  ('resort_skiing',  'Ski en station',       'other', false, true),
+  ('treadmill',      'Treadmill',            'run',   true,  true),
+  ('cycling',        'Cycling',              'bike',  false, true),
+  ('virtual_cycling','Virtual cycling',      'bike',  true,  true),
+  ('lap_swimming',   'Pool swimming',        'swim',  true,  false),
+  ('open_water',     'Open water',           'swim',  false, true),
+  ('hiking',         'Hiking',               'other', false, true),
+  ('resort_skiing',  'Resort skiing',        'other', false, true),
   ('multisport',     'Multisport',           'other', false, false),
   ('transition',     'Transition',           'other', false, true),
-  ('strength',       'Renforcement',         'other', true,  true)
+  ('strength',       'Strength',             'other', true,  true)
 ON CONFLICT DO NOTHING;
 
 
 CREATE TABLE core.load_method (
     method_code   text    PRIMARY KEY,
-    label_fr      text    NOT NULL,
+    label      text    NOT NULL,
     scale         text    NOT NULL,
     is_measured   boolean NOT NULL,
     CONSTRAINT load_method_scale_ck CHECK (scale IN ('tss','trimp','rpe','none'))
 );
 
 COMMENT ON TABLE core.load_method IS
-  'Méthodes de calcul de charge. La colonne scale est STRUCTURANTE et non décorative : elle interdit d''additionner dans le CTL des grandeurs d''échelles différentes. VÉRIFIÉ (04 §5.1) : « 1 h au seuil donne ~170 TRIMP, pas 100. Le TRIMP n''est pas sur l''échelle du TSS et ne doit JAMAIS être additionné à des TSS dans le CTL. » Une vue qui somme la charge journalière DOIT filtrer sur scale = ''tss''. is_measured distingue une charge mesurée d''une charge estimée, pour la coloration Grafana exigée en 04 §5.3.';
+  'Load calculation methods. The scale column is STRUCTURAL and not decorative: it prevents adding quantities of different scales in CTL. VERIFIED (04 section 5.1): "1 hour at threshold gives ~170 TRIMP, not 100. TRIMP is not on the TSS scale and must NEVER be added to TSS in CTL." A view that sums daily load MUST filter on scale = ''tss''. is_measured distinguishes measured load from estimated load, for the Grafana coloring required in 04 section 5.3.';
 
-INSERT INTO core.load_method (method_code, label_fr, scale, is_measured) VALUES
-  ('bike_power', 'TSS puissance vélo (NP/FTP)',          'tss',   true),
-  ('run_power',  'rTSS puissance course (NP/rFTP)',      'tss',   true),
-  ('run_gap',    'rTSS allure corrigée pente (NGP/FTPa)','tss',   true),
-  ('swim_css',   'sTSS natation (vitesse/CSS)',          'tss',   true),
-  ('hr_hrtss',   'hrTSS par histogramme de FC',          'tss',   false),
-  ('hr_trimp',   'TRIMP de Banister par échantillon',    'trimp', false),
-  ('rpe',        'Charge saisie manuellement (RPE)',     'rpe',   false)
+INSERT INTO core.load_method (method_code, label, scale, is_measured) VALUES
+  ('bike_power', 'TSS bike power (NP/FTP)',              'tss',   true),
+  ('run_power',  'rTSS run power (NP/rFTP)',             'tss',   true),
+  ('run_gap',    'rTSS gradient-adjusted pace (NGP/FTPa)','tss',  true),
+  ('swim_css',   'sTSS swimming (speed/CSS)',            'tss',   true),
+  ('hr_hrtss',   'hrTSS by heart rate histogram',        'tss',   false),
+  ('hr_trimp',   'Banister TRIMP by sample',             'trimp', false),
+  ('rpe',        'Manually entered load (RPE)',          'rpe',   false)
 ON CONFLICT DO NOTHING;
 
 
@@ -95,7 +95,7 @@ CREATE TABLE core.threshold (
     CONSTRAINT threshold_source_ck     CHECK (source IN ('manual','cp_model','auto_20min','import')),
     CONSTRAINT threshold_no_overlap
         EXCLUDE USING gist (athlete_id WITH =, discipline WITH =, validity WITH &&),
-    -- Interdit structurellement de mélanger les deux échelles de puissance.
+    -- Structurally forbidden to mix the two power scales.
     CONSTRAINT threshold_bike_only CHECK (discipline <> 'bike' OR (rftp_watts IS NULL AND css_m_s IS NULL)),
     CONSTRAINT threshold_run_only  CHECK (discipline <> 'run'  OR (ftp_watts  IS NULL AND css_m_s IS NULL)),
     CONSTRAINT threshold_swim_only CHECK (discipline <> 'swim' OR (ftp_watts  IS NULL AND rftp_watts IS NULL)),
@@ -104,13 +104,13 @@ CREATE TABLE core.threshold (
 );
 
 COMMENT ON TABLE core.threshold IS
-  'Seuils physiologiques HISTORISÉS PAR PÉRIODE DE VALIDITÉ. Contrainte produit non négociable, réaffirmée par 04 §2.3 : « Le TSS d''une activité utilise le seuil en vigueur à sa date. Sinon une mise à jour de FTP réécrirait rétroactivement tout l''historique de CTL. » La contrainte d''exclusion GiST garantit qu''aucune date n''est couverte par deux lignes de la même discipline : la jointure « le seuil du jour J » ne peut donc jamais renvoyer deux lignes. Les contraintes CHECK par discipline interdisent physiquement de renseigner ftp_watts (vélo, puissance mécanique mesurée) et rftp_watts (course, puissance modélisée Garmin) sur la même ligne — VÉRIFIÉ 04 §3.2.1 : « Règle absolue : rFTP et FTP vélo ne sont pas comparables et ne doivent jamais être mélangés. »';
+  'Physiological thresholds HISTORIZED BY VALIDITY PERIOD. Non-negotiable product constraint, reaffirmed by 04 section 2.3: "An activity''s TSS uses the threshold in effect on its date. Otherwise an FTP update would retroactively rewrite the entire CTL history." The GiST exclusion constraint guarantees that no date is covered by two rows of the same discipline: the join "the threshold on day J" can never return two rows. CHECK constraints per discipline physically prevent entering ftp_watts (bike, measured mechanical power) and rftp_watts (run, Garmin modeled power) on the same row -- VERIFIED 04 section 3.2.1: "Absolute rule: rFTP and bike FTP are not comparable and must never be mixed."';
 COMMENT ON COLUMN core.threshold.validity IS
-  'Intervalle de dates [debut, fin) en convention semi-ouverte. La borne haute NULL/infinity désigne le seuil courant. Utiliser validity @> a.local_date pour joindre une activité à son seuil.';
+  'Date range [start, end) in half-open convention. NULL/infinity upper bound designates the current threshold. Use validity @> a.local_date to join an activity to its threshold.';
 COMMENT ON COLUMN core.threshold.power_source IS
-  'Origine de la mesure de puissance (garmin_native, stryd, powermeter_<modele>). VÉRIFIÉ (04 §3.2) : la Running Power Garmin est un modèle propriétaire non documenté ; « un 250 W Garmin et un 250 W Stryd ne sont pas la même mesure ». Un changement de valeur ici DOIT clore la période de validité et invalider le rFTP.';
+  'Origin of power measurement (garmin_native, stryd, powermeter_<model>). VERIFIED (04 section 3.2): Garmin Running Power is a proprietary undocumented model; "a 250 W Garmin and a 250 W Stryd are not the same measurement". A change in value here MUST close the validity period and invalidate the rFTP.';
 COMMENT ON COLUMN core.threshold.css_estimated IS
-  'true quand la CSS provient du repli grossier « 1000 m CLM x 0.97 » faute de double test 200/400 m (VÉRIFIÉ 04 §4.1). À exposer dans Grafana : un sTSS bâti sur une CSS estimée n''a pas le même statut.';
+  'true when CSS comes from the coarse fallback "1000 m TT x 0.97" due to lack of a double 200/400 m test (VERIFIED 04 section 4.1). Should be exposed in Grafana: an sTSS built on an estimated CSS does not have the same status.';
 
 
 CREATE TABLE core.hr_tss_coefficient (
@@ -119,19 +119,19 @@ CREATE TABLE core.hr_tss_coefficient (
     lo_pct_lthr   real     NOT NULL,
     hi_pct_lthr   real     NOT NULL,
     tss_per_hour  real     NOT NULL,
-    label_fr      text     NOT NULL,
+    label      text     NOT NULL,
     CONSTRAINT hr_tss_bounds_ck CHECK (hi_pct_lthr > lo_pct_lthr),
     CONSTRAINT hr_tss_rate_ck   CHECK (tss_per_hour >= 0)
 );
 
 COMMENT ON TABLE core.hr_tss_coefficient IS
-  'Table des coefficients TSS/heure par zone de FC, bornes exprimées en POURCENTAGE DU LTHR (et non de la FC max). VÉRIFIÉ (04 §5.2) : « Cette table est une convention arbitraire et les sources se contredisent ouvertement [...] elle doit être stockée en table SQL modifiable, jamais codée en dur. » Elle est interpolée sur les ancrages chiffrés publiés par Joe Friel. La modifier et lancer un REFRESH des vues mart suffit à recalculer tout l''historique de hrTSS : aucune réingestion.';
+  'Table of TSS/hour coefficients by heart rate zone, bounds expressed as PERCENTAGE OF LTHR (not max HR). VERIFIED (04 section 5.2): "This table is an arbitrary convention and sources openly contradict each other [...] it must be stored in a modifiable SQL table, never hardcoded." It is interpolated on the numeric anchors published by Joe Friel. Modifying it and running a REFRESH of the mart views is enough to recalculate the entire hrTSS history: no re-ingestion.';
 
-INSERT INTO core.hr_tss_coefficient (zone_code, zone_order, lo_pct_lthr, hi_pct_lthr, tss_per_hour, label_fr) VALUES
-  ('Z1',  1,   0.00, 0.81,  20, 'Récupération'),
+INSERT INTO core.hr_tss_coefficient (zone_code, zone_order, lo_pct_lthr, hi_pct_lthr, tss_per_hour, label) VALUES
+  ('Z1',  1,   0.00, 0.81,  20, 'Recovery'),
   ('Z2',  2,   0.81, 0.90,  55, 'Endurance'),
   ('Z3',  3,   0.90, 0.94,  75, 'Tempo'),
-  ('Z4',  4,   0.94, 1.00,  90, 'Seuil'),
+  ('Z4',  4,   0.94, 1.00,  90, 'Threshold'),
   ('Z5a', 5,   1.00, 1.03, 105, 'Z5a'),
   ('Z5b', 6,   1.03, 1.07, 120, 'Z5b'),
   ('Z5c', 7,   1.07, 9.99, 140, 'Z5c')
@@ -149,7 +149,7 @@ CREATE TABLE core.metric_method_priority (
 );
 
 COMMENT ON TABLE core.metric_method_priority IS
-  'Matrice de repli DÉCLARATIVE : pour un couple (métrique, sport), quelle méthode fait foi, et dans quel ordre en cas d''indisponibilité. Matérialise en base la table 04 §0.3. Raison d''être : sans elle, la cascade « puissance sinon FC sinon RPE » se recopie en CASE WHEN dans chaque vue Grafana — non auditable, non testable, divergente dès la deuxième copie. La contrainte UNIQUE (metric, sport_code, priority) interdit deux méthodes ex aequo, donc toute ambiguïté de résolution. C''est cette table qui alimente le calcul de core.activity_metric.is_canonical.';
+  'DECLARATIVE fallback matrix: for a (metric, sport) pair, which method is authoritative, and in what order if unavailable. Materializes table 04 section 0.3 in the database. Raison d''etre: without it, the cascade "power else HR else RPE" gets recopied as CASE WHEN in every Grafana view -- unauditable, untestable, divergent on the second copy. The UNIQUE constraint (metric, sport_code, priority) forbids two methods ex aequo, thus any resolution ambiguity. This table feeds the calculation of core.activity_metric.is_canonical.';
 
 INSERT INTO core.metric_method_priority (metric, sport_code, method_code, priority) VALUES
   ('tss','cycling',        'bike_power',1), ('tss','cycling',        'hr_hrtss',2), ('tss','cycling',        'rpe',3),
@@ -178,4 +178,4 @@ CREATE TABLE core.pmc_seed (
 );
 
 COMMENT ON TABLE core.pmc_seed IS
-  'Valeurs d''amorçage de la récursion CTL/ATL à la date de début de l''historique. VÉRIFIÉ (04 §6.5.3) : initialiser à 0 sans avertissement est « à proscrire » car cela « fabrique une progression fictive » ; le défaut recommandé est le seed stationnaire (moyenne des TSS journaliers des 42 premiers jours). PIÈGE DOCUMENTÉ (04 §6.5.3) : cette moyenne introduit une circularité si on la recalcule sur une fenêtre glissante — elle doit être calculée UNE SEULE FOIS sur la date de début fixe, puis STOCKÉE. Cette table est précisément ce stockage ; le seed n''est jamais recalculé par la vue mart.pmc.';
+  'Seed values for the CTL/ATL recursion at the history start date. VERIFIED (04 section 6.5.3): initializing to 0 without warning is "to be avoided" because it "creates fictional progression"; the recommended default is the stationary seed (average of daily TSS of the first 42 days). DOCUMENTED PITFALL (04 section 6.5.3): this average introduces circularity if recalculated on a sliding window -- it must be calculated EXACTLY ONCE on the fixed start date, then STORED. This table is precisely that storage; the seed is never recalculated by the mart.pmc view.';

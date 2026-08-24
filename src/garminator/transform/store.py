@@ -1,69 +1,59 @@
-"""Écriture idempotente d'un ``CoreActivityBundle`` dans les tables ``core.*``.
+"""Idempotent write of a ``CoreActivityBundle`` to ``core.*`` tables.
 
-Motif repris SANS DÉVIATION de ``garminator.garmin.raw_store`` (voir sa docstring de
-module pour la justification complète) : les fonctions ci-dessous acceptent une
-connexion typée par le protocole structurel :class:`DBConnection`, jamais
-``psycopg.Connection`` concrètement -- ``garminator.db`` n'expose aucun utilitaire de
-requête générique, et un Protocol structurel laisse les tests injecter une fausse
-connexion en mémoire (aucun PostgreSQL disponible ici) tout en restant vérifié par
-mypy, puisque ``psycopg.Connection`` le satisfait structurellement. Ce module n'ouvre
-lui-même aucune connexion et n'importe ``psycopg`` qu'au niveau des types (``Jsonb``,
-utilisée pour les colonnes ``jsonb``).
+Pattern taken WITHOUT DEVIATION from ``garminator.garmin.raw_store`` (see its module
+docstring for full justification): functions below accept a connection typed by
+structural protocol :class:`DBConnection`, never concrete ``psycopg.Connection`` --
+``garminator.db`` exposes no generic query utilities, and a structural Protocol lets
+tests inject a fake in-memory connection (no PostgreSQL here) while staying mypy-verified,
+since ``psycopg.Connection`` satisfies it structurally. This module opens no connection
+itself and imports ``psycopg`` only at type level (``Jsonb``, used for ``jsonb`` columns).
 
-STRATÉGIE D'IDEMPOTENCE, tranchée délibérément différemment selon la table :
+IDEMPOTENCE STRATEGY, deliberately chosen differently per table:
 
-- ``core.activity`` (une ligne par activité, avec des colonnes qui accueillent des
-  décisions humaines a posteriori -- ``needs_manual_rpe``, un futur ``name`` retouché)
-  utilise un ``INSERT ... ON CONFLICT (activity_id) DO UPDATE``, en préservant
-  ``ingested_at`` (``DEFAULT now()``, jamais réécrite) et en forçant ``updated_at =
-  now()`` explicitement à chaque passage.
-- Toutes les tables de séries (``core.sample``, ``core.activity_lap``,
-  ``core.swim_length``, ``core.activity_hr_histogram``, ``core.activity_power_curve``,
-  ``core.activity_metric``) utilisent un remplacement complet par activité : ``DELETE
-  ... WHERE activity_id = %s`` puis réinsertion en lot. C'est la seule stratégie
-  honnête ici, pour deux raisons qui ne sont pas symétriques :
+- ``core.activity`` (one row per activity, with columns that host human post-hoc
+  decisions -- ``needs_manual_rpe``, future edited ``name``) uses ``INSERT ... ON CONFLICT
+  (activity_id) DO UPDATE``, preserving ``ingested_at`` (``DEFAULT now()``, never rewritten)
+  and forcing ``updated_at = now()`` explicitly each pass.
+- All series tables (``core.sample``, ``core.activity_lap``, ``core.swim_length``,
+  ``core.activity_hr_histogram``, ``core.activity_power_curve``, ``core.activity_metric``)
+  use full replacement per activity: ``DELETE ... WHERE activity_id = %s`` then bulk
+  reinsertion. It is the only honest strategy here, for two asymmetric reasons:
 
-  1. Un ``ON CONFLICT DO UPDATE`` générique par clé primaire ne supprime JAMAIS une
-     ligne devenue orpheline : si un décodeur corrigé produit moins d'échantillons ou
-     moins de tours qu'avant (un bug corrigé qui recolle deux tours, par exemple), les
-     anciennes lignes en trop resteraient en base pour toujours, invisibles dans le
-     diff du bundle mais bien réelles dans les vues ``mart``.
-  2. ``core.activity_metric`` porte en plus l'index unique PARTIEL
+  1. A generic ``ON CONFLICT DO UPDATE`` by primary key NEVER removes a line that became
+     orphaned: if a fixed decoder produces fewer samples or fewer laps than before (a bug
+     fix that reglues two laps, for example), excess old lines stay in the database
+     forever, invisible in the bundle diff but real in ``mart`` views.
+  2. ``core.activity_metric`` carries a PARTIAL unique index
      ``activity_metric_canonical_uq ON (activity_id, metric) WHERE is_canonical`` --
-     distinct de sa clé primaire ``(activity_id, metric, method_code)``. Un
-     ``ON CONFLICT`` ciblant la PK ne protège PAS de ce second index : si la méthode
-     canonique d'une métrique change entre deux passages (ex. le hrTSS devient un TSS
-     puissance parce qu'un capteur a été ajouté), la nouvelle ligne canonique et
-     l'ancienne (que la PK ne considère pas en conflit, car ``method_code`` diffère)
-     violeraient ensemble l'index partiel. Le DELETE préalable est la seule voie sûre
-     qui ne suppose rien sur la stabilité de la méthode canonique d'un passage à
-     l'autre.
+     distinct from its primary key ``(activity_id, metric, method_code)``. An ``ON CONFLICT``
+     targeting the PK does NOT protect against this second index: if a metric's canonical
+     method changes between passes (e.g., hrTSS becomes power TSS because a sensor was added),
+     the new canonical row and the old one (which the PK does not consider in conflict
+     because ``method_code`` differs) would together violate the partial index. Prior DELETE
+     is the only safe path that assumes nothing about canonical-method stability pass-to-pass.
 
-TOUT le bundle s'écrit dans UNE seule transaction (un seul ``conn.commit()``, à la
-fin) : ``core.sample`` porte ``ON DELETE CASCADE`` vers ``core.activity``, donc la
-ligne ``core.activity`` doit exister avant que ses séries soient insérées -- mais
-l'inverse compte tout autant. Une activité à moitié écrite (échantillons sans
-métriques de charge, ou l'inverse) serait pire qu'une activité absente : elle devient
-visible dans ``core.activity`` -- donc potentiellement dans un JOIN -- tout en étant
-incomplète dans les vues ``mart`` qui dépendent des tables non encore écrites, sans
-qu'aucune erreur ne le signale. Si une étape échoue, l'absence de ``commit()`` laisse
-PostgreSQL annuler implicitement la transaction ouverte à la prochaine connexion (ou à
-un ``rollback()`` explicite de l'appelant) -- rien de partiel n'est jamais visible.
+The ENTIRE bundle writes in ONE transaction (single ``conn.commit()``, at the end):
+``core.sample`` carries ``ON DELETE CASCADE`` to ``core.activity``, so the ``core.activity``
+row must exist before its series are inserted -- but the reverse matters equally. A
+half-written activity (samples without load metrics, or vice versa) would be worse than no
+activity: it becomes visible in ``core.activity`` -- thus potentially in a JOIN -- while
+incomplete in ``mart`` views dependent on tables not yet written, with no error to flag it.
+If a step fails, absence of ``commit()`` lets PostgreSQL implicitly cancel the open
+transaction on next connection (or explicit ``rollback()`` by the caller) -- nothing partial
+is ever visible.
 
-``NULL`` n'est jamais recodé en 0 nulle part dans ce module : les paramètres passés à
-``execute``/``executemany`` sont des tuples construits par simple projection des
-dataclasses de ``garminator.transform.rows`` / ``garminator.fit.model``, jamais
-retouchés. C'est la règle centrale de ``core.activity_metric.value`` (migrations/
-005_core_series.sql) -- un ``trimp``/``hrtss`` non calculable (FC absente, capteur de
-puissance seul) doit rester ``NULL``, jamais devenir un zéro qui ferait chuter
-artificiellement une moyenne de charge.
+``NULL`` is never recoded to 0 anywhere in this module: parameters passed to
+``execute``/``executemany`` are tuples built by simple projection from dataclasses in
+``garminator.transform.rows`` / ``garminator.fit.model``, never retouched. This is the
+central rule for ``core.activity_metric.value`` (migrations/005_core_series.sql) -- a
+``trimp``/``hrtss`` not computable (no HR, power sensor only) must stay ``NULL``, never
+become zero that would artificially depress a load average.
 
-Les contraintes ``CHECK`` de la DDL (FC 20-260, lat/lon bornées, puissance >= 0,
-``seconds > 0`` sur l'histogramme, ``kind IN (...)`` sur la courbe de puissance) ne
-sont PAS redoublées ici : PostgreSQL les vérifie déjà à l'écriture, et les dupliquer
-en Python créerait une seconde source de vérité qui pourrait diverger de la DDL au
-premier changement de migration. Ce module ne filtre ni ne clippe aucune valeur avant
-insertion.
+``CHECK`` constraints in DDL (HR 20-260, lat/lon bounded, power >= 0, ``seconds > 0`` on
+histogram, ``kind IN (...)`` on power curve) are NOT duplicated here: PostgreSQL verifies
+them at write time, and duplicating in Python would create a second source of truth that
+might diverge from DDL on the first migration change. This module filters nor clips no
+value before insertion.
 """
 
 from __future__ import annotations
@@ -94,24 +84,24 @@ class _Cursor(Protocol):
 
 
 class DBConnection(Protocol):
-    """Vue structurelle minimale sur une connexion psycopg 3, pour l'injection en test."""
+    """Minimal structural view of a psycopg 3 connection for test injection."""
 
     def cursor(self) -> _Cursor: ...
     def commit(self) -> None: ...
 
 
 def _jsonb_or_none(extra: dict[str, Any]) -> Jsonb | None:
-    """``{}`` -> ``NULL`` plutôt qu'un objet JSON vide : ``extra`` n'existe que pour ne
-    rien perdre des champs FIT non colonnés -- un dict vide n'a AUCUN champ à
-    préserver, l'écrire porterait un bruit visuel identique sur des milliers de lignes
-    ``core.sample`` sans jamais rien y ajouter d'exploitable.
+    """``{}`` -> ``NULL`` rather than an empty JSON object: ``extra`` exists only to
+    lose no uncolumned FIT fields -- an empty dict has NO fields to preserve, writing
+    it would add visual noise identical across thousands of ``core.sample`` rows without
+    ever adding anything exploitable.
     """
     return Jsonb(extra) if extra else None
 
 
 @dataclass(frozen=True, slots=True)
 class StoreResult:
-    """Décompte des lignes écrites par :func:`store_activity_bundle`, table par table."""
+    """Count of rows written by :func:`store_activity_bundle`, table by table."""
 
     activity_id: int
     samples: int
@@ -125,11 +115,11 @@ class StoreResult:
 def _upsert_activity(cur: _Cursor, a: ActivityRow) -> None:
     """``INSERT ... ON CONFLICT (activity_id) DO UPDATE``.
 
-    ``ingested_at`` est absente à dessein de la liste des colonnes ``SET`` : sa
-    colonne porte ``DEFAULT now()`` en base et ne doit être posée qu'à la toute
-    première écriture. ``updated_at`` est en revanche systématiquement remise à
-    ``now()`` via l'expression SQL littérale (pas ``EXCLUDED.updated_at``, qui
-    n'existe même pas : ``ActivityRow`` ne porte pas ce champ, cf. sa docstring).
+    ``ingested_at`` is deliberately absent from the ``SET`` column list: its column has
+    ``DEFAULT now()`` in the database and should only be set on the very first write.
+    ``updated_at``, in contrast, is systematically reset to ``now()`` via SQL literal
+    expression (not ``EXCLUDED.updated_at``, which does not even exist: ``ActivityRow``
+    does not carry that field, cf. its docstring).
     """
     cur.execute(
         """
@@ -142,7 +132,7 @@ def _upsert_activity(cur: _Cursor, a: ActivityRow) -> None:
             ngp_speed_mps, gap_applied, swim_time_s, swim_time_source,
             total_samples, imputed_seconds, excised_seconds, data_quality,
             parent_activity_id, is_parent, leg_order,
-            primary_device_id, fit_file_id, summary_sha256, name, needs_manual_rpe
+            primary_device_id, fit_file_id, summary_sha256, name, needs_manual_rpe, source
         )
         VALUES (
             %s, %s, %s, %s,
@@ -153,7 +143,7 @@ def _upsert_activity(cur: _Cursor, a: ActivityRow) -> None:
             %s, %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s, %s,
-            %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (activity_id) DO UPDATE SET
             athlete_id = EXCLUDED.athlete_id,
@@ -195,6 +185,7 @@ def _upsert_activity(cur: _Cursor, a: ActivityRow) -> None:
             summary_sha256 = EXCLUDED.summary_sha256,
             name = EXCLUDED.name,
             needs_manual_rpe = EXCLUDED.needs_manual_rpe,
+            source = EXCLUDED.source,
             updated_at = now();
         """,
         (
@@ -238,6 +229,7 @@ def _upsert_activity(cur: _Cursor, a: ActivityRow) -> None:
             a.summary_sha256,
             a.name,
             a.needs_manual_rpe,
+            a.source,
         ),
     )
 
@@ -246,12 +238,11 @@ def _replace_samples(cur: _Cursor, activity_id: int, rows: Sequence[SampleRow]) 
     cur.execute("DELETE FROM core.sample WHERE activity_id = %s;", (activity_id,))
     if not rows:
         return 0
-    # executemany plutôt qu'un execute() par ligne : une séance longue produit des
-    # milliers de core.sample (jusqu'à un aller simple ~2 h en course, donc ~7000
-    # lignes). Un aller-retour réseau par ligne dominerait totalement le temps
-    # d'écriture face à un lot unique -- ce n'est pas une micro-optimisation, c'est la
-    # différence entre une ingestion en dessous de la seconde et plusieurs secondes
-    # par activité, multipliées par des centaines d'activités à chaque rejeu complet.
+    # executemany rather than one execute() per row: a long session produces thousands
+    # of core.sample (up to one-way ~2h run, so ~7000 rows). One network round-trip per
+    # row would dominate write time vs. a single batch -- this is not micro-optimization,
+    # it is the difference between sub-second ingestion and several seconds per activity,
+    # multiplied by hundreds of activities on each full replay.
     cur.executemany(
         """
         INSERT INTO core.sample (
@@ -393,16 +384,14 @@ def _replace_power_curve(
 
 
 def _replace_metrics(cur: _Cursor, activity_id: int, rows: Sequence[ActivityMetricRow]) -> int:
-    """Remplacement complet -- voir la docstring du module pour l'index unique partiel.
+    """Full replacement -- see module docstring for the partial unique index.
 
-    Un simple ``ON CONFLICT`` sur la PK ``(activity_id, metric, method_code)`` ne
-    protégerait pas ``activity_metric_canonical_uq`` (partiel, sur
-    ``(activity_id, metric) WHERE is_canonical``) quand la méthode canonique change
-    entre deux passages : les deux lignes -- l'ancienne canonique et la nouvelle --
-    portent des ``method_code`` différents, donc la PK ne les voit jamais en conflit,
-    et l'INSERT violerait l'index partiel. Supprimer d'abord toutes les lignes de
-    l'activité rend cette collision structurellement impossible, quel que soit
-    l'historique des méthodes déjà écrites.
+    A simple ``ON CONFLICT`` on PK ``(activity_id, metric, method_code)`` would not
+    protect ``activity_metric_canonical_uq`` (partial, on ``(activity_id, metric) WHERE
+    is_canonical``) when canonical method changes between passes: the two rows -- old
+    canonical and new -- carry different ``method_code``, so the PK never sees them in
+    conflict, and INSERT would violate the partial index. Deleting all activity rows
+    first makes this collision structurally impossible regardless of prior method history.
     """
     cur.execute("DELETE FROM core.activity_metric WHERE activity_id = %s;", (activity_id,))
     if not rows:
@@ -423,16 +412,15 @@ def _replace_metrics(cur: _Cursor, activity_id: int, rows: Sequence[ActivityMetr
 
 
 def store_activity_bundle(conn: DBConnection, bundle: CoreActivityBundle) -> StoreResult:
-    """Écrit tout ``bundle`` (produit par ``garminator.transform.activity.build_core_rows``)
-    dans les sept tables ``core.*`` qu'il couvre, en UNE transaction (un seul
-    ``commit()``, à la fin -- voir la docstring du module pour ce que casserait un
-    commit intermédiaire). ``core.activity`` est écrite en premier : ``core.sample``
-    porte ``ON DELETE CASCADE`` vers ``core.activity``, donc ses lignes ne peuvent pas
-    être insérées avant que la ligne parente n'existe.
+    """Write the entire ``bundle`` (produced by ``garminator.transform.activity.build_core_rows``)
+    to the seven ``core.*`` tables it covers, in ONE transaction (single ``commit()`` at
+    the end -- see module docstring for what an intermediate commit would break).
+    ``core.activity`` is written first: ``core.sample`` carries ``ON DELETE CASCADE`` to
+    ``core.activity``, so its rows cannot be inserted before the parent row exists.
 
-    ``core.device`` et ``core.sample_derived`` ne sont pas écrites : ``bundle`` n'en
-    porte de toute façon aucune ligne (``bundle.sample_derived`` est toujours vide --
-    voir la docstring de ``garminator.transform.rows``), rien à peupler ici.
+    ``core.device`` and ``core.sample_derived`` are not written: ``bundle`` carries no rows
+    for them anyway (``bundle.sample_derived`` is always empty -- see ``garminator.transform.rows``
+    docstring), nothing to populate here.
     """
     with conn.cursor() as cur:
         _upsert_activity(cur, bundle.activity)

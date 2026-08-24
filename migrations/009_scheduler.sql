@@ -1,13 +1,13 @@
--- Migration 009 : ordonnancement du sondage (lot L6)
--- Ajoute raw.poll_window, le registre d'avancement du sondage périodique.
--- Lot L6 (garminator) -- ne pas modifier la DDL manuellement hors migration.
+-- Migration 009: polling scheduling (batch L6)
+-- Adds raw.poll_window, the progress log for periodic polling.
+-- Batch L6 (garminator) -- do not modify the DDL manually outside migration.
 
--- Contexte : raw.payload_seen (migration 002) répond à « ce CONTENU exact a-t-il déjà
--- été vu ? » -- une question de déduplication au niveau du payload, indépendante du
--- temps. Elle ne répond PAS à « ai-je déjà correctement sondé Garmin pour ce jour ? »,
--- qui est une question d'ORDONNANCEMENT : quelles fenêtres reste-t-il à interroger, et
--- lesquelles ont été interrompues par une panne au milieu d'un run. C'est cette
--- deuxième question que raw.poll_window résout.
+-- Context: raw.payload_seen (migration 002) answers "has this EXACT CONTENT already
+-- been seen?" -- a deduplication question at payload level, independent of
+-- time. It does NOT answer "have I already properly polled Garmin for this day?",
+-- which is a SCHEDULING question: what windows remain to query, and
+-- which ones were interrupted by a failure in the middle of a run. This
+-- second question is what raw.poll_window solves.
 CREATE TABLE raw.poll_window (
     endpoint            text        NOT NULL,
     window_date         date        NOT NULL,
@@ -23,18 +23,18 @@ CREATE TABLE raw.poll_window (
 );
 
 COMMENT ON TABLE raw.poll_window IS
-  'Registre d''avancement du sondage périodique, une ligne par (endpoint, jour calendaire local de l''athlète -- cf. raw.api_response.scope_date). Clé d''identification choisie délibérément DIFFÉRENTE de raw.payload_seen : ici on identifie une FENÊTRE DE TRAVAIL planifiée, pas un contenu. (endpoint, window_date) est stable et connu AVANT même d''interroger Garmin (contrairement à un hash de payload, qui suppose déjà d''avoir reçu la réponse) -- c''est ce qui permet de savoir, avant tout appel réseau, quelles fenêtres restent dues. RÈGLE D''IDEMPOTENCE : une fenêtre passe à ''in_progress'' AVANT l''appel réseau et à ''done'' seulement APRÈS son succès complet ; un crash au milieu la laisse ''in_progress'', jamais ''done'' -- l''ordonnanceur (garminator.scheduler) traite toute ligne ''in_progress'' plus vieille qu''un seuil de péremption comme un run interrompu à rejouer. Ainsi une panne ne peut jamais faire perdre une activité : au pire une fenêtre est resondée (ce que raw.payload_seen rend ensuite peu coûteux à détecter en aval). Une fenêtre ''done'' peut légitimement redevenir due : l''ordonnanceur ressonde toujours une fenêtre glissante récente pour rattraper les activités renommées, corrigées ou arrivées en retard côté Garmin -- l''idempotence ne doit jamais empêcher une réingestion légitime d''une version plus récente.';
+  'Progress log of periodic polling, one row per (endpoint, athlete''s local calendar day -- see raw.api_response.scope_date). Identification key deliberately DIFFERENT from raw.payload_seen: here we identify a planned WORK WINDOW, not content. (endpoint, window_date) is stable and known BEFORE even querying Garmin (unlike a payload hash, which assumes already receiving the response) -- this is what lets us know, before any network call, what windows remain due. IDEMPOTENCE RULE: a window moves to ''in_progress'' BEFORE the network call and to ''done'' only AFTER complete success; a crash in the middle leaves it ''in_progress'', never ''done'' -- the scheduler (garminator.scheduler) treats any ''in_progress'' row older than a staleness threshold as an interrupted run to replay. Thus a failure can never lose an activity: at worst a window is re-polled (which raw.payload_seen then makes cheap to detect downstream). A ''done'' window can legitimately become due again: the scheduler always re-polls a recent sliding window to catch renamed, corrected, or late-arriving activities on Garmin''s side -- idempotence must never prevent legitimate re-ingestion of a newer version.';
 COMMENT ON COLUMN raw.poll_window.endpoint IS
-  'Nom de la méthode garminconnect sondée (même vocabulaire que raw.api_response.endpoint).';
+  'Name of the garminconnect method polled (same vocabulary as raw.api_response.endpoint).';
 COMMENT ON COLUMN raw.poll_window.window_date IS
-  'Date LOCALE de l''athlète couverte par cette fenêtre de sondage (une fenêtre = un jour). Pas de granularité plus fine : les ~130 endpoints garminconnect utilisés ici sont journaliers (paramètre cdate).';
+  'Athlete''s LOCAL date covered by this polling window (one window = one day). No finer granularity: the ~130 garminconnect endpoints used here are daily (cdate parameter).';
 COMMENT ON COLUMN raw.poll_window.attempts IS
-  'Nombre de tentatives de sondage de cette fenêtre, y compris l''échec le plus récent. Incrémenté à chaque passage à ''in_progress'', jamais remis à zéro : un compteur qui repart de zéro masquerait qu''une fenêtre a déjà nécessité de nombreux essais.';
+  'Number of polling attempts for this window, including the most recent failure. Incremented at each transition to ''in_progress'', never reset to zero: a counter resetting to zero would hide that a window already needed many tries.';
 COMMENT ON COLUMN raw.poll_window.last_error IS
-  'Message de la dernière erreur si status = ''failed''. Remis à NULL dès que la fenêtre repasse ''done'' -- ne jamais laisser une erreur obsolète à côté d''un succès plus récent.';
+  'Message of the last error if status = ''failed''. Reset to NULL as soon as the window goes ''done'' again -- never leave an obsolete error next to a more recent success.';
 
 CREATE INDEX poll_window_due_idx
     ON raw.poll_window (endpoint, status, window_date);
 
 COMMENT ON INDEX raw.poll_window_due_idx IS
-  'Sert la requête de planification : pour un endpoint donné, retrouver rapidement les fenêtres par statut et par date (les plus anciennes dues en premier, cf. garminator.scheduler.planning.due_windows).';
+  'Serves the scheduling query: for a given endpoint, quickly find windows by status and date (oldest due first, see garminator.scheduler.planning.due_windows).';

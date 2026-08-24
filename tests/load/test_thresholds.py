@@ -54,7 +54,7 @@ class TestThresholdForDate:
 
 
 class TestPaceConversion:
-    def test_real_threshold_athlete_4min30_per_km(self) -> None:
+    def test_example_threshold_pace_4min30_per_km(self) -> None:
         speed = pace_s_per_km_to_speed_mps(270.0)
         assert speed is not None
         assert abs(speed - 3.7037037037037037) < 1e-9

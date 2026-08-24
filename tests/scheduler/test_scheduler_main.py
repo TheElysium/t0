@@ -1,11 +1,11 @@
-"""Tests du point d'entrée ``python -m garminator.scheduler`` (lot L11).
+"""Tests for entry point ``python -m garminator.scheduler`` (batch L11).
 
-Ne construit **jamais** de vrai transport ``garminconnect`` ni de vraie connexion
-PostgreSQL : ``main()`` accepte trois points d'injection (``settings``, ``connect_db``,
-``build_window_fetcher``) précisément pour permettre ce genre de test -- voir le
-docstring du module testé. Seuls le parsing d'arguments, le code de sortie et le mode
-``--dry-run`` sont exercés ici ; l'orchestration elle-même (``run_scheduled_poll``) est
-déjà testée par ``tests/scheduler/test_service.py``.
+Never builds real ``garminconnect`` transport or real PostgreSQL connection:
+``main()`` accepts three injection points (``settings``, ``connect_db``,
+``build_window_fetcher``) precisely to enable this kind of test -- see the tested
+module's docstring. Only argument parsing, exit codes, and ``--dry-run`` mode are
+exercised here ; actual orchestration (``run_scheduled_poll``) is already tested by
+``tests/scheduler/test_service.py``.
 """
 
 from __future__ import annotations
@@ -37,12 +37,12 @@ if TYPE_CHECKING:
 
 
 class _MainFakeCursor(_PollFakeCursor):
-    """Étend le curseur de :mod:`tests.scheduler.fakes` avec les requêtes de
-    ``raw.ingest_run`` -- ``main()`` ouvre lui-même un ``ingest_run(...)`` autour de
-    ``run_scheduled_poll``, en plus des requêtes ``poll_window``/``payload_seen`` que
-    ``FakePollDB`` sait déjà simuler. Composition plutôt que duplication : seule la
-    reconnaissance des deux requêtes supplémentaires est ajoutée ici, tout le reste
-    (poll_window, payload_seen) délègue au parent, éprouvé par le lot L6.
+    """Extends :mod:`tests.scheduler.fakes` cursor with ``raw.ingest_run`` queries --
+    ``main()`` itself wraps ``run_scheduled_poll`` in an ``ingest_run(...)`` call, in
+    addition to ``poll_window``/``payload_seen`` queries that ``FakePollDB`` already
+    handles. Composition over duplication: only recognition of the two extra queries
+    is added here, everything else (poll_window, payload_seen) delegates to parent,
+    proven by batch L6.
     """
 
     def __init__(self, db: _MainFakeDB) -> None:
@@ -53,13 +53,12 @@ class _MainFakeCursor(_PollFakeCursor):
         normalized = " ".join(query.split())
 
         if normalized.startswith("INSERT INTO raw.ingest_run"):
-            # La doublure doit être aussi stricte que ``ingest_run_mode_ck`` : sans cette
-            # garde, elle acceptait le ``mode="scheduled"`` du lot L11, qui échouait en
-            # revanche à la toute première requête en production.
+            # Stub must be as strict as ``ingest_run_mode_ck``: without this guard, it
+            # accepted batch L11's ``mode="scheduled"``, which failed on first production query.
             mode = params[0]
             assert mode in INGEST_RUN_MODES, (
-                f"mode={mode!r} viole ingest_run_mode_ck : PostgreSQL rejetterait cet "
-                f"INSERT (valeurs acceptées : {sorted(INGEST_RUN_MODES)})"
+                f"mode={mode!r} violates ingest_run_mode_ck : PostgreSQL would reject this "
+                f"INSERT (accepted values: {sorted(INGEST_RUN_MODES)})"
             )
             self._main_db.executed.append((normalized, params))
             self._main_db.next_ingest_run_id += 1
@@ -76,9 +75,9 @@ class _MainFakeCursor(_PollFakeCursor):
 
 @dataclass
 class _MainFakeDB(FakePollDB):
-    """``FakePollDB`` (poll_window/payload_seen) + compteur ``ingest_run`` en mémoire :
-    la seule doublure de ce fichier, réutilisée par tous les tests qui n'utilisent pas
-    ``--dry-run`` (lequel ne touche jamais ``raw.ingest_run``)."""
+    """``FakePollDB`` (poll_window/payload_seen) + in-memory ``ingest_run`` counter :
+    the only stub in this file, reused by all tests not using ``--dry-run``
+    (which never touches ``raw.ingest_run``)."""
 
     next_ingest_run_id: int = 0
     closed: bool = field(default=False, init=False)
@@ -90,19 +89,18 @@ class _MainFakeDB(FakePollDB):
         self.closed = True
 
 
-#: DSN passe explicitement par ``--dsn`` dans les tests. Depuis la reprise du lot,
-#: ``main()`` resout le DSN comme ``garminator.ops.__main__`` (argument ou
-#: ``GARMINATOR_POSTGRES_DSN``) et non plus depuis ``Settings`` : le ``--dry-run``
-#: doit pouvoir tourner sans aucun secret Garmin. Les tests le fournissent donc en
-#: ligne de commande, sans dependre de l'environnement de la machine qui les execute.
+#: DSN explicitly passed via ``--dsn`` in tests. Since batch recovery, ``main()`` resolves
+#: DSN like ``garminator.ops.__main__`` (argument or ``GARMINATOR_POSTGRES_DSN``), not
+#: from ``Settings`` : ``--dry-run`` must run without any Garmin secrets. Tests provide
+#: it on the command line, independent of the machine's environment.
 _DSN = "postgresql://user:pass@localhost:5432/garminator"
 
 
 def _settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "postgres_dsn": SecretStr("postgresql://user:pass@localhost:5432/garminator"),
-        # ``garmin_tokens_path`` porte ``validation_alias="GARMINTOKENS"`` (settings.py) :
-        # sans ``populate_by_name``, seul l'alias est accepté en construction directe.
+        # ``garmin_tokens_path`` has ``validation_alias="GARMINTOKENS"`` (settings.py):
+        # without ``populate_by_name``, only the alias is accepted in direct construction.
         "GARMINTOKENS": Path("/dev/null"),
         "fit_archive_path": Path("/dev/null"),
         "garmin_username": SecretStr("athlete@example.invalid"),
@@ -115,13 +113,11 @@ def _settings(**overrides: object) -> Settings:
 def _unreachable_build_window_fetcher(
     _settings: Settings, _conn: DBConnection, _tracker: IngestRunTracker
 ) -> WindowFetcher:
-    raise AssertionError(
-        "build_window_fetcher appelé : --dry-run ne doit jamais construire de fetcher"
-    )
+    raise AssertionError("build_window_fetcher called: --dry-run must never build a fetcher")
 
 
 def _unreachable_connect(*_args: object, **_kwargs: object) -> object:
-    raise AssertionError("connect_db appelé avec le connecteur de production réel")
+    raise AssertionError("connect_db called with real production connector")
 
 
 def test_unknown_endpoint_returns_exit_code_2_without_touching_settings_or_db() -> None:
@@ -166,7 +162,7 @@ def test_dry_run_lists_due_windows_without_building_a_fetcher(
     assert "get_sleep_data" in out
     assert "2026-08-20" in out
     assert "2026-08-22" in out
-    # Aucune requête ingest_run : le dry-run ne doit jamais écrire.
+    # No ingest_run queries: dry-run must never write.
     assert all("ingest_run" not in q for q, _params in db.executed)
 
 
@@ -222,7 +218,7 @@ def test_full_run_all_windows_succeed_returns_exit_code_0(
     out = capsys.readouterr().out
     assert "get_sleep_data" in out
     assert db.closed
-    # Un ingest_run a bien été ouvert puis clôturé (statut 'ok', aucune erreur).
+    # One ingest_run was properly opened then closed (status 'ok', no errors).
     assert any(q.startswith("INSERT INTO raw.ingest_run") for q, _p in db.executed)
     finish_queries = [params for q, params in db.executed if q.startswith("UPDATE raw.ingest_run")]
     assert len(finish_queries) == 1
@@ -235,7 +231,7 @@ def test_full_run_with_a_failing_window_returns_exit_code_1(
     db = _MainFakeDB(clock=datetime(2026, 8, 22, 6, 0, 0))
 
     def failing_fetch_window(endpoint: str, window_date: date) -> list[FetchedWindow]:
-        raise RuntimeError("panne Garmin simulée")
+        raise RuntimeError("simulated Garmin failure")
 
     def build_failing_window_fetcher(
         _settings: Settings, _conn: DBConnection, _tracker: IngestRunTracker
@@ -260,17 +256,16 @@ def test_full_run_with_a_failing_window_returns_exit_code_1(
 
     assert exit_code == 1
     out = capsys.readouterr().out
-    assert "ÉCHEC" in out
-    assert "panne Garmin simulée" in out
+    assert "FAILED" in out
+    assert "simulated Garmin failure" in out
     finish_queries = [params for q, params in db.executed if q.startswith("UPDATE raw.ingest_run")]
     assert len(finish_queries) == 1
-    # 'partial' : depuis la correction C3, ``_reconcile_tracker_with_summary`` comble
-    # l'écart entre les fenêtres marquées 'failed' par ``run_scheduled_poll`` et les erreurs
-    # déjà comptées par ``IngestRunTracker.record_error``. Ici le faux ``fetch_window`` lève
-    # sans jamais passer par un ``GarminClient`` réel : aucune erreur n'a donc été comptée en
-    # amont, et c'est précisément le trou que la réconciliation ferme. Sans elle,
-    # ``raw.ingest_run`` afficherait 'ok' pour un run qui a perdu une fenêtre -- un mensonge
-    # durable, là où le code de sortie non nul disparaît avec le pod.
+    # 'partial': since fix C3, ``_reconcile_tracker_with_summary`` closes the gap between
+    # windows marked 'failed' by ``run_scheduled_poll`` and errors already counted by
+    # ``IngestRunTracker.record_error``. Here the fake ``fetch_window`` raises without
+    # ever hitting real ``GarminClient``: no error was counted upstream, and that's
+    # exactly the gap reconciliation closes. Without it, ``raw.ingest_run`` would show 'ok'
+    # for a run that lost a window -- a lasting lie, vs exit code non-zero that dies with pod.
     assert finish_queries[0][0] == "partial"
 
 
@@ -283,7 +278,7 @@ def test_invalid_settings_returns_exit_code_2(monkeypatch: pytest.MonkeyPatch) -
         "GARMINATOR_GARMIN_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.chdir(Path(__file__).resolve().parent)  # évite un .env de dépôt fortuit
+    monkeypatch.chdir(Path(__file__).resolve().parent)  # avoid a stray repository .env
 
     exit_code = scheduler_main.main(
         [],
@@ -320,23 +315,23 @@ def test_max_windows_per_endpoint_bounds_dry_run_listing(
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "reportée" in out
+    assert "deferred to next run" in out
 
 
-# --- Câblage de l'archivage des fichiers originaux -------------------------------------
+# --- Wiring of original-file archiving -------------------------------------------------
 #
-# Ces tests couvrent la JONCTION (quels identifiants, quel jour, quelle racine, quel
-# format sont transmis), pas le téléchargement lui-même : celui-ci est déjà couvert de
-# bout en bout par ``tests/scheduler/test_activity_files.py``. ``archive_activities_for_day``
-# est donc remplacé par un espion -- il n'y a rien à gagner à réécrire ici les doublures
-# de PVC et de ``raw.fit_file`` de l'autre fichier.
+# These tests cover the JUNCTION (which identifiers, which day, which root, which
+# format are passed through), not the download itself: that is already covered
+# end to end by ``tests/scheduler/test_activity_files.py``. ``archive_activities_for_day``
+# is therefore replaced by a spy -- there is nothing to gain from rewriting the
+# other file's PVC and ``raw.fit_file`` doubles here.
 
 
 class _FakeDownloader:
-    """Client minimal satisfaisant ``OriginalFileDownloader`` (méthode seule)."""
+    """Minimal client satisfying ``OriginalFileDownloader`` (method only)."""
 
     def download_original(self, activity_id: str, *, dl_fmt: object, tracker: object = None) -> Any:
-        raise AssertionError("non appelé : archive_activities_for_day est espionné")
+        raise AssertionError("not called: archive_activities_for_day is spied on")
 
 
 @dataclass
@@ -392,8 +387,8 @@ def test_activity_files_are_archived_with_the_activity_ids_just_polled(
 
     assert exit_code == 0
     assert len(calls) == 1
-    # Les ``activityId`` viennent des ``scope_key`` du sondage : aucune requête
-    # supplémentaire n'est faite pour redemander la liste du jour.
+    # The ``activityId`` come from the polling ``scope_key``: no extra request
+    # is made to ask for the day's list again.
     assert list(calls[0]["activity_ids"]) == ["111", "222"]
     assert calls[0]["window_date"] == date(2026, 8, 20)
     assert calls[0]["archive_root"] == tmp_path
@@ -413,16 +408,16 @@ def test_no_activity_files_flag_skips_downloads_entirely(
 
 
 def test_a_fetcher_without_client_skips_archiving_instead_of_improvising_a_session() -> None:
-    """Aucune session Garmin n'est jamais reconstruite pour l'archivage."""
+    """No Garmin session is ever rebuilt for archiving."""
     assert scheduler_main._downloader_of(lambda _e, _d: []) is None
 
 
 def test_production_fetcher_still_exposes_the_client_the_wiring_relies_on() -> None:
     """Garde-fou : ``_downloader_of`` lit ``GarminWindowFetcher.client`` par nom.
 
-    Un renommage de cet attribut désactiverait TOUT l'archivage silencieusement -- le run
-    resterait vert, les fichiers .FIT cesseraient simplement d'arriver sur le PVC. Ce test
-    n'instancie aucun transport : il inspecte les champs déclarés de la dataclass.
+    Renaming this attribute would silently disable ALL archiving -- the run
+    would stay green, the .FIT files would simply stop arriving on the PVC. This test
+    instantiates no transport: it inspects the declared fields of the dataclass.
     """
     fields_by_name = {f.name for f in dataclasses.fields(GarminWindowFetcher)}
     assert "client" in fields_by_name

@@ -1,4 +1,4 @@
-"""TSS/rTSS/sTSS formulas (04-formules-charge.md §2-4).
+"""TSS/rTSS/sTSS formulas (04-load-formulas.md §2-4).
 
 Pure functions: duration, measured quantity (power or speed), threshold in; intensity
 factor (IF) and TSS out. Functions never recalculate NP, GAP, or critical power model—

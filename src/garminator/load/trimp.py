@@ -1,4 +1,4 @@
-"""Banister TRIMP (04-formules-charge.md §5.1) from HR histogram.
+"""Banister TRIMP (04-load-formulas.md §5.1) from HR histogram.
 
 Computed per histogram bucket (1 bpm resolution, ``core.activity_hr_histogram``), not
 global mean: mean(f(HR)) ≠ f(mean(HR)) (Jensen inequality, TRIMP convex in HR). Spec

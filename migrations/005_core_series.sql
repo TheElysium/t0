@@ -1,6 +1,6 @@
--- Migration 005: core : sample, sample_derived, activity_hr_histogram, activity_power_curve, activity_metric
--- Source : research/05-schema-postgres.md §3, transcrit tel quel (DDL figé).
--- Lot L1 (garminator) -- ne pas modifier la DDL manuellement hors migration.
+-- Migration 005: core: sample, sample_derived, activity_hr_histogram, activity_power_curve, activity_metric
+-- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
+-- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
 
 CREATE TABLE core.sample (
     activity_id           bigint      NOT NULL REFERENCES core.activity(activity_id) ON DELETE CASCADE,
@@ -28,21 +28,21 @@ CREATE TABLE core.sample (
 );
 
 COMMENT ON TABLE core.sample IS
-  'Série par seconde, TOUS SPORTS CONFONDUS, image fidèle du message FIT record (mesg num 20, 84 champs — VÉRIFIÉ 02 §2). Table unique et non une table par discipline : les colonnes NULL ne coûtent qu''un bit dans le bitmap de valeurs nulles de l''en-tête de tuple, alors que trois tables imposeraient un UNION dans chaque requête multisport et une triple maintenance d''index. AUCUNE valeur dérivée ici : cette table est reconstructible à l''identique depuis le .FIT et rien d''autre. DIMENSIONNEMENT (calcul, cf. §5) : ~3,2 à 4 M de lignes à 5 ans, ~0,5 à 0,6 Go index compris. CONCLUSION EXPLICITE : PAS DE PARTITIONNEMENT, ni maintenant ni « au cas où ». La PK inclut t, donc la conversion en hypertable TimescaleDB reste possible sans migration si le volume démentait un jour cette estimation.';
+  'Per-second series, ALL SPORTS COMBINED, faithful image of FIT record message (mesg num 20, 84 fields -- VERIFIED 02 section 2). Single table, not one per discipline: NULL columns cost only a bit in the tuple header nulls bitmap, whereas three tables would require a UNION in every multisport query and triple index maintenance. NO derived values here: this table is reconstructible identically from .FIT and nothing else. SIZING (calculation, see section 5): ~3.2 to 4 M rows in 5 years, ~0.5 to 0.6 GB including indexes. EXPLICIT CONCLUSION: NO PARTITIONING, neither now nor "just in case". The PK includes t, so TimescaleDB hypertable conversion remains possible without migration if volume someday contradicted this estimate.';
 COMMENT ON COLUMN core.sample.t IS
-  'Horodatage absolu de l''échantillon (timestamptz). Composant de la PK ET colonne de partitionnement potentielle. L''ordre (activity_id, t) est délibéré : la requête dominante de Grafana est « toute la série d''UNE activité », servie par un parcours d''index contigu.';
+  'Absolute sample timestamp (timestamptz). Component of the PK AND potential partitioning column. The order (activity_id, t) is deliberate: Grafana''s dominant query is "all the series of ONE activity", served by a contiguous index scan.';
 COMMENT ON COLUMN core.sample.elapsed_s IS
-  'Secondes écoulées depuis le départ. Seule redondance tolérée dans cette table (dérivable de t moins activity.start_time) : elle évite une jointure et un calcul d''intervalle dans chaque graphe Grafana d''une séance, pour 4 octets par ligne.';
+  'Seconds elapsed since start. Only tolerated redundancy in this table (derivable from t minus activity.start_time): it avoids a join and interval calculation in every Grafana graph of a session, for 4 bytes per row.';
 COMMENT ON COLUMN core.sample.latitude_deg IS
-  'Degrés décimaux, double precision — et non l''entier semicircles du FIT. La conversion est faite une fois à l''ingestion ; le geomap Grafana et PostGIS attendent des degrés. Coût nul sur les activités indoor et en piscine : une colonne NULL n''occupe aucun octet de données.';
+  'Decimal degrees, double precision -- not the FIT integer semicircles. The conversion is done once at ingestion; Grafana geomap and PostGIS expect degrees. Zero cost on indoor and pool activities: a NULL column occupies zero data bytes.';
 COMMENT ON COLUMN core.sample.power IS
-  'Puissance instantanée en watts, brute. Renseignée à la fois pour le vélo (capteur) et pour la course (Running Power Garmin, présente sur 155/155 des courses — VÉRIFIÉ 04 §0.1). Les deux échelles ne sont PAS comparables (04 §3.2.1) : c''est core.activity.sport_code qui les distingue, et core.threshold qui interdit de partager un seuil.';
+  'Instantaneous power in watts, raw. Populated for both bike (sensor) and running (Garmin Running Power, present on 155/155 runs -- VERIFIED 04 section 0.1). The two scales are NOT comparable (04 section 3.2.1): it is core.activity.sport_code that distinguishes them, and core.threshold that forbids sharing a threshold.';
 COMMENT ON COLUMN core.sample.extra IS
-  'Champs FIT restants (dont les developer fields, messages 206/207) sous forme jsonb, pour ne rien perdre sans coloniser 84 champs. Volontairement NON indexé en GIN : aucune requête identifiée ne filtre dessus, et un index GIN sur plusieurs millions de lignes coûterait plus que la table. À ajouter le jour où un besoin précis apparaît, pas avant.';
+  'Remaining FIT fields (including developer fields, messages 206/207) as jsonb, to lose nothing without columning 84 fields. Deliberately NOT indexed as GIN: no query identified filters on it, and a GIN index over millions of rows would cost more than the table. To add the day a specific need appears, not before.';
 
 CREATE INDEX sample_t_brin ON core.sample USING brin (t) WITH (pages_per_range = 32);
 COMMENT ON INDEX core.sample_t_brin IS
-  'BRIN et non B-tree : les lignes sont insérées par activité, donc physiquement quasi triées par t, ce qui est exactement le cas d''usage du BRIN. Coût : quelques dizaines de kilo-octets, contre ~110 Mo pour un B-tree sur la même colonne. Sert les requêtes de plage temporelle inter-activités (« toutes les données de mars »).';
+  'BRIN not B-tree: rows are inserted per activity, thus physically nearly sorted by t, which is exactly the BRIN use case. Cost: tens of kilobytes, versus ~110 MB for a B-tree on the same column. Serves inter-activity temporal range queries ("all data from March").';
 
 ALTER TABLE core.sample SET (autovacuum_vacuum_scale_factor = 0.02, autovacuum_analyze_scale_factor = 0.01);
 
@@ -62,13 +62,13 @@ CREATE TABLE core.sample_derived (
 );
 
 COMMENT ON TABLE core.sample_derived IS
-  'Séries par seconde CALCULÉES (lissage 30 s de la puissance, pente lissée, facteur de correction de pente, vitesse équivalente plat). Séparée de core.sample pour une raison précise : core.sample est un fait immuable, ceci est le produit d''une version d''algorithme. Une correction de la fenêtre de lissage de pente se traite par TRUNCATE + recalcul, sans jamais toucher aux données brutes ni re-télécharger un FIT. Écrite dans la MÊME transaction que le parsing. PAS de clé étrangère vers core.activity : cette table est convertible en hypertable et Timescale interdit qu''une hypertable soit cible de clé étrangère ; l''intégrité est assurée par la reconstruction en bloc.';
+  'Per-second CALCULATED series (30s power smoothing, smoothed gradient, gradient correction factor, flat-equivalent speed). Separated from core.sample for a precise reason: core.sample is an immutable fact, this is the product of an algorithm version. Correcting the gradient smoothing window is handled by TRUNCATE + recalculation, without ever touching raw data or re-downloading a FIT. Written in the SAME transaction as parsing. NO foreign key to core.activity: this table is convertible to hypertable and Timescale forbids a hypertable being a foreign key target; integrity is ensured by bulk reconstruction.';
 COMMENT ON COLUMN core.sample_derived.grade_pct IS
-  'Pente lissée sur une fenêtre de +/- 10 m de DISTANCE (et non de temps, qui donnerait une fenêtre variable selon l''allure), écrêtée à +/- 30 %. VÉRIFIÉ 04 §3.3.2 : sans lissage, le bruit de l''altimètre barométrique produit des pentes aberrantes seconde par seconde.';
+  'Gradient smoothed over a window of +/- 10 m of DISTANCE (not time, which would give a variable window by pace), clipped to +/- 30%. VERIFIED 04 section 3.3.2: without smoothing, barometric altimeter noise produces aberrant gradients second by second.';
 COMMENT ON COLUMN core.sample_derived.grade_factor IS
-  'Facteur multiplicatif f(i) appliqué à la vitesse pour obtenir la vitesse équivalente sur plat. Forcé à 1 sur tapis de course (core.sport.is_indoor), VÉRIFIÉ 04 §3.3.4.';
+  'Multiplicative factor f(i) applied to speed to get flat-equivalent speed. Forced to 1 on treadmill (core.sport.is_indoor), VERIFIED 04 section 3.3.4.';
 COMMENT ON COLUMN core.sample_derived.imputed IS
-  'true si la valeur de puissance de cette seconde a été reconstituée (interpolation ou remplissage à 0 W). VÉRIFIÉ 04 §1.3. La somme de ces drapeaux alimente core.activity.imputed_seconds.';
+  'true if the power value for this second was reconstructed (interpolation or 0 W filling). VERIFIED 04 section 1.3. The sum of these flags feeds core.activity.imputed_seconds.';
 
 CREATE INDEX sample_derived_t_brin ON core.sample_derived USING brin (t) WITH (pages_per_range = 32);
 ALTER TABLE core.sample_derived SET (autovacuum_vacuum_scale_factor = 0.02);
@@ -84,9 +84,9 @@ CREATE TABLE core.activity_hr_histogram (
 );
 
 COMMENT ON TABLE core.activity_hr_histogram IS
-  'Histogramme de fréquence cardiaque à la résolution de 1 BATTEMENT PAR MINUTE (temps passé à chaque bpm entier). Remplace délibérément le stockage de seconds_in_zone_1..7. VÉRIFIÉ (04 §5.4) : « Stocker le temps par zone fige les bornes de zones dans la donnée. [...] Stocker l''histogramme à 1 bpm rend le temps par zone recalculable pour n''importe quel jeu de bornes. » CONSÉQUENCE DÉCISIVE : corriger un LTHR erroné devient un UPDATE dans core.threshold suivi d''un REFRESH des vues mart — pas une réingestion de 300 activités. COÛT : environ 200 lignes par activité, soit ~60 000 lignes pour l''historique existant et ~220 000 à 5 ans — négligeable devant core.sample. Ne dispense pas de conserver core.sample : l''histogramme perd l''ordre chronologique, donc le découplage aérobie et le TRIMP par échantillon en restent tributaires.';
+  'Heart rate frequency histogram at 1 BEAT-PER-MINUTE resolution (time spent at each whole bpm). Deliberately replaces storing seconds_in_zone_1..7. VERIFIED (04 section 5.4): "Storing time by zone freezes zone boundaries in the data. [...] Storing the histogram at 1 bpm makes time by zone recalculable for any set of bounds." DECISIVE CONSEQUENCE: correcting a wrong LTHR becomes an UPDATE in core.threshold followed by a REFRESH of mart views -- not re-ingesting 300 activities. COST: about 200 rows per activity, i.e., ~60,000 rows for existing history and ~220,000 in 5 years -- negligible versus core.sample. Does not dispense with keeping core.sample: the histogram loses chronological order, so aerobic decoupling and sample-by-sample TRIMP remain dependent on it.';
 COMMENT ON COLUMN core.activity_hr_histogram.seconds IS
-  'Nombre de secondes passées exactement à cette valeur entière de FC. La somme sur une activité vaut le temps de FC valide, qui peut être inférieur à duration_s en cas de décrochage de ceinture.';
+  'Number of seconds spent exactly at this whole HR value. The sum over an activity equals valid HR time, which may be less than duration_s if the belt drops off.';
 
 
 CREATE TABLE core.activity_power_curve (
@@ -101,17 +101,17 @@ CREATE TABLE core.activity_power_curve (
 );
 
 COMMENT ON TABLE core.activity_power_curve IS
-  'Courbe des meilleures moyennes glissantes d''une activité : pour chaque durée d, la meilleure valeur moyenne soutenue pendant d secondes. Précalculée à l''ingestion sur une grille d''environ 60 à 100 DURÉES LOG-ESPACÉES (d_j = round(10^(j/20)) dédoublonné, VÉRIFIÉ 04 §8.2) et non sur toutes les durées entières : la courbe est lisse en échelle log, une résolution fine au-delà de la minute n''apporte rien et multiplierait le volume par cent. Le calcul en SQL à la volée sur plusieurs millions de lignes est hors de portée d''un tableau de bord interactif — d''où la précalculation.';
+  'Curve of an activity''s best moving averages: for each duration d, the best average value sustained for d seconds. Pre-calculated at ingestion on a grid of approximately 60 to 100 LOG-SPACED DURATIONS (d_j = round(10^(j/20)) deduplicated, VERIFIED 04 section 8.2) not all integer durations: the curve is smooth in log scale, fine resolution beyond a minute adds nothing and would multiply volume by a hundred. SQL calculation on the fly over millions of rows is beyond the reach of an interactive dashboard -- hence pre-calculation.';
 COMMENT ON COLUMN core.activity_power_curve.kind IS
-  'Nature de la courbe, explicite et sans ambiguïté d''unité. bike_power et run_power sont en watts et NE DOIVENT JAMAIS ÊTRE FUSIONNÉS (VÉRIFIÉ 04 §8.3, échelles incomparables). run_speed et swim_speed sont en m/s : la vitesse et non l''allure, pour que le meilleur effort soit toujours un MAX (une allure, en s/km, exigerait un MIN et casserait toute agrégation générique). L''allure d''affichage se dérive par 1000/value. Sans run_speed, la courbe record ignorerait les 155 activités de course sur 300 pour lesquelles l''allure est la référence historique.';
+  'Nature of the curve, explicit and unambiguous for units. bike_power and run_power are in watts and MUST NEVER BE MERGED (VERIFIED 04 section 8.3, incomparable scales). run_speed and swim_speed are in m/s: speed not pace, so the best effort is always a MAX (pace in s/km would require a MIN and break any generic aggregation). Display pace is derived by 1000/value. Without run_speed, the record curve would ignore 155 of 300 running activities for which pace is the historical reference.';
 COMMENT ON COLUMN core.activity_power_curve.spans_pause IS
-  'true si la fenêtre optimale enjambe une pause excisée : la moyenne est alors physiologiquement fausse (deux efforts recollés). VÉRIFIÉ 04 §8.3 : ces points doivent être exclus de la courbe record de période, tout en restant visibles sur l''activité.';
+  'true if the optimal window spans an excised pause: the average is then physiologically false (two efforts stuck together). VERIFIED 04 section 8.3: these points must be excluded from the period record curve, while remaining visible on the activity.';
 
 CREATE INDEX activity_power_curve_best_idx
     ON core.activity_power_curve (kind, duration_s, value DESC)
     WHERE NOT spans_pause;
 COMMENT ON INDEX core.activity_power_curve_best_idx IS
-  'Index de service de la courbe record de période : « meilleure valeur sur d secondes parmi les activités d''une plage ». L''ordre DESC sur value permet au planificateur de s''arrêter à la première ligne par groupe. Le filtre partiel exclut d''emblée les fenêtres à cheval sur une pause.';
+  'Index serving the period record curve: "best value over d seconds among activities in a range". The DESC order on value allows the planner to stop at the first row per group. The partial filter immediately excludes windows spanning a pause.';
 
 
 CREATE TABLE core.activity_metric (
@@ -130,12 +130,12 @@ CREATE UNIQUE INDEX activity_metric_canonical_uq
     WHERE is_canonical;
 
 COMMENT ON TABLE core.activity_metric IS
-  'Métriques calculées par activité, en FORMAT LONG (une ligne par méthode de calcul) et non en colonnes larges. Justification : une même activité peut légitimement porter plusieurs valeurs de TSS obtenues par des méthodes différentes (puissance ET fréquence cardiaque), et l''on veut pouvoir les comparer, pas en écraser une. Un format large imposerait tss_power, tss_hr, tss_gap, tss_rpe... et une colonne de plus à chaque nouvelle méthode. L''affichage large reste disponible via la vue mart.activity_wide : table étroite en écriture, vue large en lecture.';
+  'Metrics calculated per activity, in LONG FORMAT (one row per calculation method) not wide columns. Justification: the same activity can legitimately carry multiple TSS values obtained by different methods (power AND heart rate), and we want to compare them, not overwrite one. A wide format would impose tss_power, tss_hr, tss_gap, tss_rpe... and one more column per new method. Wide display remains available via the mart.activity_wide view: narrow table for writing, wide view for reading.';
 COMMENT ON COLUMN core.activity_metric.is_canonical IS
-  'Désigne LA valeur qui fait foi pour cette activité et cette métrique, résolue via core.metric_method_priority. L''index unique partiel garantit qu''il n''y en a jamais deux : l''ambiguïté est interdite par le schéma, pas par une convention de code. Toute vue de charge lit exclusivement is_canonical.';
+  'Designates THE value that is authoritative for this activity and metric, resolved via core.metric_method_priority. The unique partial index guarantees there are never two: ambiguity is forbidden by schema, not code convention. Every load view reads only is_canonical.';
 COMMENT ON COLUMN core.activity_metric.threshold_id IS
-  'Seuil effectivement utilisé pour ce calcul. Traçabilité indispensable : sans lui, on ne peut pas répondre à « ce TSS de 2025 a-t-il été calculé avec l''ancienne FTP ? » après une mise à jour de seuil.';
+  'Threshold actually used for this calculation. Essential traceability: without it, you cannot answer "was this 2025 TSS calculated with the old FTP?" after a threshold update.';
 COMMENT ON COLUMN core.activity_metric.value IS
-  'NULL est une valeur légitime et SIGNIFIANTE : elle veut dire « non calculable » et se distingue de 0. VÉRIFIÉ 04 §0.3 : quand la puissance est présente mais la FC absente (cas observé sur 4 des 19 séances de home-trainer), trimp, hrtss, decoupling et efficiency_factor doivent valoir NULL et jamais 0, sous peine de faire chuter artificiellement toutes les moyennes.';
+  'NULL is a legitimate and MEANINGFUL value: it means "not calculable" and is distinct from 0. VERIFIED 04 section 0.3: when power is present but HR is absent (observed on 4 of 19 home-trainer sessions), trimp, hrtss, decoupling and efficiency_factor must be NULL never 0, lest artificially crash all averages.';
 
 CREATE INDEX activity_metric_metric_idx ON core.activity_metric (metric, method_code);

@@ -1,4 +1,4 @@
-"""Normalized power (NP, Coggan algorithm) - §1 of ``04-formules-charge.md``.
+"""Normalized power (NP, Coggan algorithm) - §1 of ``04-load-formulas.md``.
 
 Windowing convention: **(A) full windows only**. A series of length ``N`` yields ``N - 29``
 windows of 30 samples when ``N >= 30``; otherwise no window, and ``normalized_power``
@@ -22,7 +22,7 @@ MIN_SAMPLES_FOR_NP = 30
 
 #: Between these bounds (seconds usable), NP is mathematically defined but unreliable:
 #: ``np_reliable`` must be ``False`` (§1.6, see ``core.activity.np_reliable``
-#: in ``05-schema-postgres.md``).
+#: in ``05-postgres-schema.md``).
 RELIABLE_THRESHOLD_S = 300
 
 

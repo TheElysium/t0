@@ -1,9 +1,9 @@
-"""Tests d'acceptance de bout en bout du lot L5 (orchestration activity_load.py).
+"""End-to-end acceptance tests for L5 batch (activity_load.py orchestration).
 
-Chaque test ici vérifie un critère d'acceptance explicite du mandat : (1) un vélo
-route sans capteur de puissance retombe sur hrTSS et le trace, (2) TRIMP est None et
-jamais 0 sans FC, (3) une activité antérieure au seuil (2026-05-19 pour cet athlète)
-n'a ni TSS fabriqué ni exception."""
+Each test here verifies an explicit acceptance criterion from the mandate: (1) a road bike
+without power sensor falls back to hrTSS and logs it, (2) TRIMP is None and never 0
+without HR, (3) an activity before the threshold date (2026-05-19 for this athlete) has
+neither fabricated TSS nor exception."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _hr_histogram_around(bpm: int, seconds: int) -> dict[int, int]:
 
 
 class TestRoadBikeFallsBackToHrTss:
-    def test_velo_route_sans_puissance_retombe_sur_hr_hrtss_et_le_trace(self) -> None:
+    def test_road_bike_without_power_falls_back_to_hr_hrtss_and_logs_it(self) -> None:
         bike_threshold = Threshold(
             discipline="bike",
             valid_from=date(2026, 5, 19),
@@ -47,7 +47,7 @@ class TestRoadBikeFallsBackToHrTss:
             duration_s=3600.0,
             distance_m=30000.0,
             swim_time_s=None,
-            np_watts=None,  # pas de capteur de puissance sur le vélo route
+            np_watts=None,  # no power sensor on road bike
             ngp_speed_mps=None,
             hr_histogram=_hr_histogram_around(180, 3600),
             threshold=bike_threshold,
@@ -64,9 +64,9 @@ class TestRoadBikeFallsBackToHrTss:
         assert sum(r.is_canonical for r in tss_rows.values()) == 1
         assert needs_manual_rpe(rows) is False
 
-    def test_velo_indoor_avec_puissance_seule_utilise_bike_power_et_masque_trimp(self) -> None:
-        """Vélo indoor (TCX) : puissance présente, FC absente (addendum §2-3). TSS doit
-        être calculé normalement via bike_power ; TRIMP doit rester None, jamais 0."""
+    def test_indoor_bike_with_power_only_uses_bike_power_and_masks_trimp(self) -> None:
+        """Indoor bike (TCX): power present, HR absent. TSS is computed from bike_power;
+        TRIMP stays None, never 0."""
         bike_threshold = Threshold(
             discipline="bike",
             valid_from=date(2026, 5, 19),
@@ -83,7 +83,7 @@ class TestRoadBikeFallsBackToHrTss:
             swim_time_s=None,
             np_watts=230.0,
             ngp_speed_mps=None,
-            hr_histogram={},  # TCX indoor : pas de FC
+            hr_histogram={},  # TCX indoor: no HR
             threshold=bike_threshold,
             all_threshold=_ALL_THRESHOLD,
         )
@@ -98,7 +98,7 @@ class TestRoadBikeFallsBackToHrTss:
 
 
 class TestActivityBeforeThresholdValidity:
-    def test_aucun_seuil_avant_2026_05_19_pas_de_tss_fabrique_pas_dexception(self) -> None:
+    def test_no_threshold_before_2026_05_19_no_fabricated_tss_no_exception(self) -> None:
         data = ActivityLoadInput(
             activity_id=7,
             sport_code="running",
@@ -109,7 +109,7 @@ class TestActivityBeforeThresholdValidity:
             np_watts=None,
             ngp_speed_mps=3.5,
             hr_histogram=_hr_histogram_around(150, 2700),
-            threshold=None,  # activité antérieure à la date de backdating
+            threshold=None,  # activity before backdate date
             all_threshold=None,
         )
         rows = build_activity_metric_rows(data)
@@ -122,14 +122,14 @@ class TestActivityBeforeThresholdValidity:
 
 
 class TestRunFallsBackFromMissingRftp:
-    def test_course_avec_gap_disponible_rftp_null(self) -> None:
+    def test_run_with_gap_available_rftp_null(self) -> None:
         run_threshold = Threshold(
             discipline="run",
             valid_from=date(2026, 5, 19),
             valid_to=None,
             threshold_id=2,
             ftp_pace_s_per_km=270.0,
-            rftp_watts=None,  # jamais deviné, cf. règle métier non négociable
+            rftp_watts=None,  # never guessed, see non-negotiable business rule
         )
         data = ActivityLoadInput(
             activity_id=8,
@@ -153,9 +153,9 @@ class TestRunFallsBackFromMissingRftp:
 
 
 class TestSwim:
-    def test_natation_utilise_swim_css_sur_le_temps_actif(self) -> None:
-        """Addendum §4 : la natation vit dans les messages ``length``, donc
-        ``swim_time_s`` (temps actif) et non ``duration_s`` (qui inclut les repos)."""
+    def test_swim_uses_swim_css_on_active_time(self) -> None:
+        """Addendum §4: swimming lives in ``length`` messages, so ``swim_time_s``
+        (active time) not ``duration_s`` (which includes rests)."""
         swim_threshold = Threshold(
             discipline="swim",
             valid_from=date(2026, 5, 19),
@@ -167,12 +167,12 @@ class TestSwim:
             activity_id=9,
             sport_code="lap_swimming",
             discipline="swim",
-            duration_s=3600.0,  # avec les repos
+            duration_s=3600.0,  # with rests
             distance_m=1800.0,
-            swim_time_s=1800.0,  # temps actif seul
+            swim_time_s=1800.0,  # active time only
             np_watts=None,
             ngp_speed_mps=None,
-            hr_histogram={},  # pas de FC en piscine
+            hr_histogram={},  # no HR in pool
             threshold=swim_threshold,
             all_threshold=_ALL_THRESHOLD,
         )
@@ -183,11 +183,11 @@ class TestSwim:
         assert tss_rows["swim_css"].threshold_id == swim_threshold.threshold_id
         assert tss_rows["hr_hrtss"].value is None
         assert needs_manual_rpe(rows) is False
-        # 1800 m en 1800 s = 1.0 m/s face au CSS d'exemple (0.909091 m/s) -> IF = 1.1,
-        # sur 0.5 h -> sTSS = 0.5 * 1.1**3 * 100 = 66.55.
+        # 1800 m in 1800 s = 1.0 m/s against the example CSS (0.909091 m/s) -> IF = 1.1,
+        # over 0.5 h -> sTSS = 0.5 * 1.1**3 * 100 = 66.55.
         assert abs(tss_rows["swim_css"].value - 66.55) < 1e-3
 
-    def test_natation_sans_css_ne_fabrique_pas_de_tss(self) -> None:
+    def test_swim_without_css_invents_no_tss(self) -> None:
         data = ActivityLoadInput(
             activity_id=10,
             sport_code="open_water",

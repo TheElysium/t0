@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# --- Étage 1 : construction du wheel ---------------------------------------
+# --- Stage 1: wheel build -------------------------------------------------------
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
@@ -12,11 +12,11 @@ COPY src ./src
 
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels .
 
-# --- Étage 2 : image finale, sans compilateur -------------------------------
+# --- Stage 2: final image, no compiler ----------------------------------------
 FROM python:3.12-slim AS runtime
 
-# Pas de compilateur ni d'outils de build dans l'image finale : les wheels
-# binaires (psycopg[binary], etc.) sont installés tels quels.
+# No compiler or build tools in the final image: binary wheels
+# (psycopg[binary], etc.) are installed as-is.
 RUN groupadd --system garminator \
     && useradd --system --gid garminator --home-dir /app --shell /usr/sbin/nologin garminator
 
@@ -27,7 +27,7 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir /wheels/*.whl \
     && rm -rf /wheels
 
-# Volumes attendus à l'exécution : session Garmin (GARMINTOKENS) et archive FIT.
+# Expected volumes at runtime: Garmin session (GARMINTOKENS) and FIT archive.
 RUN mkdir -p /data/garmin-tokens /data/fit-archive \
     && chown -R garminator:garminator /data /app
 
@@ -40,11 +40,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8000
 
-# Le point d'entrée réel (API FastAPI de L7, endpoint d'upload FIT) n'existe
-# pas encore à ce stade du dépôt (lot L0) ; l'exécution de référence pour le
-# healthcheck est donc l'import du paquet, qui échoue si l'environnement ou
-# les dépendances sont cassés.
+# The healthcheck intentionally stays independent of runtime configuration: the
+# FastAPI factory loads settings only when a request needs them.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import garminator" || exit 1
 
-CMD ["python", "-c", "import garminator; print(garminator.__version__)"]
+# Serve the local manual-upload API by default. Scheduler and operations jobs
+# explicitly override this command in their Helm manifests.
+CMD ["uvicorn", "garminator.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,4 +1,4 @@
-"""Grade-adjusted pace (GAP)—Minetti (2002) model, section 3.3 of 04-formules-charge.md.
+"""Grade-adjusted pace (GAP)—Minetti (2002) model, section 3.3 of 04-load-formulas.md.
 
 Running energy cost as a function of grade i (rise/distance, dimensionless—e.g.,
 i = 0.05 for 5% grade), 5th-degree polynomial fitted by Minetti et al. (2002):
@@ -126,7 +126,7 @@ def smooth_grade_series(
     """
     n = len(distance_m)
     if len(altitude_m) != n:
-        msg = "distance_m et altitude_m doivent avoir la même longueur"
+        msg = "distance_m and altitude_m must have the same length"
         raise ValueError(msg)
 
     bounds = [_window_bounds(distance_m, k, half_window_m) for k in range(n)]
@@ -172,7 +172,7 @@ def normalized_graded_pace_speed_mps(
     never 0.
     """
     if len(speed_mps) != len(grade):
-        msg = "speed_mps et grade doivent avoir la même longueur"
+        msg = "speed_mps and grade must have the same length"
         raise ValueError(msg)
 
     v_gap = [

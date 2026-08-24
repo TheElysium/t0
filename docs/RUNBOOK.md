@@ -1,50 +1,47 @@
-# RUNBOOK — Exploitation de garminator
+# RUNBOOK — Running garminator
 
-Ce document couvre les procédures d'exploitation réellement disponibles à ce jour. Il
-ne décrit que ce qui existe : aucune commande, aucun endpoint, aucune table mentionnés
-ici n'est hypothétique. Là où une pièce manque encore, c'est dit explicitement, avec la
-raison.
+This document covers the operational procedures actually available today. It describes
+only what exists: no command, endpoint, or table mentioned here is hypothetical. Where
+a piece is still missing, it is stated explicitly, with the reason.
 
-Toutes les commandes ci-dessous supposent `GARMINATOR_POSTGRES_DSN` défini dans
-l'environnement (jamais `--dsn` en ligne de commande dans un contexte partagé : voir
-« Pourquoi pas `--dsn` » plus bas).
+All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environment
+(never `--dsn` on the command line in a shared context: see "Why not `--dsn`" below).
 
-## Sommaire
+## Contents
 
-1. [Premier démarrage](#1-premier-démarrage)
-2. [Reprendre après un échec](#2-reprendre-après-un-échec)
-3. [Une fenêtre bloquée en `in_progress`](#3-une-fenêtre-bloquée-en-in_progress)
-4. [Restaurer depuis une sauvegarde](#4-restaurer-depuis-une-sauvegarde)
-5. [Rafraîchir les vues `mart` manuellement](#5-rafraîchir-les-vues-mart-manuellement)
-6. [Garmin renvoie 401](#6-garmin-renvoie-401)
-7. [Pourquoi pas `--dsn`](#7-pourquoi-pas---dsn)
-8. [Le sondage quotidien (CronJob `scheduler`)](#8-le-sondage-quotidien-cronjob-scheduler)
-9. [Réconcilier le PVC et `raw.fit_file`](#9-réconcilier-le-pvc-et-rawfit_file)
-10. [La transformation quotidienne (CronJob `transform`)](#10-la-transformation-quotidienne-cronjob-transform)
-11. [Envoyer un fichier manuellement](#11-envoyer-un-fichier-manuellement)
+1. [First startup](#1-first-startup)
+2. [Recovering from a failure](#2-recovering-from-a-failure)
+3. [A window stuck in `in_progress`](#3-a-window-stuck-in-in_progress)
+4. [Restoring from a backup](#4-restoring-from-a-backup)
+5. [Refreshing `mart` views manually](#5-refreshing-mart-views-manually)
+6. [Garmin returns 401](#6-garmin-returns-401)
+7. [Why not `--dsn`](#7-why-not---dsn)
+8. [Daily polling (CronJob `scheduler`)](#8-daily-polling-cronjob-scheduler)
+9. [Reconciling the PVC and `raw.fit_file`](#9-reconciling-the-pvc-and-rawfit_file)
+10. [Daily transformation (CronJob `transform`)](#10-daily-transformation-cronjob-transform)
+11. [Uploading a file manually](#11-uploading-a-file-manually)
 
 ---
 
-## 1. Premier démarrage
+## 1. First startup
 
-1. Appliquer les migrations :
+1. Apply migrations:
 
    ```
    python -m garminator.db migrate
    ```
 
-   Vérifier l'absence de dérive : `python -m garminator.db status` doit afficher
-   « Dérives détectées : » sans aucune ligne `!` en dessous.
+   Verify the absence of drift: `python -m garminator.db status` should display
+   "Drifts detected: " with no `!` lines below.
 
-2. Les six vues `mart.*` sont peuplées automatiquement à leur création par les
-   migrations 007/008 (`CREATE MATERIALIZED VIEW` sans `WITH NO DATA`) : aucune action
-   supplémentaire n'est nécessaire à ce stade pour qu'elles existent, mais elles seront
-   VIDES tant qu'aucune activité n'a été ingérée dans `core.activity` — c'est normal, pas
-   une panne.
+2. The six `mart.*` views are automatically populated on creation by migrations 007/008
+   (`CREATE MATERIALIZED VIEW` without `WITH NO DATA`): no additional action is needed at
+   this stage for them to exist, but they will be EMPTY as long as no activity has been
+   ingested into `core.activity` -- this is normal, not a failure.
 
-3. **Amorcer l'athlète et ses seuils.** Étape OBLIGATOIRE, et la seule qui ne soit pas
-   automatisable : copier `deploy/seed/athlete.sql.example` **hors du dépôt**, le
-   remplir, puis l'exécuter :
+3. **Seed the athlete and their thresholds.** MANDATORY step, and the only one that is
+   not automatable: copy `deploy/seed/athlete.sql.example` **outside the repository**,
+   fill it in, then execute it:
 
    ```
    cp deploy/seed/athlete.sql.example ~/garminator-seed.sql
@@ -52,412 +49,405 @@ l'environnement (jamais `--dsn` en ligne de commande dans un contexte partagé :
    psql "$GARMINATOR_POSTGRES_DSN" -f ~/garminator-seed.sql
    ```
 
-   Ce n'est pas une migration parce que ces valeurs sont des données personnelles
-   (poids, fréquences cardiaques, seuils) : le dépôt porte la procédure, jamais la
-   donnée — même raisonnement que pour les traces GPS des fichiers .FIT. Le prix à payer
-   est que **cette étape est à refaire sur chaque base neuve**.
+   This is not a migration because these values are personal data (weight, heart rates,
+   thresholds): the repository carries the procedure, never the data -- same reasoning as
+   for the GPS traces in .FIT files. The price to pay is that **this step must be
+   repeated for each new database**.
 
-   Sans elle, `python -m garminator.transform` s'arrête en code 2 (« core.athlete
-   contient 0 ligne(s) ») : il refuse de deviner l'athlète, parce qu'un mauvais athlète
-   donnerait de mauvais seuils, donc des TSS faux — sans violer la moindre contrainte ni
-   produire le moindre symptôme visible avant des mois.
+   Without it, `python -m garminator.transform` exits with code 2 ("core.athlete
+   contains 0 row(s)"): it refuses to guess the athlete, because a wrong athlete would
+   give wrong thresholds, so false TSS -- without violating any constraint or producing
+   any visible symptom for months.
 
-4. Constater l'état de départ :
+4. Observe the starting state:
 
    ```
    python -m garminator.ops health
    ```
 
-   Sur une base neuve, attendez-vous à : aucun endpoint dans « Dernier succès par
-   endpoint » (raw.poll_window est vide), zéro fenêtre en échec, zéro fenêtre bloquée,
-   et les six vues `mart` à `0` ligne (peuplées mais vides).
+   On a new database, expect: no endpoint in "Last success per endpoint" (raw.poll_window
+   is empty), zero failed windows, zero stuck windows, and all six `mart` views at 0 rows
+   (populated but empty).
 
-5. Déclencher le premier sondage. Il n'y a rien de spécial à faire : le CronJob
-   `<release>-scheduler` (`scheduler-cronjob.yaml`) passe chaque jour et rattrape
-   lui-même tout l'historique manquant depuis `GARMINATOR_HISTORY_START`, à raison de
-   `scheduler.maxWindowsPerEndpoint` fenêtres par endpoint et par passage — voir la
-   section 8. Pour ne pas attendre le prochain passage planifié :
+5. Trigger the first poll. There is nothing special to do: the CronJob `<release>-scheduler`
+   (`scheduler-cronjob.yaml`) runs daily and catches up itself all missing history since
+   `GARMINATOR_HISTORY_START`, at a rate of `scheduler.maxWindowsPerEndpoint` windows per
+   endpoint per run -- see section 8. To avoid waiting for the next scheduled run:
 
    ```
-   kubectl create job --from=cronjob/<release>-scheduler premier-sondage
+   kubectl create job --from=cronjob/<release>-scheduler first-poll
    ```
 
-   Sur un tout premier backfill, ce premier passage télécharge aussi les fichiers
-   originaux (.FIT/.TCX) de chaque activité rencontrée. Pour étaler cette salve, un
-   premier run purement JSON est possible via `scheduler.activityFiles: false` (drapeau
-   `--no-activity-files`) : les fichiers seront récupérés aux passages suivants, une fois
-   le drapeau remis à `true`.
+   On a very first backfill, this first run also downloads the original files (.FIT/.TCX)
+   for each activity encountered. To spread out this batch, a JSON-only run is possible
+   via `scheduler.activityFiles: false` (flag `--no-activity-files`): files will be
+   retrieved on subsequent runs, once the flag is set back to `true`.
 
-6. Suivre l'avancement du rattrapage :
+6. Follow the backfill progress:
 
    ```
    python -m garminator.ops backfill-status
    ```
 
-   Cette commande est un RAPPORT lecture seule sur `raw.poll_window` : elle ne déclenche
-   aucun sondage. C'est le CronJob ci-dessus qui progresse, passage après passage.
+   This command is a read-only REPORT on `raw.poll_window`: it triggers no polling. It is
+   the CronJob above that progresses, run after run.
 
-## 2. Reprendre après un échec
+## 2. Recovering from a failure
 
-Le sondage (`garminator.scheduler.service.run_scheduled_poll`, utilisé par le service
-d'ingestion) est conçu pour être rejouable sans risque : une fenêtre déjà `done` n'est
-retéléchargée que si elle retombe dans la fenêtre glissante de rafraîchissement récente
-(`refresh_lookback_days`, 3 jours par défaut). Reprendre après un échec (crash du pod,
-coupure réseau, redémarrage du cluster) ne demande donc **aucune action manuelle** :
-relancer le service d'ingestion suffit, il reprendra exactement où il s'était arrêté.
+The polling (`garminator.scheduler.service.run_scheduled_poll`, used by the ingestion
+service) is designed to be safely replayable: a window already `done` is only
+re-downloaded if it falls back into the recent refresh sliding window (`refresh_lookback_days`,
+3 days by default). Recovering from a failure (pod crash, network outage, cluster restart)
+therefore requires **no manual action**: restarting the ingestion service is enough, it
+will resume exactly where it left off.
 
-Pour vérifier ce qu'il reste à faire avant de relancer :
+To check what remains to be done before restarting:
 
 ```
 python -m garminator.ops backfill-status --endpoint <endpoint> [--endpoint <endpoint> ...]
 ```
 
-Remplacer `<endpoint>` par les noms d'endpoints réellement sondés par le service
-d'ingestion (ce runbook ne les invente pas : consulter la configuration du service
-d'ingestion pour la liste en vigueur).
+Replace `<endpoint>` with the names of endpoints actually polled by the ingestion service
+(this runbook does not invent them: consult the ingestion service configuration for the
+current list).
 
-## 3. Une fenêtre bloquée en `in_progress`
+## 3. A window stuck in `in_progress`
 
-Une fenêtre reste `in_progress` quand le processus a été interrompu (kill, OOM, panne
-du nœud) entre le moment où elle a été marquée `in_progress` et celui où elle aurait dû
-être marquée `done` ou `failed`.
+A window remains `in_progress` when the process was interrupted (kill, OOM, node crash)
+between the moment it was marked `in_progress` and when it should have been marked `done`
+or `failed`.
 
-**Aucune intervention manuelle en base n'est nécessaire ni recommandée.** Le calcul des
-fenêtres dues (`garminator.scheduler.planning.due_windows`) considère automatiquement
-comme due toute fenêtre `in_progress` dont `last_attempted_at` dépasse
-`DEFAULT_STALE_IN_PROGRESS_AFTER` (2 heures) : au prochain cycle de sondage, elle sera
-retentée normalement, sans duplication (la fenêtre est simplement retraitée comme si
-elle était `pending`).
+**No manual database intervention is necessary or recommended.** The calculation of due
+windows (`garminator.scheduler.planning.due_windows`) automatically considers any
+`in_progress` window whose `last_attempted_at` exceeds `DEFAULT_STALE_IN_PROGRESS_AFTER`
+(2 hours) as due: on the next poll cycle, it will be retried normally, without duplication
+(the window is simply reprocessed as if it were `pending`).
 
-Pour l'observer :
+To observe this:
 
 ```
 python -m garminator.ops health
 ```
 
-section « Fenêtres bloquées in_progress ». Si une fenêtre y reste listée sur PLUSIEURS
-exécutions consécutives séparées de plus de 2 heures, ce n'est plus un cas normal
-d'attente : cela signifie que le service de sondage lui-même ne tourne plus (sinon il
-l'aurait reprise). Diagnostiquer d'abord l'état du pod d'ingestion (`kubectl get pods`,
-`kubectl logs`) avant toute manipulation de `raw.poll_window`.
+section "Stuck in_progress windows". If a window remains listed there across MULTIPLE
+consecutive executions separated by more than 2 hours, it is no longer a normal wait case:
+it means the polling service itself is no longer running (otherwise it would have picked
+it up). Diagnose the ingestion pod state first (`kubectl get pods`, `kubectl logs`) before
+any manipulation of `raw.poll_window`.
 
-Ne JAMAIS `UPDATE raw.poll_window SET status = 'failed'` à la main pour « débloquer »
-une fenêtre : c'est inutile (le mécanisme ci-dessus s'en charge) et risque de masquer un
-job de sondage réellement arrêté (le symptôme visible disparaîtrait sans que la cause
-soit traitée).
+Never manually `UPDATE raw.poll_window SET status = 'failed'` to "unblock" a window: it
+is unnecessary (the mechanism above handles it) and risks masking a polling job that is
+truly stopped (the visible symptom would disappear without the cause being addressed).
 
-## 4. Restaurer depuis une sauvegarde
+## 4. Restoring from a backup
 
-Les sauvegardes sont produites par le CronJob existant
-(`deploy/helm/garminator/templates/backup-cronjob.yaml`), au format `pg_dump --format=custom`,
-dans `fitArchive.subPaths.postgresBackups` du PVC partagé, nommées
-`garminator-<horodatage-UTC>.dump`.
+Backups are produced by the existing CronJob
+(`deploy/helm/garminator/templates/backup-cronjob.yaml`), in `pg_dump --format=custom`
+format, in `fitArchive.subPaths.postgresBackups` of the shared PVC, named
+`garminator-<UTC-timestamp>.dump`.
 
-1. Identifier le dump à restaurer (le plus récent, sauf besoin explicite d'un point
-   dans le passé) : lister le contenu du sous-chemin de sauvegarde sur le PVC.
-2. Restaurer avec `pg_restore` contre une base PostgreSQL joignable :
+1. Identify the dump to restore (the most recent, unless explicitly needing a point in
+   the past): list the contents of the backup subdirectory on the PVC.
+2. Restore with `pg_restore` against a reachable PostgreSQL database:
 
    ```
-   pg_restore --clean --if-exists --no-owner --dbname="$GARMINATOR_POSTGRES_DSN" garminator-<horodatage>.dump
+   pg_restore --clean --if-exists --no-owner --dbname="$GARMINATOR_POSTGRES_DSN" garminator-<timestamp>.dump
    ```
 
-   `--clean --if-exists` supprime les objets existants avant de les recréer : la
-   restauration remplace intégralement le contenu de la base cible — à n'exécuter que
-   contre une base explicitement destinée à recevoir cette restauration, jamais contre
-   une base de production sans confirmation préalable.
+   `--clean --if-exists` deletes existing objects before recreating them: the restore
+   completely replaces the contents of the target database -- only execute against a
+   database explicitly intended to receive this restore, never against a production
+   database without prior confirmation.
 
-3. Après restauration, vérifier l'absence de dérive de schéma et l'état des vues :
+3. After restore, verify the absence of schema drift and the state of the views:
 
    ```
    python -m garminator.db status
    python -m garminator.ops health
    ```
 
-   Si les vues `mart` apparaissent « JAMAIS PEUPLÉE » après restauration (cas possible
-   si le dump a été produit par un outil qui exclut les données des vues matérialisées),
-   voir la section suivante : `python -m garminator.ops refresh` bascule automatiquement
-   sur un rafraîchissement non concurrent pour ce cas précis.
+   If the `mart` views appear "NEVER POPULATED" after restore (possible if the dump was
+   produced by a tool that excludes materialized view data), see the next section:
+   `python -m garminator.ops refresh` automatically switches to non-concurrent refresh
+   for this specific case.
 
-## 5. Rafraîchir les vues `mart` manuellement
+## 5. Refreshing `mart` views manually
 
 ```
 python -m garminator.ops refresh
 ```
 
-Rafraîchit les six vues `mart.*` dans l'ordre imposé par leurs dépendances réelles
-(`mart.daily_load` avant `mart.pmc`, qui la lit — les quatre autres vues n'ont pas
-d'ordre imposé entre elles). Chaque vue est rafraîchie indépendamment : l'échec d'une
-vue n'empêche pas les suivantes d'être tentées, et le code de sortie de la commande
-(`1`) signale un échec partiel sans qu'il faille relire les logs pour le savoir.
+Refreshes the six `mart.*` views in the order imposed by their actual dependencies
+(`mart.daily_load` before `mart.pmc`, which reads it -- the other four views have no
+imposed order among themselves). Each view is refreshed independently: the failure of one
+view does not prevent subsequent ones from being attempted, and the exit code of the
+command (`1`) signals a partial failure without needing to reread the logs.
 
-Ce rafraîchissement manuel est un COMPLÉMENT au `CronJob` de rafraîchissement
-périodique (`ops-refresh-cronjob.yaml`, cadence dans `opsRefresh.schedule`), utile
-immédiatement après une restauration ou un rattrapage massif, sans attendre le prochain
-passage planifié.
+This manual refresh is a COMPLEMENT to the periodic refresh `CronJob`
+(`ops-refresh-cronjob.yaml`, schedule in `opsRefresh.schedule`), useful immediately
+after a restore or massive catch-up, without waiting for the next scheduled run.
 
-## 6. Garmin renvoie 401
+## 6. Garmin returns 401
 
-Un 401 signifie que la session persistée dans `GARMINTOKENS` n'est plus valide (mot de
-passe changé, session expirée côté Garmin, ou compte bloqué après trop de tentatives).
+A 401 means that the session persisted in `GARMINTOKENS` is no longer valid (password
+changed, session expired on Garmin's side, or account locked after too many attempts).
 
-1. **Ne pas relancer le service en boucle** : chaque tentative de reconnexion échouée
-   avec de mauvaises informations d'identification rapproche le compte (sans 2FA — voir
-   le profil athlète) d'un blocage total.
-2. Vérifier que `GARMINATOR_GARMIN_USERNAME`/`GARMINATOR_GARMIN_PASSWORD` (variables
-   d'environnement du conteneur, alimentées depuis les clés `username`/`password` du
-   Secret Kubernetes référencé par `ingest-deployment.yaml` et le CronJob du scheduler)
-   sont toujours corrects. Le préfixe `GARMINATOR_` est obligatoire : `Settings` est un
-   `BaseSettings` avec `env_prefix="GARMINATOR_"` et `extra="ignore"`, donc une variable
-   non préfixée est ignorée en silence et le pod échoue au démarrage sur un champ requis
-   manquant — symptôme qui ne ressemble PAS à un problème d'identifiants.
-3. Si les identifiants sont corrects mais la session a simplement expiré, purger le
-   contenu de `GARMINTOKENS` (sous-chemin `fitArchive.subPaths.garminTokens` du PVC)
-   pour forcer une nouvelle authentification complète au prochain démarrage du pod
-   d'ingestion — à faire consciemment, pas systématiquement : chaque authentification
-   complète est elle-même plus visible pour Garmin qu'une reprise de session.
-4. Si le blocage persiste après une authentification manuelle réussie hors du cluster
-   (navigateur), il ne s'agit plus d'un problème que ce dépôt peut résoudre par du code :
-   c'est un incident côté compte Garmin, à traiter directement sur leur interface.
+1. **Do not restart the service in a loop**: each failed reconnection attempt with bad
+   credentials brings the account (without 2FA -- see athlete profile) closer to a total
+   lockout.
+2. Verify that `GARMINATOR_GARMIN_USERNAME`/`GARMINATOR_GARMIN_PASSWORD` (container
+   environment variables, fed from the `username`/`password` keys of the Kubernetes Secret
+   referenced by `ingest-deployment.yaml` and the scheduler CronJob) are still correct.
+   The `GARMINATOR_` prefix is mandatory: `Settings` is a `BaseSettings` with
+   `env_prefix="GARMINATOR_"` and `extra="ignore"`, so an unprefixed variable is silently
+   ignored and the pod fails on startup with a missing required field -- a symptom that
+   does NOT look like a credentials problem.
+3. If the credentials are correct but the session has simply expired, purge the contents
+   of `GARMINTOKENS` (subdirectory `fitArchive.subPaths.garminTokens` of the PVC) to
+   force a new full authentication on the next ingestion pod startup -- do this
+   consciously, not systematically: each full authentication is itself more visible to
+   Garmin than session resumption.
+4. If the lockout persists after a successful manual authentication outside the cluster
+   (browser), it is no longer a problem this repository can solve with code: it is a
+   Garmin account incident, to be handled directly on their interface.
 
-Ce lot n'ajoute aucune détection automatique du 401 : `python -m garminator.ops health`
-ne verra un tel incident qu'indirectement, via l'accumulation de fenêtres `failed` (le
-message d'erreur persisté dans `raw.poll_window.last_error` par le sondage, si le 401
-s'y répercute, donnera le détail exact — la CLI `health` l'affiche déjà par fenêtre).
+This batch adds no automatic 401 detection: `python -m garminator.ops health` will see
+such an incident only indirectly, through the accumulation of `failed` windows (the error
+message persisted in `raw.poll_window.last_error` by polling, if the 401 propagates there,
+will give the exact detail -- the `health` CLI already displays it per window).
 
-## 7. Pourquoi pas `--dsn`
+## 7. Why not `--dsn`
 
-`python -m garminator.ops` accepte `--dsn` pour un usage interactif ponctuel, mais la
-variable d'environnement `GARMINATOR_POSTGRES_DSN` reste le choix par défaut recommandé
-et celui utilisé par tous les manifests Helm de ce lot : un DSN passé en argument de
-ligne de commande porte le mot de passe PostgreSQL en clair et reste visible dans la
-liste des processus du conteneur (`ps`, `/proc/<pid>/cmdline`, et
-`spec.containers[].command` via `kubectl describe pod`) pendant toute la durée de vie
-du processus — la variable d'environnement n'est, elle, exposée que via
-`/proc/<pid>/environ`, déjà le canal utilisé par le reste du dépôt (identifiants Garmin
-inclus) et jugé acceptable pour ce niveau de risque.
+`python -m garminator.ops` accepts `--dsn` for occasional interactive use, but the
+environment variable `GARMINATOR_POSTGRES_DSN` remains the recommended default choice
+and the one used by all Helm manifests in this batch: a DSN passed as a command-line
+argument carries the PostgreSQL password in the clear and remains visible in the
+container's process list (`ps`, `/proc/<pid>/cmdline`, and `spec.containers[].command`
+via `kubectl describe pod`) for the entire lifetime of the process -- the environment
+variable is only exposed via `/proc/<pid>/environ`, already the channel used by the rest
+of the repository (including Garmin credentials) and judged acceptable for this level of
+risk.
 
 ---
 
-## 8. Le sondage quotidien (CronJob `scheduler`)
+## 8. Daily polling (CronJob `scheduler`)
 
-C'est la pièce qui interroge réellement Garmin. Manifeste :
-`deploy/helm/garminator/templates/scheduler-cronjob.yaml`, valeurs sous `scheduler.*`.
+This is the piece that actually queries Garmin. Manifest:
+`deploy/helm/garminator/templates/scheduler-cronjob.yaml`, values under `scheduler.*`.
 
-| Clé | Défaut | Effet |
+| Key | Default | Effect |
 | --- | --- | --- |
-| `scheduler.enabled` | `true` | Désactive complètement le sondage si `false`. |
-| `scheduler.schedule` | `"0 5 * * *"` | Cadence. Un passage par jour suffit : Garmin consolide sommeil et HRV plusieurs heures après le réveil. |
-| `scheduler.maxWindowsPerEndpoint` | `60` | Fenêtres traitées par endpoint et par passage. Borne la durée d'un run et le nombre de requêtes vers une API non publique. |
-| `scheduler.activityFiles` | `true` | À `false`, ajoute `--no-activity-files` : sondage JSON seul, sans télécharger les .FIT/.TCX. |
-| `scheduler.endpoints` | les 10 de `DEFAULT_ENDPOINTS` | Doit rester aligné sur le catalogue du code ; `tests/test_config_coherence.py` le vérifie. |
+| `scheduler.enabled` | `true` | Completely disables polling if `false`. |
+| `scheduler.schedule` | `"0 5 * * *"` | Schedule. One run per day is enough: Garmin consolidates sleep and HRV several hours after waking. |
+| `scheduler.maxWindowsPerEndpoint` | `60` | Windows processed per endpoint per run. Bounds the duration of a run and the number of requests to a non-public API. |
+| `scheduler.activityFiles` | `true` | When `false`, adds `--no-activity-files`: JSON polling only, without downloading .FIT/.TCX. |
+| `scheduler.endpoints` | the 10 of `DEFAULT_ENDPOINTS` | Must stay aligned with the code catalog; `tests/test_config_coherence.py` verifies it. |
 
-Ce que fait un passage, dans l'ordre : il calcule les fenêtres dues (tout jour non
-encore `done` depuis `GARMINATOR_HISTORY_START`, plus les
-`GARMINATOR_REFRESH_LOOKBACK_DAYS` derniers jours rejoués systématiquement, plus
-toujours le jour même), sonde chaque endpoint, puis archive sur le PVC les fichiers
-originaux des activités que le sondage vient de lister — sans requête supplémentaire
-pour redemander cette liste.
+What a run does, in order: it calculates due windows (every day not yet `done` since
+`GARMINATOR_HISTORY_START`, plus the `GARMINATOR_REFRESH_LOOKBACK_DAYS` last days
+systematically replayed, plus always the current day), polls each endpoint, then archives
+on the PVC the original files of activities the poll just listed -- without an additional
+request to re-ask for this list.
 
-**`concurrencyPolicy: Forbid` n'est pas du confort.** Deux passages simultanés
-authentifieraient deux sessions Garmin en parallèle sur le même compte, et une salve
-d'authentifications est précisément ce qui fait bloquer un compte Garmin Connect. Pour
-la même raison `backoffLimit: 0` : une fenêtre en échec est déjà persistée `'failed'` en
-base et sera rejouée au prochain passage, alors que réessayer immédiatement un échec
-d'authentification ne fait qu'accélérer le blocage. Ne pas relancer le Job en boucle
-après un échec — voir la section 6.
+**`concurrencyPolicy: Forbid` is not a comfort.** Two simultaneous runs would authenticate
+two Garmin sessions in parallel on the same account, and a wave of authentications is
+precisely what locks a Garmin Connect account. For the same reason `backoffLimit: 0`: a
+failed window is already persisted as `'failed'` in the database and will be retried on
+the next run, whereas immediately retrying an authentication failure only accelerates the
+lockout. Do not restart the Job in a loop after a failure -- see section 6.
 
-Le rattrapage historique n'a pas de commande dédiée : c'est ce même CronJob qui, passage
-après passage, consomme les fenêtres restantes. `python -m garminator.ops
-backfill-status` en donne l'avancement.
+Historical catch-up has no dedicated command: it is this same CronJob that, run after run,
+consumes the remaining windows. `python -m garminator.ops backfill-status` gives its
+progress.
 
 ---
 
-## 9. Réconcilier le PVC et `raw.fit_file`
+## 9. Reconciling the PVC and `raw.fit_file`
 
-`migrations/002_raw.sql` pose la règle d'atomicité — **le fichier est écrit et fsync sur
-le PVC AVANT l'INSERT de sa ligne, jamais l'inverse** — et qualifie les deux désaccords
-possibles. Le CronJob `ops-reconcile` (tous les jours à 07h00) les cherche. Il est
-**strictement en lecture seule** : le PVC lui est monté `readOnly`, il ne supprime aucun
-fichier et ne modifie aucune ligne.
+`migrations/002_raw.sql` establishes the atomicity rule -- **the file is written and
+fsynced on the PVC BEFORE its row is INSERTed, never the other way around** -- and
+qualifies the two possible disagreements. The CronJob `ops-reconcile` (daily at 07:00)
+looks for them. It is **strictly read-only**: the PVC is mounted `readOnly` for it, it
+deletes no files and modifies no rows.
 
-| Anomalie | Gravité | Ce que ça veut dire |
+| Anomaly | Severity | What it means |
 |---|---|---|
-| **Fichier orphelin** (sur le PVC, aucune ligne) | bénin | Archivage réussi, INSERT en échec. C'est le sens que la règle d'atomicité rend délibérément possible. Le fichier est simplement inutilisé. |
-| **Ligne orpheline** (en base, aucun fichier) | **grave** | La ligne affirme l'existence d'un fichier source. Toute reconstruction de `core` depuis `raw` s'appuiera dessus et échouera, ou sautera l'activité en silence. |
-| **Taille (ou sha256) divergente** | **grave** | Troncature ou écrasement : la ligne ne décrit plus son fichier. |
+| **Orphan file** (on PVC, no row) | benign | Archive succeeded, INSERT failed. This is the case the atomicity rule deliberately makes possible. The file is simply unused. |
+| **Orphan row** (in database, no file) | **grave** | The row asserts the existence of a source file. Any reconstruction of `core` from `raw` will rely on it and fail, or silently skip the activity. |
+| **Size (or sha256) divergent** | **grave** | Truncation or overwrite: the row no longer describes its file. |
 
-Le Job ne sort en échec que sur une anomalie **grave**. Un fichier orphelin le laisse en
-succès, délibérément : un CronJob qui échoue pour un fichier inutilisé finit par ne plus
-être lu du tout, et c'est l'alerte « ligne orpheline » qu'on ne peut pas se permettre
-d'ignorer.
+The Job exits with failure only on a **grave** anomaly. An orphan file leaves it in
+success, deliberately: a CronJob that fails for an unused file ends up not being read at
+all, and it is the "orphan row" alert that cannot be afforded to ignore.
 
-### Lancer un scan à la demande
-
-```bash
-kubectl create job -n garminator --from=cronjob/garminator-ops-reconcile scan-manuel
-```
-
-Puis lire le rapport :
+### Run a scan on demand
 
 ```bash
-kubectl logs -n garminator job/scan-manuel
+kubectl create job -n garminator --from=cronjob/garminator-ops-reconcile manual-scan
 ```
 
-### Scan profond
+Then read the report:
 
-Par défaut le scan compare les **tailles** : sur ~1 090 fichiers de plusieurs Mo, relire
-tout le volume pour un contrôle quotidien coûte cher, et la taille attrape la quasi-totalité
-des cas. Sur soupçon de corruption silencieuse (même taille, contenu différent), passer
-`opsReconcile.deep=true` — ou lancer ponctuellement le module à la main depuis un pod qui
-monte le PVC :
+```bash
+kubectl logs -n garminator job/manual-scan
+```
+
+### Deep scan
+
+By default the scan compares **sizes**: on ~1,090 files of several MB, re-reading the
+entire volume for a daily check is expensive, and size catches the vast majority of
+cases. On suspicion of silent corruption (same size, different content), pass
+`opsReconcile.deep=true` -- or occasionally run the module by hand from a pod that mounts
+the PVC:
 
 ```bash
 python -m garminator.ops reconcile --archive-root /data/fit-archive --deep
 ```
 
-### Que faire des anomalies
+### What to do with anomalies
 
-- **Fichiers orphelins** — rien d'urgent. Ils n'occupent que de l'espace. Avant d'en
-  supprimer un, vérifier qu'aucune ligne ne le référence (le rapport l'a déjà fait, mais
-  la suppression est irréversible et le rapport peut dater). Une accumulation soudaine est
-  en revanche un symptôme à comprendre, pas à balayer.
-- **Lignes orphelines** — c'est le cas grave. Le fichier source est perdu : la ligne
-  `raw.fit_file` ne peut plus être rejouée. Si l'activité existe encore chez Garmin, la
-  voie de réparation est de **supprimer la ligne** puis de laisser le sondage la
-  retélécharger (une fenêtre repassée en `failed` sera reprise — voir la section 2). Si
-  elle vient d'un upload manuel, le fichier d'origine est la seule source.
-- **Toutes les lignes rapportées absentes d'un coup** — ce n'est pas une perte de données,
-  c'est presque toujours un **PVC monté ailleurs** qu'à l'écriture. Comparer
-  `--archive-root` à `ingest.config.fitArchivePath` et au `subPath` du montage. Le scan est
-  volontairement bruyant dans ce cas plutôt que silencieux.
+- **Orphan files** -- nothing urgent. They only take up space. Before deleting one, verify
+  that no row references it (the report already did, but deletion is irreversible and the
+  report may be stale). A sudden accumulation is however a symptom to understand, not to
+  sweep away.
+- **Orphan rows** -- this is the grave case. The source file is lost: the `raw.fit_file`
+  row can no longer be replayed. If the activity still exists at Garmin, the repair path
+  is to **delete the row** then let polling re-download it (a window changed to `failed`
+  will be picked up -- see section 2). If it comes from a manual upload, the original file
+  is the only source.
+- **All reported rows missing at once** -- this is not data loss, it is almost always a
+  **PVC mounted elsewhere** than at write time. Compare `--archive-root` to
+  `ingest.config.fitArchivePath` and the `subPath` of the mount. The scan is deliberately
+  loud in this case rather than silent.
 
-Un contexte historique utile : jusqu'à la correction du hachage des téléchargements ZIP
-dans `garminator.scheduler.activity_files`, chaque passage sur la fenêtre du jour courant
-réarchivait les activités du jour. Un déploiement antérieur à cette correction a donc très
-probablement accumulé des fichiers orphelins — bénins, mais nombreux.
+Useful historical context: until the ZIP download hash fix in `garminator.scheduler.activity_files`,
+each run on the current day's window re-archived that day's activities. A deployment before
+this fix has therefore very likely accumulated orphan files -- benign, but numerous.
 
-## 10. La transformation quotidienne (CronJob `transform`)
+## 10. Daily transformation (CronJob `transform`)
 
 ```
 python -m garminator.transform [--limit N] [--athlete-id N] [--retry-failed]
 ```
 
-C'est le maillon entre l'archive et les tableaux de bord : il consomme les fichiers de
-`raw.fit_file` dont `parsed_at` est NULL, les décode, et écrit les lignes `core.*` dont
-les vues `mart.*` dérivent. Le CronJob `<release>-transform` le lance chaque jour, entre
-le sondage et le rafraîchissement des vues (`transform.schedule` dans `values.yaml`).
+This is the link between the archive and the dashboards: it consumes files from
+`raw.fit_file` whose `parsed_at` is NULL, decodes them, and writes the `core.*` rows
+that the `mart.*` views derive from. The CronJob `<release>-transform` runs it daily,
+between polling and view refresh (`transform.schedule` in `values.yaml`).
 
-**Cet ordre n'est pas une préférence.** Rafraîchir les vues avant la transformation
-RÉUSSIT : le rafraîchissement recopie simplement du vide. Les tableaux de bord restent
-blancs une journée entière sans qu'aucun voyant ne s'allume. Un test
-(`tests/test_config_coherence.py`) vérifie que les trois `schedule` du chart restent dans
-l'ordre sondage → transformation → refresh ; ne pas le contourner.
+**This order is not a preference.** Refreshing views before transformation SUCCEEDS: the
+refresh simply copies empty data. The dashboards remain blank for an entire day without
+any lights turning on. A test (`tests/test_config_coherence.py`) verifies that the three
+`schedule` entries in the chart stay in the order poll -> transform -> refresh; do not
+work around it.
 
-### Lire le code de sortie
+### Read the exit code
 
-- **`0`** — passage nominal, **y compris avec des fichiers reportés**. Un fichier dont le
-  résumé Garmin n'est pas encore ingéré est un état transitoire attendu : ni `parsed_at`
-  ni `parse_error` ne sont posés, le fichier revient de lui-même dans la file au passage
-  suivant. Le compter comme un échec ferait échouer le CronJob presque chaque nuit, et un
-  CronJob qui échoue toutes les nuits est un CronJob qu'on cesse de regarder.
-- **`1`** — au moins un fichier en échec. L'incident est déjà consigné dans
-  `raw.fit_file.parse_error` ; le code de sortie sert seulement à le rendre visible sans
-  lire les logs.
-- **`2`** — le passage n'a pas pu commencer : DSN absent, ou `core.athlete` vide ou
-  ambiguë (voir l'étape 3 du premier démarrage). Distinct de `1` parce que **rien n'a été
-  tenté** : c'est une erreur de configuration, pas une donnée fautive.
+- **`0`** -- normal run, **including with deferred files**. A file whose Garmin summary
+  is not yet ingested is an expected transitory state: neither `parsed_at` nor
+  `parse_error` are set, the file returns itself to the queue on the next run. Counting
+  it as a failure would fail the CronJob almost every night, and a CronJob that fails
+  every night is one you stop reading.
+- **`1`** -- at least one file failed. The incident is already recorded in
+  `raw.fit_file.parse_error`; the exit code just makes it visible without reading logs.
+- **`2`** -- the run could not start: DSN missing, or `core.athlete` empty or ambiguous
+  (see step 3 of first startup). Distinct from `1` because **nothing was attempted**: it
+  is a configuration error, not faulty data.
 
-### Un fichier en échec
+### A file in failure
 
 ```
 SELECT fit_file_id, garmin_activity_id, storage_path, parse_error
 FROM raw.fit_file WHERE parse_error IS NOT NULL ORDER BY downloaded_at DESC;
 ```
 
-Un fichier portant un `parse_error` **sort de la file** et n'est plus retenté : sans
-cela, un fichier indigeste ferait échouer le passage toutes les nuits. Une fois la cause
-corrigée (correspondance de sport manquante, décodeur à réparer) :
+A file carrying a `parse_error` **leaves the queue** and is no longer retried: without
+this, an indigestible file would fail the run every night. Once the cause is fixed
+(missing sport mapping, decoder to repair):
 
 ```
 python -m garminator.transform --retry-failed
 ```
 
-Un succès efface le `parse_error` précédent. Rejouer **avant** d'avoir corrigé la cause
-ne fait que reproduire le même échec.
+Success clears the previous `parse_error`. Replaying **before** fixing the cause only
+reproduces the same failure.
 
-### Rattraper un retard
+### Catching up on a backlog
 
-Chaque activité est commitée individuellement : un passage interrompu (éviction de pod,
-redémarrage de nœud) ne perd que le fichier en cours, jamais le lot. Le backfill initial
-se résorbe donc sur plusieurs nuits, à `transform.batchLimit` fichiers par passage. Pour
-l'accélérer sans attendre :
+Each activity is committed individually: a run interrupted (pod eviction, node restart)
+loses only the current file, never the batch. Initial backfill thus clears over multiple
+nights, at `transform.batchLimit` files per run. To speed it up without waiting:
 
 ```
-kubectl create job --from=cronjob/<release>-transform rattrapage-transform
+kubectl create job --from=cronjob/<release>-transform transform-catchup
 ```
 
-`concurrencyPolicy: Forbid` empêche ce Job manuel de croiser le passage planifié.
+`concurrencyPolicy: Forbid` prevents this manual Job from crossing the scheduled run.
 
-### Ce que la transformation n'écrit jamais avant d'avoir fini
+### What transformation never writes before finishing
 
-L'ordre d'écriture est le même principe que celui de l'archivage (fichier fsyncé sur le
-PVC AVANT l'insertion de sa ligne) : le bundle `core.*` est **commité avant** que
-`parsed_at` ne soit posé. Une coupure entre les deux laisse donc le fichier dans la file,
-et il sera retraité — l'écriture étant idempotente, cela ne produit pas de doublon. Poser
-`parsed_at` d'abord aurait fait disparaître silencieusement l'activité de la file sans
-qu'elle soit écrite nulle part.
+The write order follows the same principle as archiving (file fsynced on the PVC BEFORE
+its row is inserted): the `core.*` bundle is **committed before** `parsed_at` is set. A
+cut between the two leaves the file in the queue, and it will be reprocessed -- the write
+being idempotent, this does not produce a duplicate. Setting `parsed_at` first would have
+silently made the activity disappear from the queue without being written anywhere.
 
-## 11. Envoyer un fichier manuellement
+## 11. Uploading a file manually
 
 ```bash
-curl -F "file=@/chemin/vers/activite.fit" http://localhost:8000/uploads
+curl -F "file=@/path/to/activity.fit" http://localhost:8000/uploads
 ```
 
-L'endpoint `POST /uploads` (`garminator.api.upload`) est **local uniquement** pour
-l'instant — pas d'Ingress, pas de TLS, pas d'authentification (décision assumée, voir le
-rapport du lot qui l'a introduit). Il sert pour une activité que le sondage Garmin n'a
-pas ou ne peut pas récupérer : import depuis un autre outil, activité effacée côté
-Garmin avant le passage du CronJob `scheduler`, etc.
+The `POST /uploads` endpoint (`garminator.api.upload`) is **local only** for now -- no
+Ingress, no TLS, no authentication (decision taken, see the batch report that introduced
+it). It serves for an activity that Garmin polling has not or cannot retrieve: import from
+another tool, activity deleted on Garmin's side before the `scheduler` CronJob run, etc.
 
-Le format (FIT, TCX, ou ZIP contenant l'un des deux) est détecté **par le contenu**,
-jamais par l'extension du nom de fichier. Le fichier est archivé sur le PVC — même
-règle d'atomicité que le sondage : écrit et fsyncé AVANT que sa ligne `raw.fit_file` ne
-soit insérée — avec `garmin_activity_id = NULL`. C'est la seule marque de provenance :
-`raw.fit_file` ne porte aucune colonne dédiée à distinguer un envoi manuel d'un
-téléchargement Garmin, la valeur NULL suffit et c'est la convention posée par
-`migrations/012_raw_fit_file_manual_upload.sql`.
+The format (FIT, TCX, or ZIP containing either) is detected **by content**, never by
+filename extension. The file is archived on the PVC -- same atomicity rule as polling:
+written and fsynced BEFORE its `raw.fit_file` row is inserted -- with `garmin_activity_id = NULL`.
+This is the only mark of origin: `raw.fit_file` carries no column dedicated to
+distinguishing a manual upload from a Garmin download, the NULL value suffices and is
+the convention established by `migrations/012_raw_fit_file_manual_upload.sql`.
 
-Réponses possibles :
+Possible responses:
 
-| Code | Sens |
+| Code | Meaning |
 |---|---|
-| `201` | Archivé et parsé avec succès. Le corps renvoie `fit_file_id`. |
-| `409` | Le contenu (même `sha256`) est déjà rattaché en base à une AUTRE provenance — activité Garmin réelle, ou envoi manuel distinct. Rien n'est perdu : le fichier reste archivé, aucune ligne n'est créée ni modifiée. |
-| `413` | Corps de requête au-dessus de la borne de taille. |
-| `422` | Contenu non reconnu (ni FIT ni TCX, ZIP vide/à plusieurs membres/dangereux), ou archivage réussi mais parsing local échoué — le corps de la réponse le précise dans les deux cas, et l'archive n'est jamais perdue même en cas de parsing raté. |
+| `201` | Archived and parsed successfully. The body returns `fit_file_id`. |
+| `409` | The content (same `sha256`) is already attached in the database to a DIFFERENT origin -- real Garmin activity, or distinct manual upload. Nothing is lost: the file remains archived, no rows are created or modified. |
+| `413` | Request body above the size limit. |
+| `422` | Content not recognized (neither FIT nor TCX, empty/multi-member/dangerous ZIP), or archiving succeeded but local parsing failed -- the response body specifies which in both cases, and the archive is never lost even if parsing fails. |
 
-### La limite connue : un envoi manuel reste « skipped »
+### What a manual upload becomes in `core.*`
 
-**Un envoi manuel est archivé dans `raw.*` mais n'atteint jamais `core.*`.** Le motif
-n'est pas que le fichier serait muet — il ne l'est pas : la durée se déduit des deux
-formats, et le sport figure dans le message `session` d'un FIT comme dans l'attribut
-`Sport` d'un TCX, même si aucun lecteur ne les extrait aujourd'hui. Le fuseau est le
-seul élément réellement absent, et `core.athlete.home_timezone` en tient lieu.
+A manual upload goes all the way to `core.*`, through a path of its own
+(`garminator.transform.manual`, migrations 012 and 014). Two things a Garmin download gets
+for free had to be produced elsewhere:
 
-Les deux obstacles réels sont structurels :
+1. **The context** -- sport, timezone, duration. `garminator.transform.summary` reads them
+   from the Garmin JSON summary, which a manual upload has never had.
+   `build_manual_activity_context` derives them from the archived file itself: the FIT
+   `session` message, or the `Sport` attribute of the TCX `Activity` element. Timezone is
+   the only element the file truly cannot carry: `core.athlete.home_timezone` stands in for
+   it, the case its own column comment sanctions (`migrations/003_core_ref.sql`).
+2. **The primary key.** `core.activity.activity_id` **is** the Garmin identifier -- bigint
+   primary key, no sequence, no default. A manual upload draws instead from
+   `core.manual_activity_id_seq`, which starts at 9e18, eight orders of magnitude above any
+   identifier Garmin has emitted. `core.activity.source` records the provenance, and the
+   `activity_manual_id_range` CHECK forbids the column and the identifier range from ever
+   diverging. Re-running the transformation does not duplicate anything: the partial unique
+   index `activity_manual_file_uq` keys a manual activity on its `fit_file_id`.
 
-1. `garminator.transform` ne sait construire son `ActivityContext` qu'à partir du
-   résumé Garmin (`get_activities_by_date`), que le sondage associe à chaque fichier
-   téléchargé et qu'un envoi manuel n'a pas, puisqu'il n'est jamais passé par le
-   sondage. Il n'existe pas de second chemin partant du fichier décodé.
-2. `core.activity.activity_id` **est** l'identifiant Garmin : clé primaire, sans
-   séquence ni valeur par défaut. Un envoi manuel n'a aucune clé à fournir.
+**The sport is never guessed.** A FIT `(sport, sub_sport)` pair or a TCX `Sport` value with
+no entry in the mapping tables raises `UnknownManualSportError`, naming the observed value,
+and the file lands with `parse_error` -- rather than folding to a default that would
+silently skew TSS. Two consequences worth knowing before uploading:
 
-En attendant, `transform` laisse le fichier dans la file au statut « skipped » — ni
-`parsed_at` ni `parse_error` ne sont posés, exactement comme un fichier Garmin dont le
-résumé n'est pas encore arrivé (voir « Lire le code de sortie » ci-dessus). Le jour où
-les deux manques ci-dessus seront comblés, les fichiers déjà envoyés seront repris sans
-intervention.
-
-C'est un manque assumé et documenté, pas un bug : aucune valeur n'est inventée ni
-devinée pour combler le trou.
+- TCX only expresses `Running` | `Biking` | `Other`. It cannot say indoor vs. outdoor, so a
+  home-trainer ride uploaded as TCX lands as `cycling`, not `virtual_cycling`. That is the
+  intended, honest outcome. `Other` is deliberately unmapped -- too coarse to trust.
+- A FIT sport absent from `SPORT_CODE_BY_FIT_SPORT` (`garminator.transform.manual`) is
+  refused rather than approximated. Adding it means adding the pair there, the row in
+  `core.sport` if missing, and the row in `core.sport_fit_map`
+  (`migrations/015_core_sport_fit_map.sql`) -- a static test fails if the three drift apart.

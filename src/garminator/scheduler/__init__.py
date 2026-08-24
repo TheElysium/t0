@@ -1,20 +1,19 @@
-"""Lot L6 : ordonnancement du sondage périodique et idempotence.
+"""Batch L6: periodic poll scheduling and idempotence.
 
-Trois responsabilités séparées :
+Three separate responsibilities:
 
-- :mod:`garminator.scheduler.planning` : logique pure (aucune DB, aucun réseau) décidant
-  quelles fenêtres ``(endpoint, jour)`` sont dues.
-- :mod:`garminator.scheduler.store` : lecture/écriture de ``raw.poll_window`` (migration
-  009, avancement du sondage) et ``raw.payload_seen`` (migration 002, déduplication de
-  contenu), derrière une connexion injectée.
-- :mod:`garminator.scheduler.service` : orchestre les deux autour d'un téléchargement
-  injecté (:class:`~garminator.scheduler.service.WindowFetcher`), sans jamais construire
-  lui-même de :class:`garminator.garmin.client.GarminClient` -- ce câblage réel est la
-  responsabilité du point d'entrée du service, hors périmètre de ce lot.
+- :mod:`garminator.scheduler.planning`: pure logic (no DB, no network) deciding which
+  ``(endpoint, day)`` windows are due.
+- :mod:`garminator.scheduler.store`: read/write ``raw.poll_window`` (migration 009,
+  poll progress) and ``raw.payload_seen`` (migration 002, content deduplication),
+  behind an injected connection.
+- :mod:`garminator.scheduler.service`: orchestrates both around an injected download
+  (:class:`~garminator.scheduler.service.WindowFetcher`), never building its own
+  :class:`garminator.garmin.client.GarminClient`—that real wiring is the service
+  entry point's job, out of this batch's scope.
 
-Garantie tenue par ce paquet : un run interrompu au milieu (panne, ``SIGTERM``) ne fait
-jamais perdre de fenêtre -- elle est rejouée au run suivant, jamais silencieusement
-considérée comme traitée.
+Guarantee upheld by this package: a run interrupted mid-way (crash, ``SIGTERM``)
+never loses a window—it is replayed next run, never silently marked complete.
 """
 
 from __future__ import annotations

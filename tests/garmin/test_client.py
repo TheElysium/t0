@@ -1,10 +1,9 @@
-"""Tests de :mod:`garminator.garmin.client`, entièrement sur transport et DB simulés.
+"""Tests for :mod:`garminator.garmin.client`, entirely on simulated transport and DB.
 
-Couvre les trois exigences d'acceptation du lot portées par ce module :
-- des tokens existants sont réutilisés sans SSO (et la restauration est journalisée) ;
-- un tokenstore vide déclenche un SSO complet, journalisé explicitement (jamais en
-  silence) ;
-- un échec d'authentification ne déclenche aucun réessai.
+Covers three acceptance requirements for this module:
+- existing tokens are reused without SSO (and restoration is logged);
+- empty tokenstore triggers full SSO, logged explicitly (never silently);
+- authentication failure triggers no retry.
 """
 
 from __future__ import annotations
@@ -51,7 +50,9 @@ def test_login_reuses_existing_tokens_without_full_sso(
 ) -> None:
     tokenstore = tmp_path / "tokens"
     tokenstore.mkdir()
-    (tokenstore / TOKEN_FILENAME).write_text(json.dumps({"di_token": "deja-la"}), encoding="utf-8")
+    (tokenstore / TOKEN_FILENAME).write_text(
+        json.dumps({"di_token": "already-there"}), encoding="utf-8"
+    )
 
     transport = FakeTransport()
     client = _client(transport, tokenstore)
@@ -61,9 +62,9 @@ def test_login_reuses_existing_tokens_without_full_sso(
 
     assert transport.did_full_sso is False
     assert transport.login_calls == [str(tokenstore)]
-    assert any("restaurée" in record.message for record in caplog.records)
+    assert any("restored" in record.message for record in caplog.records)
     assert not any(
-        record.levelno == logging.WARNING and "SSO Garmin complet" in record.message
+        record.levelno == logging.WARNING and "Full Garmin SSO" in record.message
         for record in caplog.records
     )
 
@@ -71,7 +72,7 @@ def test_login_reuses_existing_tokens_without_full_sso(
 def test_login_with_empty_tokenstore_performs_and_logs_full_sso(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    tokenstore = tmp_path / "tokens"  # n'existe pas encore
+    tokenstore = tmp_path / "tokens"  # doesn't exist yet
 
     transport = FakeTransport()
     client = _client(transport, tokenstore)
@@ -81,7 +82,7 @@ def test_login_with_empty_tokenstore_performs_and_logs_full_sso(
 
     assert transport.did_full_sso is True
     assert any(
-        record.levelno == logging.WARNING and "SSO Garmin complet" in record.message
+        record.levelno == logging.WARNING and "Full Garmin SSO" in record.message
         for record in caplog.records
     )
 
@@ -89,14 +90,14 @@ def test_login_with_empty_tokenstore_performs_and_logs_full_sso(
 def test_authentication_failure_during_login_is_not_retried(tmp_path: Path) -> None:
     tokenstore = tmp_path / "tokens"
     transport = FakeTransport(
-        login_outcomes=[GarminConnectAuthenticationError("identifiants invalides")]
+        login_outcomes=[GarminConnectAuthenticationError("invalid credentials")]
     )
     client = _client(transport, tokenstore)
 
     with pytest.raises(GarminConnectAuthenticationError):
         client.login()
 
-    assert len(transport.login_calls) == 1  # aucun réessai
+    assert len(transport.login_calls) == 1  # no retry
 
 
 def test_fetch_429_then_429_then_success_writes_raw_api_response(tmp_path: Path) -> None:
@@ -135,7 +136,7 @@ def test_fetch_authentication_error_is_not_retried_and_nothing_is_written(
         client.fetch("get_activities")
 
     assert transport.call_counts["get_activities"] == 1
-    assert conn.executed == []  # rien écrit dans raw.api_response
+    assert conn.executed == []  # nothing written to raw.api_response
 
 
 def test_fetch_exhausts_retries_and_raises_retry_exhausted_error(tmp_path: Path) -> None:
@@ -201,16 +202,16 @@ def test_ingest_run_tracker_records_error_and_marks_partial(tmp_path: Path) -> N
     conn = FakeConnection()
     client = _client(transport, tmp_path / "tokens", conn)
 
-    # Ordre important : ``pytest.raises`` doit être le contexte le plus externe pour que
-    # ``ingest_run`` (le plus interne) voie l'exception en premier lors de la sortie, et
-    # clôture donc bien en "failed" avant que pytest.raises ne l'avale.
+    # Important order: ``pytest.raises`` must be the outermost context so ``ingest_run``
+    # (innermost) sees the exception first on exit and closes with "failed" before
+    # pytest.raises swallows it.
     with pytest.raises(GarminConnectAuthenticationError), ingest_run(conn, mode="daily") as tracker:
         client.fetch("get_activities", tracker=tracker)
 
     assert tracker.requests == 1
     assert tracker.errors == 1
-    # L'exception a traversé le bloc `ingest_run` sans y être rattrapée -> clôture en
-    # "failed" (et non "partial"), avec le message d'erreur consigné dans ``notes``.
+    # Exception crossed the ingest_run block without being caught -> closes as
+    # "failed" (not "partial"), with error message recorded in ``notes``.
     update_query, params = conn.executed[-1]
     status, notes, _run_id = params
     assert status == "failed"
@@ -228,7 +229,7 @@ def test_ingest_run_tracker_marks_partial_when_caller_absorbs_the_error(tmp_path
         ingest_run(conn, mode="daily") as tracker,
         contextlib.suppress(GarminConnectAuthenticationError),
     ):
-        # Le caller choisit d'absorber l'erreur et de continuer malgré elle.
+        # Caller chooses to absorb the error and continue despite it.
         client.fetch("get_activities", tracker=tracker)
 
     assert tracker.errors == 1
@@ -254,7 +255,7 @@ def test_download_original_returns_bytes_and_real_filename(tmp_path: Path) -> No
     assert result.filename == "55555.tcx"
     assert result.content == buf.getvalue()
     assert result.activity_id == "55555"
-    assert conn.executed == []  # aucune écriture raw.api_response pour un binaire
+    assert conn.executed == []  # no raw.api_response write for binary
 
 
 def test_download_original_429_then_success_is_retried(tmp_path: Path) -> None:
@@ -276,14 +277,14 @@ def test_download_original_429_then_success_is_retried(tmp_path: Path) -> None:
     assert len(transport.download_calls) == 2
 
 
-# --- login() : jamais de réessai, et détection fiable d'un SSO complet ----------------
+# --- login(): never retry, reliable full SSO detection ---------------------------------
 #
-# ``Garmin.login()`` convertit un 429 du SSO en ``GarminConnectTooManyRequestsError`` et
-# *tout autre* échec en ``GarminConnectConnectionError`` (source installée,
-# ``garminconnect/__init__.py`` lignes ~560-579). Ces deux types sont réessayables sur le
-# chemin des données ; les réessayer sur le login reviendrait à enchaîner jusqu'à
-# ``max_attempts`` SSO complets à quelques secondes d'intervalle — la boucle qui fait
-# bloquer un compte. ``login()`` ne doit donc faire qu'un seul appel, quoi qu'il arrive.
+# ``Garmin.login()`` converts SSO 429 to ``GarminConnectTooManyRequestsError`` and
+# *any other* failure to ``GarminConnectConnectionError`` (installed source,
+# ``garminconnect/__init__.py`` lines ~560-579). Both types are retryable on the data
+# path; retrying them on login would chain up to ``max_attempts`` full SSOs seconds
+# apart — the loop that locks out an account. So ``login()`` must make only one call,
+# no matter what.
 
 
 @pytest.mark.parametrize(
@@ -291,7 +292,7 @@ def test_download_original_429_then_success_is_retried(tmp_path: Path) -> None:
     [
         GarminConnectTooManyRequestsError("Too many login attempts"),
         GarminConnectConnectionError("Login failed: boom"),
-        GarminConnectAuthenticationError("identifiants invalides"),
+        GarminConnectAuthenticationError("invalid credentials"),
     ],
 )
 def test_login_never_retries_whatever_the_failure(tmp_path: Path, failure: Exception) -> None:
@@ -310,22 +311,22 @@ def test_login_never_retries_whatever_the_failure(tmp_path: Path, failure: Excep
 def test_login_warns_when_garminconnect_rewrites_the_tokens(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Jetons présents mais périmés : garminconnect refait un SSO en silence.
+    """Tokens present but expired: garminconnect redoes SSO silently.
 
-    Le wrapper ne peut pas l'apprendre autrement qu'en comparant l'empreinte du fichier
-    de jetons avant/après : ``garminconnect`` ne réécrit ``garmin_tokens.json`` que lors
-    d'un SSO complet ou d'un rafraîchissement. On simule ici le cas dangereux — le
-    tokenstore semble garni, et pourtant les jetons sont réécrits.
+    The wrapper can only learn this by comparing token file fingerprint before/after:
+    ``garminconnect`` rewrites ``garmin_tokens.json`` only during full SSO or refresh.
+    We simulate the dangerous case here — tokenstore appears populated yet tokens are
+    rewritten.
     """
     tokenstore = tmp_path / "tokens"
     tokenstore.mkdir()
     tokens = tokenstore / TOKEN_FILENAME
-    tokens.write_text(json.dumps({"di_token": "perime"}), encoding="utf-8")
+    tokens.write_text(json.dumps({"di_token": "expired"}), encoding="utf-8")
 
     class RewritingTransport(FakeTransport):
         def login(self, tokenstore: str) -> tuple[str | None, str | None]:
             self.login_calls.append(tokenstore)
-            # Ce que fait garminconnect quand le rechargement échoue : SSO puis dump().
+            # What garminconnect does when reloading fails: SSO then dump().
             tokens.write_text(json.dumps({"di_token": "tout-neuf"}), encoding="utf-8")
             return (None, None)
 
@@ -335,9 +336,9 @@ def test_login_warns_when_garminconnect_rewrites_the_tokens(
         client.login()
 
     assert any(
-        record.levelno == logging.WARNING and "RÉÉCRITS" in record.message
+        record.levelno == logging.WARNING and "REWRITTEN" in record.message
         for record in caplog.records
-    ), "un SSO silencieux doit être signalé, pas masqué par « session restaurée »"
+    ), "silent SSO must be flagged, not hidden by 'session restored'"
 
 
 def test_login_does_not_warn_when_tokens_are_untouched(
@@ -352,4 +353,4 @@ def test_login_does_not_warn_when_tokens_are_untouched(
     with caplog.at_level(logging.INFO, logger="garminator.garmin.client"):
         client.login()
 
-    assert not any("RÉÉCRITS" in record.message for record in caplog.records)
+    assert not any("REWRITTEN" in record.message for record in caplog.records)

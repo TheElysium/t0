@@ -1,18 +1,18 @@
-"""Boucle de sondage périodique idempotente et reprenable (lot L6).
+"""Idempotent and resumable periodic polling loop (batch L6).
 
-Ce module orchestre :mod:`garminator.scheduler.planning` (quelles fenêtres sonder) et
-:mod:`garminator.scheduler.store` (l'état persisté de l'avancement) autour d'un
-téléchargement **injecté** (:class:`WindowFetcher`) : ``run_scheduled_poll`` ne connaît
-ni ``garminconnect`` ni le réseau, et n'importe pas
-:class:`garminator.garmin.client.GarminClient` -- ce qui garde ce module testable sans
-réseau ET sans dépendre du câblage réel du lot L2 (hors périmètre de ce lot ; le point
-d'entrée du service est responsable de fournir un ``WindowFetcher`` qui appelle
-``GarminClient`` puis retourne les empreintes des payloads obtenus).
+This module orchestrates :mod:`garminator.scheduler.planning` (which windows to poll) and
+:mod:`garminator.scheduler.store` (persisted progress state) around an **injected**
+downloader (:class:`WindowFetcher`) : ``run_scheduled_poll`` knows neither
+``garminconnect`` nor the network, and does not import
+:class:`garminator.garmin.client.GarminClient` -- this keeps this module testable
+without network AND independent of batch L2's actual wiring (out of scope ; the service
+entry point is responsible for providing a ``WindowFetcher`` that calls ``GarminClient``
+then returns the SHA256 hashes of the obtained payloads).
 
-Garantie centrale : **un échec au milieu d'un run ne fait jamais perdre de fenêtre**.
-Chaque fenêtre est marquée ``in_progress`` avant l'appel réseau, ``done`` seulement après
-son succès complet ; une exception pendant le fetch marque la fenêtre ``failed`` et le
-run continue avec les fenêtres suivantes -- ni interrompu, ni recommencé depuis le début.
+Central guarantee: **a failure mid-run never loses a window**. Each window is marked
+``in_progress`` before the network call, ``done`` only after complete success ; an
+exception during fetch marks the window ``failed`` and the run continues with the next
+windows -- neither interrupted nor restarted from the beginning.
 """
 
 from __future__ import annotations
@@ -43,40 +43,38 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Nombre maximal de fenêtres traitées PAR ENDPOINT au cours d'un même run.
+#: Max windows processed PER ENDPOINT in a single run.
 #:
-#: Sans cette borne, le tout premier run après une installation partirait de
-#: ``history_start`` (avril 2025) et enchaînerait plus de cinq cents appels réseau d'une
-#: traite, par endpoint. Le limiteur de débit (:mod:`garminator.garmin.rate_limit`) les
-#: espacerait sans les borner : le run durerait des heures, et une API non publique
-#: sollicitée ainsi est le meilleur moyen de se faire bannir.
+#: Without this bound, the first run after install would start from ``history_start``
+#: (Apr 2025) and chain over five hundred network calls in a row, per endpoint. The
+#: rate limiter (:mod:`garminator.garmin.rate_limit`) would space them without bounding
+#: them : the run would last hours, and an unpublic API hammered this way is the fastest
+#: way to get banned.
 #:
-#: La borne est sûre parce que ``due_windows`` rend les fenêtres dans l'ordre
-#: CHRONOLOGIQUE CROISSANT : chaque run comble les trous les plus anciens, donc le
-#: rattrapage progresse de façon monotone et aucune fenêtre n'est jamais abandonnée --
-#: seulement différée. Elle est appliquée par endpoint et non globalement, sinon un
-#: endpoint très en retard affamerait indéfiniment tous ceux qui le suivent dans la liste.
+#: The bound is safe because ``due_windows`` returns windows in strictly ASCENDING
+#: chronological order : each run fills the oldest gaps, so catch-up progresses monotonically
+#: and no window is ever abandoned -- only deferred. Applied per endpoint, not globally,
+#: else a lagging endpoint would starve all following ones in the list.
 DEFAULT_MAX_WINDOWS_PER_ENDPOINT = 60
 
 
 @dataclass(frozen=True, slots=True)
 class FetchedWindow:
-    """Un payload obtenu pour une fenêtre, tel que rapporté par le :class:`WindowFetcher`
-    injecté. Une fenêtre peut produire plusieurs payloads (ex. plusieurs activités le
-    même jour) : ``scope_key`` les distingue, ``None`` pour un endpoint agrégé au niveau
-    du jour (même convention que ``raw.api_response.scope_key``)."""
+    """A payload obtained for a window, as reported by the injected :class:`WindowFetcher`.
+    A window can yield multiple payloads (e.g. multiple activities on the same day):
+    ``scope_key`` distinguishes them, ``None`` for day-aggregated endpoints (same
+    convention as ``raw.api_response.scope_key``)."""
 
     scope_key: str | None
     payload_sha256: bytes
 
 
 class WindowFetcher(Protocol):
-    """Callable injecté effectuant le sondage réel d'une fenêtre.
+    """Injected callable that performs the actual polling of a window.
 
-    Peut lever n'importe quelle exception (réseau, authentification, parsing) :
-    :func:`run_scheduled_poll` la capture, marque la fenêtre ``failed`` et poursuit avec
-    les fenêtres suivantes -- un échec sur un jour ne doit jamais empêcher le rattrapage
-    des autres jours ni des autres endpoints.
+    May raise any exception (network, authentication, parsing) : :func:`run_scheduled_poll`
+    catches it, marks the window ``failed`` and continues with the next windows -- a
+    failure on one day must never block catch-up of other days or endpoints.
     """
 
     def __call__(self, endpoint: str, window_date: date) -> Sequence[FetchedWindow]: ...
@@ -84,21 +82,20 @@ class WindowFetcher(Protocol):
 
 @dataclass(slots=True)
 class WindowOutcome:
-    """Résultat du traitement d'une fenêtre au sein d'un :class:`RunSummary`."""
+    """Result of processing one window within a :class:`RunSummary`."""
 
     endpoint: str
     window_date: date
     error: str | None = None
     already_seen_count: int = 0
     new_payload_count: int = 0
-    #: ``scope_key`` non nuls rapportés par le fetcher pour cette fenêtre, dans l'ordre
-    #: reçu. Pour ``get_activities_by_date`` (seul endpoint à en produire, cf.
-    #: ``CallShape.ACTIVITIES_BY_DATE``) ce sont les ``activityId`` du jour : c'est par
-    #: eux que ``python -m garminator.scheduler`` sait quels fichiers originaux archiver,
-    #: sans re-solliciter l'API pour redemander une liste qu'il vient d'obtenir.
-    #: Renseigné pour TOUS les payloads, déjà vus ou non : la présence d'un fichier sur
-    #: le PVC est une question distincte de la republication d'un payload JSON, et c'est
-    #: ``archive_activity_file`` qui tranche, à partir de ``raw.fit_file``.
+    #: Non-null ``scope_key`` values reported by the fetcher for this window, in order
+    #: received. For ``get_activities_by_date`` (only endpoint that produces them, cf.
+    #: ``CallShape.ACTIVITIES_BY_DATE``) these are the day's ``activityId`` values : by
+    #: these, ``python -m garminator.scheduler`` knows which original files to archive,
+    #: without re-querying the API for a list it just obtained. Populated for ALL payloads,
+    #: already-seen or new: file presence on PVC is separate from JSON payload republication,
+    #: and it's ``archive_activity_file`` that decides, from ``raw.fit_file``.
     scope_keys: list[str] = field(default_factory=list)
 
     @property
@@ -108,12 +105,12 @@ class WindowOutcome:
 
 @dataclass(slots=True)
 class RunSummary:
-    """Bilan d'un appel à :func:`run_scheduled_poll`, une entrée par fenêtre traitée."""
+    """Summary of a call to :func:`run_scheduled_poll`, one entry per window processed."""
 
     outcomes: list[WindowOutcome] = field(default_factory=list)
-    #: Endpoints dont les fenêtres dues excédaient la borne de ce run : le rattrapage
-    #: reprendra au run suivant. Renseigné pour que la troncature ne soit jamais
-    #: silencieuse -- un rattrapage qui progresse lentement doit être visible.
+    #: Endpoints whose due windows exceeded this run's bound : catch-up resumes at the
+    #: next run. Set so truncation is never silent -- slowly progressing catch-up must
+    #: be visible.
     truncated_endpoints: list[str] = field(default_factory=list)
 
     @property
@@ -138,29 +135,27 @@ def run_scheduled_poll(
     stale_after: timedelta = DEFAULT_STALE_IN_PROGRESS_AFTER,
     max_windows_per_endpoint: int | None = DEFAULT_MAX_WINDOWS_PER_ENDPOINT,
 ) -> RunSummary:
-    """Exécute un cycle de sondage sur ``endpoints``, uniquement sur les fenêtres dues.
+    """Execute one polling cycle on ``endpoints``, only on windows that are due.
 
-    Pour chaque endpoint : lit l'état persisté (:func:`~garminator.scheduler.store.
-    load_window_states`), calcule les fenêtres dues (:func:`~garminator.scheduler.
-    planning.due_windows`), puis pour chacune, dans l'ordre chronologique croissant :
+    For each endpoint : load persisted state (:func:`~garminator.scheduler.store.
+    load_window_states`), compute due windows (:func:`~garminator.scheduler.
+    planning.due_windows`), then for each, in strictly ascending chronological order :
 
-    1. la marque ``in_progress`` (persisté, avant tout appel réseau) ;
-    2. appelle ``fetch_window`` ;
-    3. en cas d'exception : la marque ``failed`` avec le message d'erreur, poursuit avec
-       la fenêtre suivante -- rien n'est perdu, rien n'est réappliqué en double ;
-    4. en cas de succès : pour chaque payload obtenu, consulte puis met à jour
-       ``raw.payload_seen`` (compteur de republications, jamais de perte d'information),
-       puis marque la fenêtre ``done``.
+    1. mark it ``in_progress`` (persisted, before any network call) ;
+    2. call ``fetch_window`` ;
+    3. on exception : mark it ``failed`` with the error message, continue with the next
+       window -- nothing is lost, nothing is reapplied twice ;
+    4. on success : for each obtained payload, query then update ``raw.payload_seen``
+       (republish counter, never information loss), then mark the window ``done``.
 
-    Au plus ``max_windows_per_endpoint`` fenêtres sont traitées par endpoint et par run
-    (``None`` pour ne pas borner) ; le reliquat est repris au run suivant et l'endpoint
-    est signalé dans ``RunSummary.truncated_endpoints``. Voir
-    :data:`DEFAULT_MAX_WINDOWS_PER_ENDPOINT` pour la raison.
+    At most ``max_windows_per_endpoint`` windows are processed per endpoint per run
+    (``None`` to unbind) ; remaining windows resume at the next run and the endpoint is
+    flagged in ``RunSummary.truncated_endpoints``. See
+    :data:`DEFAULT_MAX_WINDOWS_PER_ENDPOINT` for why.
 
-    Une fenêtre déjà ``done`` en dehors de la fenêtre glissante de rafraîchissement n'est
-    simplement jamais proposée par ``due_windows`` : ``fetch_window`` n'est alors pas
-    appelée du tout pour elle, ce qui évite tout retéléchargement inutile après une
-    reprise normale.
+    A window already ``done`` outside the refresh sliding window is simply never proposed
+    by ``due_windows`` : ``fetch_window`` is not called for it, avoiding unnecessary
+    redownload after normal recovery.
     """
     active_now = now if now is not None else datetime.now(UTC)
     summary = RunSummary()
@@ -176,8 +171,8 @@ def run_scheduled_poll(
         )
         if max_windows_per_endpoint is not None and len(pending_dates) > max_windows_per_endpoint:
             logger.info(
-                "Endpoint %s : %d fenêtres dues, %d traitées ce run (borne) ; le reliquat "
-                "sera repris au run suivant, des plus anciennes aux plus récentes.",
+                "Endpoint %s : %d due windows, %d processed this run (bound) ; remaining "
+                "windows resume at next run, oldest to newest.",
                 endpoint,
                 len(pending_dates),
                 max_windows_per_endpoint,
@@ -194,7 +189,7 @@ def run_scheduled_poll(
                 fetched = fetch_window(endpoint, window_date)
             except Exception as exc:
                 logger.warning(
-                    "Fenêtre %s/%s en échec (%s) : marquée 'failed', rejouable au run " "suivant.",
+                    "Window %s/%s failed (%s) : marked 'failed', replayable at next run.",
                     endpoint,
                     window_date,
                     exc,

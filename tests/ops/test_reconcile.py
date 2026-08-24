@@ -1,9 +1,8 @@
-"""Tests de :mod:`garminator.ops.reconcile` -- le scan PVC <-> ``raw.fit_file``.
+"""Tests of :mod:`garminator.ops.reconcile` -- PVC <-> ``raw.fit_file`` scan.
 
-Doublure de connexion minimale plutôt que ``FakePollDB`` : ce module n'exécute qu'une
-seule requête, un SELECT sur ``raw.fit_file``, et n'a besoin ni de la machinerie de
-fenêtres ni d'une horloge. Aucun PostgreSQL, aucun réseau ; les fichiers sont écrits dans
-``tmp_path``, jamais sur un vrai volume.
+Minimal connection test double instead of ``FakePollDB``: this module runs only one
+query, a SELECT on ``raw.fit_file``, and needs neither window machinery nor a clock.
+No PostgreSQL, no network; files written to ``tmp_path``, never a real volume.
 """
 
 from __future__ import annotations
@@ -30,14 +29,14 @@ class _FakeCursor:
         return None
 
     def execute(self, sql: str, params: Any = None) -> None:
-        assert "raw.fit_file" in sql  # la seule table que ce module doit lire
+        assert "raw.fit_file" in sql
 
     def fetchall(self) -> list[tuple[Any, ...]]:
         return self._rows
 
 
 class _FakeConn:
-    """Connexion en lecture seule : toute tentative d'écriture ferait échouer le test."""
+    """Read-only connection: any write attempt makes the test fail."""
 
     def __init__(self, rows: list[tuple[Any, ...]]) -> None:
         self.rows = rows
@@ -56,7 +55,7 @@ def _write(path: Path, content: bytes = _CONTENT) -> Path:
     return path
 
 
-def test_inventaire_coherent_est_propre(tmp_path: Path) -> None:
+def test_coherent_inventory_is_clean(tmp_path: Path) -> None:
     archived = _write(tmp_path / "2026" / "08" / "activity-111-abc.fit")
     report = reconcile_archive(_FakeConn([_row(1, archived)]), tmp_path)
 
@@ -66,42 +65,36 @@ def test_inventaire_coherent_est_propre(tmp_path: Path) -> None:
     assert report.is_clean is True
 
 
-def test_ligne_sans_fichier_est_une_anomalie_grave(tmp_path: Path) -> None:
-    # Le sens INTERDIT par la règle d'atomicité de 002_raw.sql : la ligne affirme
-    # l'existence d'un fichier source qui n'est pas là.
-    absent = tmp_path / "2026" / "08" / "activity-111-jamais-ecrit.fit"
+def test_row_without_file_is_critical_anomaly(tmp_path: Path) -> None:
+    absent = tmp_path / "2026" / "08" / "activity-111-never-written.fit"
     report = reconcile_archive(_FakeConn([_row(1, absent)]), tmp_path)
 
     assert len(report.missing_files) == 1
     assert report.missing_files[0].fit_file_id == 1
-    assert "absent" in report.missing_files[0].reason
+    assert "missing" in report.missing_files[0].reason
     assert report.is_clean is False
 
 
-def test_fichier_sans_ligne_est_signale_mais_reste_benin(tmp_path: Path) -> None:
-    # Le sens TOLÉRÉ : archivage réussi, INSERT en échec -- ou, avant la correction du
-    # hachage ZIP, un fichier réécrit à chaque passage sur la fenêtre du jour courant.
+def test_file_without_row_reported_but_remains_benign(tmp_path: Path) -> None:
     _write(tmp_path / "2026" / "08" / "activity-999-orphelin.fit")
     report = reconcile_archive(_FakeConn([]), tmp_path)
 
     assert len(report.orphan_files) == 1
     assert report.orphan_files[0].path.name == "activity-999-orphelin.fit"
     assert report.missing_files == ()
-    # Le point du test : un orphelin ne doit PAS faire échouer le CronJob.
     assert report.is_clean is True
 
 
-def test_taille_divergente_est_grave_sans_relire_le_contenu(tmp_path: Path) -> None:
+def test_size_mismatch_critical_without_rereading_content(tmp_path: Path) -> None:
     archived = _write(tmp_path / "2026" / "08" / "activity-111-abc.fit", _CONTENT + b"tronque")
     report = reconcile_archive(_FakeConn([_row(1, archived)]), tmp_path)
 
     assert len(report.missing_files) == 1
-    assert "taille divergente" in report.missing_files[0].reason
+    assert "size mismatch" in report.missing_files[0].reason
     assert report.is_clean is False
 
 
-def test_mode_rapide_ne_voit_pas_une_corruption_a_taille_constante(tmp_path: Path) -> None:
-    # Justifie l'existence de --deep : même longueur, contenu différent.
+def test_fast_mode_misses_corruption_at_constant_size(tmp_path: Path) -> None:
     corrompu = bytearray(_CONTENT)
     corrompu[-1] = 0xFF
     archived = _write(tmp_path / "2026" / "08" / "activity-111-abc.fit", bytes(corrompu))
@@ -111,33 +104,29 @@ def test_mode_rapide_ne_voit_pas_une_corruption_a_taille_constante(tmp_path: Pat
 
     deep = reconcile_archive(conn, tmp_path, deep=True)
     assert len(deep.missing_files) == 1
-    assert "sha256 divergent" in deep.missing_files[0].reason
+    assert "sha256 mismatch" in deep.missing_files[0].reason
     assert deep.is_clean is False
 
 
-def test_fichiers_hors_extensions_archivees_sont_ignores(tmp_path: Path) -> None:
-    # Un .tmp laissé par une écriture interrompue, ou tout autre fichier du volume, ne
-    # doit pas gonfler la liste des orphelins : le scan ne connaît que .fit et .tcx.
+def test_files_outside_archive_extensions_ignored(tmp_path: Path) -> None:
     _write(tmp_path / "2026" / "08" / ".activity-111.tmp-1234")
     report = reconcile_archive(_FakeConn([]), tmp_path)
 
     assert report.orphan_files == ()
 
 
-def test_volume_inexistant_ne_leve_pas(tmp_path: Path) -> None:
-    # PVC pas encore monté ou vide au premier démarrage : le scan doit répondre, pas
-    # planter -- c'est un outil de diagnostic.
-    report = reconcile_archive(_FakeConn([]), tmp_path / "jamais-cree")
+def test_nonexistent_volume_does_not_raise(tmp_path: Path) -> None:
+    report = reconcile_archive(_FakeConn([]), tmp_path / "never-created")
 
     assert report.orphan_files == ()
     assert report.is_clean is True
 
 
-def test_rapport_texte_nomme_le_verdict(tmp_path: Path) -> None:
+def test_text_report_names_verdict(tmp_path: Path) -> None:
     absent = tmp_path / "2026" / "08" / "activity-111-absent.fit"
     _write(tmp_path / "2026" / "08" / "activity-999-orphelin.fit")
-    rendu = format_reconcile_report(reconcile_archive(_FakeConn([_row(1, absent)]), tmp_path))
+    rendered = format_reconcile_report(reconcile_archive(_FakeConn([_row(1, absent)]), tmp_path))
 
-    assert "ANOMALIE GRAVE" in rendu
-    assert "activity-999-orphelin.fit" in rendu
-    assert "AUCUNE suppression" in rendu  # le scan promet explicitement de ne rien casser
+    assert "CRITICAL ANOMALY" in rendered
+    assert "activity-999-orphelin.fit" in rendered
+    assert "NO deletion" in rendered

@@ -1,8 +1,8 @@
-"""Tests de :mod:`garminator.garmin.raw_store`, contre une connexion DB en mémoire.
+"""Tests for :mod:`garminator.garmin.raw_store` against an in-memory DB connection.
 
-Ces tests ne touchent aucun PostgreSQL réel : ``FakeConnection``/``FakeCursor``
-(``tests/garmin/fakes.py``) implémentent seulement la vue structurelle
-``garminator.garmin.raw_store.DBConnection`` dont ce module a besoin.
+These tests touch no real PostgreSQL: ``FakeConnection``/``FakeCursor``
+(``tests/garmin/fakes.py``) implement only the structural view
+``garminator.garmin.raw_store.DBConnection`` this module needs.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def test_payload_sha256_matches_manual_hash_of_canonical_form() -> None:
     expected = hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).digest()
 
     assert payload_sha256(payload) == expected
-    assert len(payload_sha256(payload)) == 32  # contrainte api_response_sha_len
+    assert len(payload_sha256(payload)) == 32  # api_response_sha_len constraint
 
 
 def test_insert_api_response_writes_expected_columns_and_commits() -> None:
@@ -49,7 +49,7 @@ def test_insert_api_response_writes_expected_columns_and_commits() -> None:
         ingest_run_id=7,
     )
 
-    assert response_id == 101  # FakeConnection démarre à 100, incrémente avant de retourner
+    assert response_id == 101  # FakeConnection starts at 100, increments before return
     assert conn.commit_count == 1
     query, params = conn.executed[0]
     assert "INSERT INTO raw.api_response" in query
@@ -59,7 +59,7 @@ def test_insert_api_response_writes_expected_columns_and_commits() -> None:
     assert scope_date == date(2026, 8, 18)
     assert scope_key is None
     assert http_status == 200
-    assert payload.obj == {"sleepScore": 82}  # Jsonb expose .obj
+    assert payload.obj == {"sleepScore": 82}  # Jsonb exposes .obj
     assert len(sha) == 32
     assert ingest_run_id == 7
 
@@ -104,7 +104,7 @@ def test_finish_ingest_run_accepts_no_notes() -> None:
 
 
 def test_json_module_actually_used_for_canonicalization() -> None:
-    # Non-régression : s'assurer que canonical_json_dumps reste basé sur json.dumps
-    # (et non une sérialisation maison qui diverge sur les types Python non triviaux).
+    # Regression test: ensure canonical_json_dumps stays based on json.dumps
+    # (not custom serialization diverging on non-trivial Python types).
     payload = {"when": date(2026, 8, 19)}
     assert json.loads(canonical_json_dumps(payload)) == {"when": "2026-08-19"}

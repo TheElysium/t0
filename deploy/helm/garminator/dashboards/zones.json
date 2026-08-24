@@ -1,7 +1,7 @@
 {
   "uid": "garminator-zones",
-  "title": "Zones de fréquence cardiaque",
-  "description": "Temps passé par zone de FC (mart.hr_zone_time), dérivé de l'histogramme à 1 bpm : recalculable pour n'importe quel jeu de bornes par un simple REFRESH (COMMENT ON MATERIALIZED VIEW mart.hr_zone_time).",
+  "title": "Heart rate zones",
+  "description": "Time spent per HR zone (mart.hr_zone_time), derived from the 1 bpm histogram: recomputable for any set of boundaries with a plain REFRESH (COMMENT ON MATERIALIZED VIEW mart.hr_zone_time).",
   "tags": ["garminator", "zones"],
   "timezone": "browser",
   "editable": true,
@@ -31,8 +31,8 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Temps par zone — chronologie",
-      "description": "Secondes par zone (mart.hr_zone_time.zone_code), par jour, empilées.",
+      "title": "Time per zone — timeline",
+      "description": "Seconds per zone (mart.hr_zone_time.zone_code), per day, stacked.",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal", "group": "A" } }, "unit": "s" },
@@ -50,8 +50,8 @@
     {
       "id": 2,
       "type": "barchart",
-      "title": "Temps total par zone — période sélectionnée",
-      "description": "Somme des secondes par zone_code sur la période, ordonnée par mart.hr_zone_time.zone_order.",
+      "title": "Total time per zone — selected period",
+      "description": "Sum of seconds per zone_code over the period, ordered by mart.hr_zone_time.zone_order.",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 10 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
@@ -59,7 +59,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT z.zone_code AS \"Zone\", z.zone_order AS \"Ordre\", sum(z.seconds) AS \"Secondes\" FROM mart.hr_zone_time z JOIN core.activity a ON a.activity_id = z.activity_id WHERE a.athlete_id = $athlete_id AND $__timeFilter(z.local_date) GROUP BY z.zone_code, z.zone_order ORDER BY z.zone_order"
+          "rawSql": "SELECT z.zone_code AS \"Zone\", z.zone_order AS \"Order\", sum(z.seconds) AS \"Seconds\" FROM mart.hr_zone_time z JOIN core.activity a ON a.activity_id = z.activity_id WHERE a.athlete_id = $athlete_id AND $__timeFilter(z.local_date) GROUP BY z.zone_code, z.zone_order ORDER BY z.zone_order"
         }
       ]
     }

@@ -1,12 +1,11 @@
-"""Tests de :func:`garminator.garmin.raw_store.insert_fit_file` (lot L12).
+"""Tests for :func:`garminator.garmin.raw_store.insert_fit_file` (batch L12).
 
-``tests/garmin/fakes.py`` (existant, non modifié -- un autre lot peut en dépendre) ne
-simule que les motifs de requête des lots précédents (``RETURNING id`` de
-``raw.api_response``, ``RETURNING ingest_run_id``). ``raw.fit_file`` a un motif
-différent (``ON CONFLICT ... DO NOTHING RETURNING fit_file_id``, plus une éventuelle
-seconde requête de relecture consciente de l'activité), donc ce fichier définit sa
-PROPRE doublure minimale, dédiée à ce module, plutôt que de modifier une doublure
-partagée par d'autres lots.
+``tests/garmin/fakes.py`` (existing, unmodified — another batch may depend on it) only
+simulates query patterns from earlier batches (``RETURNING id`` for ``raw.api_response``,
+``RETURNING ingest_run_id``). ``raw.fit_file`` has a different pattern
+(``ON CONFLICT ... DO NOTHING RETURNING fit_file_id``, plus optional activity-aware
+re-read query), so this file defines its own minimal double, dedicated to this module,
+rather than modifying a double shared with other batches.
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ class _FakeCursor:
             garmin_activity_id, storage_path, sha256, size_bytes = params
             existing = next((row for row in self._conn.rows if row.sha256 == sha256), None)
             if existing is not None:
-                # ON CONFLICT (sha256) DO NOTHING : aucune ligne "RETURNING" côté SQL réel.
+                # ON CONFLICT (sha256) DO NOTHING: no "RETURNING" row in real SQL.
                 self._result = None
                 return
             self._conn.next_id += 1
@@ -66,7 +65,7 @@ class _FakeCursor:
             )
             return
 
-        raise AssertionError(f"_FakeCursor : requête inattendue -> {normalized}")
+        raise AssertionError(f"_FakeCursor: unexpected query -> {normalized}")
 
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._result
@@ -80,7 +79,7 @@ class _FakeCursor:
 
 @dataclass
 class _FakeFitFileConnection:
-    """Satisfait ``garminator.garmin.raw_store.DBConnection``, en mémoire."""
+    """Satisfies ``garminator.garmin.raw_store.DBConnection``, in-memory."""
 
     rows: list[_Row] = field(default_factory=list)
     executed: list[tuple[str, Any]] = field(default_factory=list)
@@ -111,9 +110,9 @@ def test_insert_fit_file_writes_expected_columns_and_commits() -> None:
 
     assert fit_file_id == 1
     assert conn.commit_count == 1
-    # Une seule requête a eu lieu (pas de conflit) : l'INSERT a suffi, la relecture
-    # n'a pas été déclenchée. Les valeurs passées comptent davantage que le texte SQL
-    # exact -- une reformulation du SQL ne doit pas casser ce test (cf. revue).
+    # One query occurred (no conflict): INSERT was enough, re-read not triggered.
+    # Parameter values matter more than exact SQL text — SQL reformulation must not
+    # break this test (see review).
     assert len(conn.executed) == 1
     _, params = conn.executed[0]
     garmin_activity_id, storage_path, sha256, size_bytes = params
@@ -133,8 +132,8 @@ def test_insert_fit_file_same_sha256_same_activity_is_idempotent() -> None:
         size_bytes=4096,
     )
 
-    # Retéléchargement de la même activité : même contenu, donc même sha256. Ne doit ni
-    # exploser (violation de fit_file_sha_uq) ni créer une seconde ligne.
+    # Re-download of same activity: same content, same sha256. Must neither explode
+    # (fit_file_sha_uq violation) nor create a second row.
     second_id = insert_fit_file(
         conn,
         garmin_activity_id=12345,
@@ -145,8 +144,8 @@ def test_insert_fit_file_same_sha256_same_activity_is_idempotent() -> None:
 
     assert second_id == first_id
     assert len(conn.rows) == 1
-    # La seconde requête (SELECT de relecture après conflit) a bien eu lieu, et a bien
-    # dû relire garmin_activity_id pour pouvoir comparer -- pas seulement fit_file_id.
+    # Second query (SELECT re-read after conflict) did occur and must read
+    # garmin_activity_id to compare — not just fit_file_id.
     assert conn.executed[-1][0].startswith("SELECT fit_file_id, garmin_activity_id")
 
 
@@ -173,18 +172,16 @@ def test_insert_fit_file_different_sha256_creates_distinct_rows() -> None:
 
 
 def test_insert_fit_file_same_sha256_different_activity_raises_conflict() -> None:
-    """BLOQUANT 2 (revue) -- écrit en premier, avant la correction, comme demandé.
+    """BLOCKING 2 (review) — written first, before fix, as requested.
 
-    Scénario réel pour cet athlète (triathlète) : une séance brick/multisport peut
-    produire deux ``garmin_activity_id`` distincts (p. ex. activité parente et enfant
-    course-à-pied) dont le téléchargement « original » sert EXACTEMENT le même fichier
-    -- même contenu, donc même sha256. Avant la correction, la relecture après conflit
-    ne comparait que ``sha256`` et retournait l'ancien ``fit_file_id`` sans jamais
-    vérifier à quelle activité il appartenait réellement : l'activité 222 se serait vu
-    silencieusement attribuer une ligne pointant en réalité vers l'activité 111 --
-    orphelin permanent pour 222, statut « archivé » mensonger, et aucune resynchronisation
-    possible sans intervention manuelle. Ce test prouve que ce cas lève désormais
-    :class:`FitFileShaConflictError` plutôt que de mentir.
+    Real scenario for this athlete (triathlon): a brick/multisport session can produce
+    two distinct ``garmin_activity_id`` (e.g., parent and child running activity)
+    whose 'original' download serves EXACTLY the same file — same content, same sha256.
+    Before the fix, conflict re-read only compared ``sha256`` and returned the old
+    ``fit_file_id`` without verifying which activity it really belonged to: activity
+    222 would silently get a row actually pointing to 111 — permanent orphan for 222,
+    false "archived" status, no resync possible without manual intervention. This test
+    proves this case now raises :class:`FitFileShaConflictError` instead of lying.
     """
     conn = _FakeFitFileConnection()
     insert_fit_file(
@@ -204,17 +201,17 @@ def test_insert_fit_file_same_sha256_different_activity_raises_conflict() -> Non
             size_bytes=100,
         )
 
-    # L'activité perdante ne doit apparaître nulle part en base : aucune ligne créée,
-    # aucune ligne existante réattribuée -- l'orphelinat doit rester visible, pas masqué.
+    # Losing activity must not appear anywhere in DB: no row created, no existing row
+    # reassigned — orphaning must stay visible, not hidden.
     assert len(conn.rows) == 1
     assert conn.rows[0].garmin_activity_id == 111
     assert "222" in str(excinfo.value)
 
 
 def test_insert_fit_file_raises_if_conflict_reread_finds_nothing() -> None:
-    # Cas d'incohérence délibérément forcé (jamais observable avec un vrai PostgreSQL,
-    # la contrainte UNIQUE garantit que la ligne existe) : couvre le garde-fou
-    # défensif de insert_fit_file plutôt que de le laisser mort.
+    # Deliberately forced inconsistency (never observable with real PostgreSQL,
+    # UNIQUE constraint guarantees row exists): covers insert_fit_file's defensive
+    # guard rather than leaving it untested.
     conn = _FakeFitFileConnection()
     conn.rows.append(
         _Row(
@@ -234,14 +231,14 @@ def test_insert_fit_file_raises_if_conflict_reread_finds_nothing() -> None:
                 return
             super().execute(query, params)
 
-    # Remplacement de la méthode liée `cursor` sur UNE instance, pour forcer la relecture
-    # à échouer sans dupliquer toute la doublure `_FakeFitFileConnection`. mypy signale
-    # normalement ce remplacement comme dangereux (une méthode liée n'est pas un simple
-    # attribut réassignable en général) ; ici c'est sûr et local à ce test précis : le
-    # `type: ignore` est donc conservé, mais justifié plutôt que laissé nu.
+    # Replace bound method `cursor` on ONE instance to force re-read to fail without
+    # duplicating entire `_FakeFitFileConnection` double. mypy normally flags this as
+    # dangerous (bound method is not normally simple reassignable attribute); here it's
+    # safe and local to this one test: the `type: ignore` is kept but justified rather
+    # than left bare.
     conn.cursor = lambda: _VanishingCursor(conn)  # type: ignore[method-assign]
 
-    with pytest.raises(RuntimeError, match="incohérence"):
+    with pytest.raises(RuntimeError, match="inconsistency"):
         insert_fit_file(
             conn,
             garmin_activity_id=2,

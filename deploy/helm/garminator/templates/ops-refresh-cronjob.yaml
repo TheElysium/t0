@@ -1,15 +1,15 @@
 {{- /*
-CronJob de rafraichissement des vues materialisees mart.* (lot L10).
+CronJob for refreshing materialized views mart.* (batch L10).
 
-Pilote par le bloc `opsRefresh` de values.yaml (integre depuis ; l'entete
-precedente affirmait a tort que ces cles manquaient encore). Il rafraichit
-les vues materialisees mart.* que Grafana interroge : sans lui, les tableaux
-de bord restent figes sur le dernier REFRESH manuel.
+Driven by the `opsRefresh` block in values.yaml (integrated now; the previous
+header wrongly claimed these keys were still missing). It refreshes the
+materialized views mart.* that Grafana queries: without it, dashboards stay
+frozen at the last manual REFRESH.
 
-Reutilise volontairement l'image d'ingestion (`.Values.ingest.image`) : le
-module `garminator.ops` fait partie du meme paquet Python que l'ingestion,
-livre dans la meme image de conteneur -- aucune image separee a construire ou
-a maintenir pour ce lot.
+Intentionally reuses the ingest image (`.Values.ingest.image`): the
+`garminator.ops` module is part of the same Python package as ingest,
+delivered in the same container image -- no separate image to build or
+maintain for this batch.
 */ -}}
 {{- if .Values.opsRefresh.enabled }}
 apiVersion: batch/v1
@@ -21,15 +21,14 @@ metadata:
     app.kubernetes.io/component: ops-refresh
 spec:
   schedule: {{ .Values.opsRefresh.schedule | quote }}
-  # Sans ce champ, le controleur applique UTC alors que le CronJob de sondage
-  # tourne en heure locale : la fenetre reelle entre les deux Jobs ne serait plus
-  # celle qu'annonce values.yaml, et changerait deux fois par an.
+  # Without this field, the controller applies UTC while the polling CronJob runs
+  # in local time: the real window between the two Jobs would no longer be what
+  # values.yaml announces, and would change twice a year.
   timeZone: {{ .Values.ingest.config.timezone | quote }}
-  # Un rafraichissement encore en cours ne doit jamais en croiser un second :
-  # REFRESH MATERIALIZED VIEW CONCURRENTLY prend un verrou d'ecriture sur la
-  # vue le temps de l'operation : un deuxieme run se contenterait d'attendre
-  # (ou d'echouer sur timeout), sans jamais rien corrompre, mais Forbid evite
-  # l'empilement inutile de Jobs bloques.
+  # A refresh still running must never meet a second one: REFRESH MATERIALIZED VIEW
+  # CONCURRENTLY takes a write lock on the view for the duration: a second run would
+  # just wait (or fail on timeout), never corrupting anything, but Forbid prevents
+  # unnecessary piling up of blocked Jobs.
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: {{ .Values.opsRefresh.startingDeadlineSeconds }}
   successfulJobsHistoryLimit: {{ .Values.opsRefresh.successfulJobsHistoryLimit }}
@@ -44,8 +43,8 @@ spec:
             app.kubernetes.io/component: ops-refresh
         spec:
           restartPolicy: OnFailure
-          # Ce Job ne parle qu'a PostgreSQL : aucun identifiant Garmin, aucun
-          # jeton de compte de service.
+          # This Job only talks to PostgreSQL: no Garmin credentials, no service
+          # account token.
           automountServiceAccountToken: false
           securityContext:
             {{- toYaml .Values.ingest.securityContext | nindent 12 }}
@@ -59,11 +58,10 @@ spec:
                   type: RuntimeDefault
               command: ["python", "-m", "garminator.ops", "refresh"]
               env:
-                # PGUSER/PGPASSWORD DOIVENT etre definis avant
-                # GARMINATOR_POSTGRES_DSN ci-dessous : Kubernetes ne resout
-                # $(VAR) que parmi les variables DEJA declarees plus haut
-                # dans la meme liste `env` (ordre du tableau, pas ordre
-                # alphabetique).
+                # PGUSER/PGPASSWORD MUST be defined before GARMINATOR_POSTGRES_DSN
+                # below: Kubernetes only resolves $(VAR) among variables ALREADY
+                # declared earlier in the same `env` list (array order, not
+                # alphabetical order).
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef:
@@ -74,16 +72,16 @@ spec:
                     secretKeyRef:
                       name: {{ include "garminator.postgresql.secretName" . }}
                       key: password
-                # DSN fourni via variable d'environnement, JAMAIS via un
-                # argument --dsn : un argument de commande est visible en
-                # clair dans la liste des processus du conteneur, y compris
-                # via `kubectl describe pod` (spec.containers[].command).
+                # DSN provided via environment variable, NEVER via an --dsn
+                # argument: a command-line argument is visible in plain text in the
+                # container process list, including via `kubectl describe pod`
+                # (spec.containers[].command).
                 - name: GARMINATOR_POSTGRES_DSN
                   value: >-
                     postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
-                # Ce Job ne monte pas la ConfigMap d'ingestion (il n'a besoin
-                # d'aucun reglage Garmin) : la verbosite est reprise ici seule,
-                # depuis la meme valeur, pour qu'un unique reglage vaille partout.
+                # This Job does not mount the ingest ConfigMap (it needs no Garmin
+                # settings): verbosity is picked up here alone, from the same value,
+                # so a single setting applies everywhere.
                 - name: GARMINATOR_LOG_LEVEL
                   value: {{ .Values.ingest.config.logLevel | quote }}
                 - name: HOME

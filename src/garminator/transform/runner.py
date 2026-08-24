@@ -1,44 +1,40 @@
-"""Orchestration du passage ``raw.fit_file`` -> ``core.*`` : la file d'attente de parsing.
+"""Orchestration of ``raw.fit_file`` -> ``core.*`` pass: the parsing queue.
 
-Ce module est le chaînon qui manquait pour que le projet produise quoi que ce soit de
-visible. Jusqu'ici la chaîne s'arrêtait à ``raw`` : les fichiers étaient téléchargés,
-archivés sur le PVC et inscrits dans ``raw.fit_file``, mais RIEN n'écrivait dans
-``core.*``. Conséquence exacte, qui ne saute pas aux yeux : les vues ``mart.*`` étaient
-rafraîchies avec succès à chaque passage d'``ops refresh``, sans la moindre erreur, et
-restaient vides -- les tableaux de bord Grafana n'affichaient rien sans qu'aucun voyant
-ne soit au rouge.
+This module is the missing link for the project to produce anything visible. Until now
+the chain stopped at ``raw``: files were downloaded, archived on PVC, and logged in
+``raw.fit_file``, but NOTHING wrote to ``core.*``. Exact consequence, not obvious: the
+``mart.*`` views refreshed successfully on each ``ops refresh`` pass without error, yet
+stayed empty -- Grafana dashboards showed nothing with no red light.
 
-La file d'attente n'est pas inventée ici : ``raw.fit_file`` la porte depuis la
-migration 002, avec ``parsed_at`` / ``parser_version`` / ``parse_error`` et l'index
-partiel ``fit_file_unparsed_idx ON raw.fit_file (downloaded_at) WHERE parsed_at IS
-NULL``. Ce module se contente de la consommer dans l'ordre que cet index sert.
+The queue is not invented here: ``raw.fit_file`` carries it since migration 002, with
+``parsed_at`` / ``parser_version`` / ``parse_error`` and partial index
+``fit_file_unparsed_idx ON raw.fit_file (downloaded_at) WHERE parsed_at IS NULL``.
+This module just consumes it in the order that index serves.
 
-ORDRE D'ÉCRITURE, ET POURQUOI CELUI-LÀ. Le bundle est écrit et VALIDÉ d'abord, puis
-``parsed_at`` est posé dans une seconde transaction. Ce n'est pas un oubli : c'est le
-même raisonnement que la règle d'atomicité « fichier sur le PVC AVANT sa ligne en
-base » du commentaire de ``raw.fit_file``, appliquée un cran plus loin. Une panne
-entre les deux laisse une activité écrite dans ``core`` et un fichier toujours marqué
-non parsé -- le passage suivant le reprend, et comme
-:func:`~garminator.transform.store.store_activity_bundle` est idempotente (remplacement
-complet par activité), l'état final est identique. L'ordre inverse produirait un
-fichier marqué parsé dont l'activité n'a jamais été écrite : une séance perdue en
-silence, que plus aucun passage ne reprendrait jamais.
+WRITE ORDER, AND WHY THAT ONE. The bundle is written and VALIDATED first, then
+``parsed_at`` is set in a second transaction. This is not an oversight: it is the same
+reasoning as the atomicity rule "file on PVC BEFORE its row in database" from the
+``raw.fit_file`` comment, applied one level deeper. A crash between the two leaves an
+activity written in ``core`` and a file still marked unparsed -- the next pass retakes
+it, and since :func:`~garminator.transform.store.store_activity_bundle` is idempotent
+(full replacement per activity), the final state is the same. The reverse order would
+produce a file marked parsed whose activity was never written: a session lost silently,
+never retaken by any pass.
 
-POURQUOI UN ÉCHEC N'EST PAS REJOUÉ AUTOMATIQUEMENT. La sélection par défaut ajoute
-``AND parse_error IS NULL`` à la condition ``parsed_at IS NULL``. Sans cela, un fichier
-définitivement indigeste -- un ``typeKey`` Garmin absent de la table de correspondance,
-une archive tronquée -- serait retenté à chaque passage nocturne, pour échouer à
-l'identique, indéfiniment. ``retry_failed=True`` (option ``--retry-failed``) rejoue
-explicitement ces lignes, ce qui est exactement ce qu'on veut APRÈS avoir corrigé la
-cause : c'est une décision d'opérateur, pas un comportement par défaut.
+WHY A FAILURE IS NOT RETRIED AUTOMATICALLY. The default selection adds ``AND parse_error
+IS NULL`` to the ``parsed_at IS NULL`` condition. Without it, a permanently indigestible
+file -- a Garmin ``typeKey`` missing from the lookup table, a truncated archive -- would
+be retried on every nightly pass, fail identically, forever. ``retry_failed=True``
+(``--retry-failed`` option) explicitly retries these rows, which is exactly what we want
+AFTER fixing the cause: it is an operator decision, not default behavior.
 
-RÉSUMÉ ABSENT ≠ ÉCHEC. ``build_core_rows`` a besoin d'un ``ActivityContext`` que seul le
-résumé JSON de Garmin porte (sport, fuseau, durée). Si ce résumé n'est pas encore dans
-``raw.api_response``, le fichier est IGNORÉ sans être marqué en erreur : c'est un état
-transitoire normal (le fichier .FIT et la fenêtre ``get_activities_by_date`` du jour ne
-sont pas nécessairement ingérés par le même passage), et le marquer en erreur
-l'exclurait de la sélection par défaut jusqu'à une intervention manuelle, pour une
-cause qui se résout d'elle-même au prochain sondage.
+MISSING SUMMARY ≠ FAILURE. ``build_core_rows`` needs an ``ActivityContext`` only the
+Garmin JSON summary carries (sport, timezone, duration). If that summary is not yet in
+``raw.api_response``, the file is IGNORED without being marked in error: it is a normal
+transient state (the .FIT file and today's ``get_activities_by_date`` window are not
+necessarily ingested by the same pass), and marking it in error would exclude it from
+the default selection until manual intervention, for a cause that resolves itself on the
+next poll.
 """
 
 from __future__ import annotations
@@ -52,6 +48,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from garminator.fit.reader import decode_fit_file
 from garminator.tcx.reader import decode_tcx_file
 from garminator.transform.activity import build_core_rows
+from garminator.transform.manual import build_manual_activity_context
 from garminator.transform.store import store_activity_bundle
 from garminator.transform.summary import build_activity_context, load_thresholds, select_thresholds
 
@@ -63,17 +60,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Inscrite dans ``raw.fit_file.parser_version`` à chaque succès. Sa raison d'être est
-#: écrite dans le commentaire de la colonne : « permet de rejouer sélectivement les
-#: fichiers parsés par une version buguée ». Elle n'a donc d'utilité que si elle CHANGE
-#: quand le comportement du décodage ou de la transformation change -- à incrémenter
-#: délibérément, jamais dérivée automatiquement d'une version de paquet.
+#: Written to ``raw.fit_file.parser_version`` on each success. Its purpose is written
+#: in the column comment: "lets us selectively replay files parsed by a buggy version".
+#: It only helps if it CHANGES when decode or transform behavior changes -- increment
+#: deliberately, never auto-derived from package version.
 PARSER_VERSION = "garminator-transform/1"
 
-#: Plafond par passage. Un CronJob nocturne n'a aucune raison de traiter les 1 090
-#: fichiers de l'historique d'un coup au premier démarrage : mieux vaut plusieurs
-#: passages courts, dont chacun laisse la base dans un état cohérent, qu'un unique
-#: passage de plusieurs heures qu'une éviction de pod ramènerait à zéro.
+#: Limit per pass. A nightly CronJob has no reason to process all 1,090 historical
+#: files on first start: better several short passes, each leaving the database in
+#: consistent state, than one multi-hour pass a pod eviction would reset to zero.
 DEFAULT_BATCH_LIMIT = 200
 
 _PENDING_QUERY_NOT_FAILED = (
@@ -94,14 +89,13 @@ _PENDING_QUERY_ALL = (
 
 
 class _Cursor(Protocol):
-    """Surface minimale exigée d'un curseur par CE module.
+    """Minimal surface required of a cursor by THIS module.
 
-    ``executemany`` y figure alors qu'aucune fonction d'ici ne l'appelle : c'est
-    :func:`~garminator.transform.store.store_activity_bundle`, à qui la connexion est
-    transmise telle quelle, qui en a besoin. Sans lui, le protocole d'ici ne serait pas
-    un sous-type de celui de ``store`` et le passage de relais ne tiendrait pas au
-    typage -- alors qu'il fonctionnerait à l'exécution. Mieux vaut l'écrire que le
-    contourner par un ``cast``.
+    ``executemany`` appears here even though no function here calls it:
+    :func:`~garminator.transform.store.store_activity_bundle`, to which the connection
+    is passed as-is, needs it. Without it, this protocol would not be a subtype of
+    ``store``'s, and the handoff would not type-check -- yet it would work at runtime.
+    Better to state it than work around it with a ``cast``.
     """
 
     def execute(self, query: str, params: Any = ...) -> object: ...
@@ -113,9 +107,9 @@ class _Cursor(Protocol):
 
 
 class DBConnection(Protocol):
-    """Vue structurelle sur une connexion psycopg 3, même motif que
-    ``garminator.garmin.raw_store``, élargie à ``rollback`` : ce module en a un besoin
-    que ses voisins n'ont pas, expliqué dans :func:`_mark_failed`."""
+    """Structural view of a psycopg 3 connection, same pattern as
+    ``garminator.garmin.raw_store``, extended with ``rollback``: this module needs it
+    in a way its neighbors do not, explained in :func:`_mark_failed`."""
 
     def cursor(self) -> _Cursor: ...
     def commit(self) -> None: ...
@@ -124,19 +118,18 @@ class DBConnection(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PendingFile:
-    """Une ligne de ``raw.fit_file`` restant à transformer."""
+    """A row from ``raw.fit_file`` awaiting transformation."""
 
     fit_file_id: int
-    #: NULL pour un envoi manuel : la migration 012 a rendu la colonne nullable, NULL
-    #: étant le seul marqueur de provenance (l'API Garmin ne produit jamais de ligne
-    #: sans activityId).
+    #: NULL for manual upload: migration 012 made the column nullable, NULL being the
+    #: only provenance marker (Garmin API never produces a row without activityId).
     garmin_activity_id: int | None
     storage_path: str
 
 
 @dataclass(frozen=True, slots=True)
 class FileOutcome:
-    """Sort d'un fichier. ``status`` vaut ``stored`` | ``skipped`` | ``failed``."""
+    """Outcome of a file. ``status`` is one of ``stored`` | ``skipped`` | ``failed``."""
 
     fit_file_id: int
     garmin_activity_id: int | None
@@ -146,13 +139,13 @@ class FileOutcome:
 
 @dataclass(frozen=True, slots=True)
 class TransformReport:
-    """Bilan d'un passage, destiné à la sortie standard du CronJob."""
+    """Summary of a pass, for CronJob stdout."""
 
     outcomes: tuple[FileOutcome, ...]
-    #: Fichiers portant un ``parse_error`` dans TOUTE la table, pas seulement dans ce
-    #: passage. Un fichier en echec sort de la selection par defaut : sans ce total, le
-    #: passage suivant le trouve absent de la file, sort en 0, et l'activite manque
-    #: definitivement dans ``core`` sans qu'aucun voyant ne s'allume.
+    #: Files carrying a ``parse_error`` anywhere in the table, not just this pass. A
+    #: failed file exits the default selection: without this total, the next pass finds
+    #: it absent from the queue, exits at 0, and the activity is permanently missing from
+    #: ``core`` with no red light.
     failed_backlog: int = 0
 
     @property
@@ -169,11 +162,11 @@ class TransformReport:
 
 
 def count_failed_files(conn: DBConnection) -> int:
-    """Nombre de fichiers portant un ``parse_error``, tous passages confondus.
+    """Count of files carrying a ``parse_error``, across all passes.
 
-    Un fichier marque en echec quitte la selection par defaut : il n'est plus jamais
-    retente sans ``--retry-failed``. Le compter a chaque passage est ce qui empeche un
-    echec unique de devenir un trou permanent dans ``core`` que plus rien ne signale.
+    A file marked failed exits the default selection: it is never retried without
+    ``--retry-failed``. Counting it each pass is what prevents a single failure from
+    becoming a permanent hole in ``core`` with no one noticing.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM raw.fit_file WHERE parse_error IS NOT NULL")
@@ -184,18 +177,17 @@ def count_failed_files(conn: DBConnection) -> int:
 def select_pending_files(
     conn: DBConnection, *, limit: int = DEFAULT_BATCH_LIMIT, retry_failed: bool = False
 ) -> tuple[PendingFile, ...]:
-    """Fichiers restant à transformer, du plus ancien téléchargement au plus récent.
+    """Files awaiting transformation, oldest download to newest.
 
-    ``ORDER BY downloaded_at`` n'est pas cosmétique : c'est la colonne de l'index
-    partiel ``fit_file_unparsed_idx``, donc le seul ordre que PostgreSQL puisse servir
-    sans tri. Traiter du plus ancien au plus récent a par ailleurs une conséquence
-    métier : le PMC se construit chronologiquement, et un passage interrompu à
-    mi-parcours laisse alors un historique continu jusqu'à une date, plutôt qu'un
-    gruyère.
+    ``ORDER BY downloaded_at`` is not cosmetic: it is the partial index
+    ``fit_file_unparsed_idx`` column, so the only order PostgreSQL can serve without
+    sort. Processing oldest-to-newest also has a business consequence: PMC is built
+    chronologically, and a pass interrupted mid-way leaves a continuous history to a
+    date, rather than gaps.
     """
-    # Deux requêtes ÉCRITES EN ENTIER plutôt qu'un fragment interpolé : rien ici ne vient
-    # de l'extérieur, mais une requête assemblée par f-string devient tôt ou tard le
-    # gabarit qu'on recopie ailleurs avec une valeur qui, elle, en vient.
+    # Two queries WRITTEN WHOLE rather than interpolated fragment: nothing here comes
+    # from outside, but a query built by f-string eventually becomes the template
+    # copied elsewhere with values that do come from outside.
     query = _PENDING_QUERY_ALL if retry_failed else _PENDING_QUERY_NOT_FAILED
     with conn.cursor() as cur:
         cur.execute(query, (limit,))
@@ -203,8 +195,8 @@ def select_pending_files(
     return tuple(
         PendingFile(
             fit_file_id=int(r[0]),
-            # `int(None)` lèverait ici, HORS de l'isolation par fichier : un seul envoi
-            # manuel ferait donc échouer le passage nocturne entier.
+            # `int(None)` would raise here, OUTSIDE file isolation: a single manual
+            # upload would fail the entire nightly pass.
             garmin_activity_id=None if r[1] is None else int(r[1]),
             storage_path=str(r[2]),
         )
@@ -213,20 +205,20 @@ def select_pending_files(
 
 
 def load_activity_summary(conn: DBConnection, activity_id: int) -> Mapping[str, Any] | None:
-    """Résumé JSON d'UNE activité, extrait du dernier payload ``get_activities_by_date``.
+    """JSON summary of ONE activity, extracted from the latest ``get_activities_by_date``
+    payload.
 
-    Garmin ne sert pas les résumés un par un : ``get_activities_by_date`` répond un
-    TABLEAU d'activités pour une fenêtre de dates, stocké tel quel dans
-    ``raw.api_response``. Retrouver une activité précise impose donc de déplier ce
-    tableau (``jsonb_array_elements``) plutôt que de filtrer sur ``scope_key`` -- lequel
-    reste NULL pour cet endpoint, faute d'une clé unique qui le caractériserait. Le coût
-    est un parcours des lignes de cet endpoint ; il est assumé ici, à raison d'une
-    requête par fichier en attente.
+    Garmin does not serve summaries one-by-one: ``get_activities_by_date`` returns an
+    ARRAY of activities for a date window, stored as-is in ``raw.api_response``.
+    Finding one specific activity requires unfolding that array (``jsonb_array_elements``)
+    rather than filtering on ``scope_key`` -- which stays NULL for this endpoint, lacking
+    a unique key to characterize it. The cost is scanning endpoint rows; it is accepted
+    here, one query per pending file.
 
-    ``ORDER BY fetched_at DESC LIMIT 1`` prend la version la PLUS RÉCENTE : la table est
-    append-only et Garmin republie ses données (recalculs a posteriori). Prendre la plus
-    ancienne figerait le résumé au premier état connu, ce qui irait exactement contre la
-    raison d'être de cette table.
+    ``ORDER BY fetched_at DESC LIMIT 1`` takes the MOST RECENT version: the table is
+    append-only and Garmin republishes data (retroactive recalculations). Taking the
+    oldest would freeze the summary at first-known state, exactly against this table's
+    purpose.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -243,8 +235,8 @@ def load_activity_summary(conn: DBConnection, activity_id: int) -> Mapping[str, 
     if row is None:
         return None
     payload = row[0]
-    # psycopg décode déjà le jsonb en objet Python ; la branche str couvre une doublure
-    # de test ou un pilote configuré autrement, sans trancher laquelle des deux est vraie.
+    # psycopg already decodes jsonb to a Python object; the str branch covers a test
+    # double or differently-configured driver, without deciding which.
     if isinstance(payload, str):
         decoded: Any = json.loads(payload)
         return decoded if isinstance(decoded, dict) else None
@@ -252,73 +244,116 @@ def load_activity_summary(conn: DBConnection, activity_id: int) -> Mapping[str, 
 
 
 def resolve_athlete_id(conn: DBConnection) -> int:
-    """``athlete_id`` unique de ``core.athlete``.
+    """Unique ``athlete_id`` from ``core.athlete``.
 
-    Lève si la table est vide ou en contient plusieurs, au lieu de retomber sur 1.
-    Rattacher tout un historique au mauvais athlète produirait des seuils faux, donc
-    des TSS faux, sans qu'aucune contrainte ne s'en aperçoive -- l'erreur ne se verrait
-    qu'à la lecture des courbes, longtemps après.
+    Raises if the table is empty or has more than one row, instead of defaulting to 1.
+    Attaching an entire history to the wrong athlete would produce wrong thresholds,
+    thus wrong TSS, undetected by any constraint -- the error only shows up reading
+    curves, much later.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT athlete_id FROM core.athlete ORDER BY athlete_id")
         rows = cur.fetchall()
     if len(rows) != 1:
         msg = (
-            f"core.athlete contient {len(rows)} ligne(s) : impossible de choisir seul. "
-            "Passer --athlete-id explicitement."
+            f"core.athlete has {len(rows)} row(s): cannot choose alone. "
+            "Pass --athlete-id explicitly."
         )
         raise ValueError(msg)
     return int(rows[0][0])
 
 
 def load_athlete_sex(conn: DBConnection, athlete_id: int) -> Sex:
-    """``sex`` de l'athlète, requis par le TRIMP de Banister.
+    """Athlete's ``sex``, required by Banister TRIMP.
 
-    Ce n'est pas une donnée d'état civil mais un coefficient de calcul : k vaut
-    0.64/1.92 pour un homme et 0.86/1.67 pour une femme. Se tromper sous-estime ou
-    surestime le TRIMP d'environ 15 % sur toute la charge, uniformément et sans
-    aucune erreur visible -- exactement le genre de faux que rien ne rattrape.
+    This is not civil status but a calculation coefficient: k is 0.64/1.92 for male,
+    0.86/1.67 for female. Getting it wrong underestimates or overestimates TRIMP by ~15%
+    across all load, uniformly and invisibly -- exactly the kind of error nothing catches.
 
-    Lève si l'athlète est inconnu : ``--athlete-id`` mal saisi doit s'arrêter ici, pas
-    rattacher un historique à une ligne qui n'existe pas.
+    Raises if athlete is unknown: mistyped ``--athlete-id`` must fail here, not attach
+    history to a nonexistent row.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT sex FROM core.athlete WHERE athlete_id = %s", (athlete_id,))
         row = cur.fetchone()
     if row is None:
-        msg = f"core.athlete ne contient aucun athlete_id = {athlete_id}."
+        msg = f"core.athlete has no athlete_id = {athlete_id}."
         raise ValueError(msg)
     value = str(row[0])
     if value not in ("male", "female"):
-        # La contrainte CHECK de la migration 003 l'interdit ; si on arrive ici, c'est
-        # que le schéma a divergé, et deviner serait pire que s'arrêter.
-        msg = f"core.athlete.sex = {value!r} : valeur hors de ('male','female')."
+        # Migration 003's CHECK constraint forbids it; if we get here, the schema has
+        # diverged, and guessing is worse than stopping.
+        msg = f"core.athlete.sex = {value!r}: value not in ('male','female')."
         raise ValueError(msg)
     return cast("Sex", value)
 
 
-def decode_archived_file(path: Path, *, activity_id: int) -> Any:
-    """Choisit le décodeur d'après l'extension posée à l'archivage.
+def load_home_timezone(conn: DBConnection, athlete_id: int) -> str:
+    """``core.athlete.home_timezone``, read ONCE per pass (same reasoning as thresholds:
+    an invariant value re-read per file would be hundreds of identical queries).
 
-    Cette extension n'est pas une supposition sur le nom envoyé par Garmin :
-    ``garminator.fit.archive`` renifle le contenu réel du membre d'archive et en DÉRIVE
-    le suffixe. S'y fier ici revient donc à se fier à un fait constaté.
+    Sanctioned by the column's own comment (migrations/003_core_ref.sql) as the fallback
+    "when an activity's timezone is indeterminable" -- exactly the manual-upload case,
+    which carries no ``startTimeGMT``/``startTimeLocal`` pair to derive a real offset from.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT home_timezone FROM core.athlete WHERE athlete_id = %s", (athlete_id,))
+        row = cur.fetchone()
+    if row is None:
+        msg = f"core.athlete has no athlete_id = {athlete_id}."
+        raise ValueError(msg)
+    return str(row[0])
+
+
+def _resolve_manual_activity_id(conn: DBConnection, fit_file_id: int) -> int | None:
+    """Idempotence (migrations/014): a manual activity already written for this file is
+    REUSED rather than re-drawn from the sequence, so a second transformation pass never
+    creates a duplicate -- the partial UNIQUE index ``activity_manual_file_uq`` would
+    reject it anyway, but failing on retry would be worse than simply finding it again.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT activity_id FROM core.activity WHERE fit_file_id = %s AND source = 'manual'",
+            (fit_file_id,),
+        )
+        row = cur.fetchone()
+    return None if row is None else int(row[0])
+
+
+def _next_manual_activity_id(conn: DBConnection) -> int:
+    """Fresh identifier from ``core.manual_activity_id_seq`` (migrations/014) for a
+    manual upload never transformed before."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT nextval('core.manual_activity_id_seq')")
+        row = cur.fetchone()
+    if row is None:
+        msg = "core.manual_activity_id_seq: nextval() returned no row."
+        raise RuntimeError(msg)
+    return int(row[0])
+
+
+def decode_archived_file(path: Path, *, activity_id: int) -> Any:
+    """Choose decoder by the extension set at archive time.
+
+    This extension is not a guess about the name Garmin sent: ``garminator.fit.archive``
+    sniffs the actual archive member content and DERIVES the suffix from it. Trusting it
+    here means trusting an observed fact.
     """
     suffix = path.suffix.lower()
     if suffix == ".fit":
         return decode_fit_file(path, activity_id=activity_id)
     if suffix == ".tcx":
         return decode_tcx_file(path, activity_id=activity_id)
-    msg = f"extension inattendue {suffix!r} pour {path} : ni .fit ni .tcx."
+    msg = f"unexpected extension {suffix!r} for {path}: neither .fit nor .tcx."
     raise ValueError(msg)
 
 
 def _mark_parsed(conn: DBConnection, fit_file_id: int) -> None:
-    """Pose ``parsed_at`` / ``parser_version`` et EFFACE ``parse_error``.
+    """Set ``parsed_at`` / ``parser_version`` and CLEAR ``parse_error``.
 
-    L'effacement compte : un fichier qui a échoué puis réussi ne doit pas conserver le
-    message de son ancien échec, sous peine qu'un bilan de santé le signale
-    éternellement comme problématique alors qu'il est en base et correct.
+    Clearing matters: a file that failed then succeeded must not keep its old failure
+    message, or a health check would forever flag it as problematic when it is in the
+    database and correct.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -331,18 +366,17 @@ def _mark_parsed(conn: DBConnection, fit_file_id: int) -> None:
 
 
 def _mark_failed(conn: DBConnection, fit_file_id: int, message: str) -> None:
-    """Enregistre l'échec en laissant ``parsed_at`` à NULL.
+    """Record failure, leaving ``parsed_at`` as NULL.
 
-    Le ``rollback()`` préalable est indispensable, et c'est la raison pour laquelle ce
-    module exige ``rollback`` dans son protocole contrairement à ses voisins : après une
-    erreur SQL, psycopg place la transaction en état « aborted » et refuse toute requête
-    ultérieure. Sans annulation préalable, l'écriture même du message d'erreur
-    échouerait -- et l'incident disparaîtrait sans laisser de trace, ce qui est
-    exactement le contraire de ce qu'on cherche ici.
+    The prior ``rollback()`` is essential, and why this module requires ``rollback`` in
+    its protocol unlike its neighbors: after SQL error, psycopg sets transaction to
+    "aborted" and refuses any further query. Without prior rollback, writing the error
+    message itself would fail -- and the incident vanishes with no trace, exactly opposite
+    what we want here.
 
-    Le message est tronqué : ``parse_error`` est un ``text`` sans limite, mais une trace
-    de plusieurs kilo-octets par fichier rendrait la colonne illisible à la relecture
-    (requête de diagnostic de ``docs/RUNBOOK.md``).
+    The message is truncated: ``parse_error`` is a limitless ``text``, but several
+    kilobytes per file would make the column unreadable when reviewing (diagnostic query
+    in ``docs/RUNBOOK.md``).
     """
     conn.rollback()
     with conn.cursor() as cur:
@@ -360,54 +394,59 @@ def transform_one(
     athlete_id: int,
     sex: Sex,
     thresholds: Sequence[Threshold],
+    home_timezone: str,
 ) -> FileOutcome:
-    """Transforme UN fichier. Ne laisse jamais échapper d'erreur propre à ce fichier.
+    """Transform ONE file. Never lets errors for this file escape.
 
-    Un fichier indigeste ne doit pas emporter le passage entier : les autres séances
-    n'ont rien à voir avec celle qui pose problème. L'erreur est donc capturée, inscrite
-    dans ``raw.fit_file.parse_error`` et le passage continue. La colonne se relit avec la
-    requête de diagnostic de ``docs/RUNBOOK.md`` ; ``format_transform_report`` en donne le
-    total à chaque passage.
+    An indigestible file must not crash the entire pass: other sessions have nothing to
+    do with it. Error is captured, written to ``raw.fit_file.parse_error``, and the pass
+    continues. The column is read with the diagnostic query from ``docs/RUNBOOK.md``;
+    ``format_transform_report`` shows the total each pass.
 
-    La CAPTURE couvre la lecture du résumé et la pose de ``parsed_at``, pas seulement le
-    calcul : un payload ``raw.api_response`` tronqué ou un incident sur l'``UPDATE`` final
-    remonteraient autrement jusqu'à l'appelant, tuant le passage sans imprimer le moindre
-    rapport -- l'opérateur ne saurait même pas où il s'est arrêté.
+    Capture covers summary reading, manual-upload identifier resolution, and
+    ``parsed_at`` setting, not just the computation: a truncated ``raw.api_response``
+    payload, an unrecognized manual-upload sport, or an issue on the final ``UPDATE``
+    would otherwise bubble to the caller, killing the pass without printing any report --
+    the operator would not know where it stopped.
     """
     activity_id = pending.garmin_activity_id
-    if activity_id is None:
-        # Envoi manuel (migration 012). Le fichier porte pourtant de quoi le decrire : la
-        # duree se deduit des deux formats, et le sport figure dans le message `session`
-        # d'un FIT comme dans l'attribut `Sport` d'un TCX -- aucun lecteur ne les extrait
-        # aujourd'hui. Ce qui manque vraiment est ailleurs : `build_activity_context`
-        # n'existe qu'a partir d'un resume Garmin, et `core.activity.activity_id` EST
-        # l'identifiant Garmin (cle primaire, sans sequence) -- un envoi manuel n'a donc
-        # pas de cle. Le fichier RESTE dans la file plutot que d'etre marque en erreur :
-        # le jour ou ces deux manques seront combles, il sera repris sans intervention.
-        logger.info(
-            "fichier %s : envoi manuel sans identifiant Garmin, transformation non prise "
-            "en charge, fichier laissé dans la file.",
-            pending.fit_file_id,
-        )
-        return FileOutcome(pending.fit_file_id, None, "skipped", "envoi manuel sans résumé")
 
     try:
-        summary = load_activity_summary(conn, activity_id)
-        if summary is None:
-            # État transitoire, PAS une erreur : voir la docstring du module.
-            logger.info(
-                "activité %s : résumé get_activities_by_date absent, fichier %s reporté.",
-                activity_id,
-                pending.fit_file_id,
+        if activity_id is None:
+            # Manual upload (migration 012 made garmin_activity_id nullable; migration
+            # 014 gave it a key). No Garmin summary exists for this file: sport,
+            # duration, and timezone are all derived from the archived file itself by
+            # `build_manual_activity_context`, never from `raw.api_response`.
+            activity_id = _resolve_manual_activity_id(conn, pending.fit_file_id)
+            if activity_id is None:
+                activity_id = _next_manual_activity_id(conn)
+            decoded = decode_archived_file(Path(pending.storage_path), activity_id=activity_id)
+            context = build_manual_activity_context(
+                decoded,
+                activity_id=activity_id,
+                home_timezone=home_timezone,
+                tcx_sport=decoded.tcx_sport,
             )
-            # La lecture ci-dessus a ouvert une transaction que ce chemin ne referme
-            # sinon jamais : un lot entièrement reporté laisserait la session
-            # `idle in transaction` et bloquerait l'avancée du VACUUM sur raw.*.
-            conn.rollback()
-            return FileOutcome(pending.fit_file_id, activity_id, "skipped", "résumé Garmin absent")
+        else:
+            summary = load_activity_summary(conn, activity_id)
+            if summary is None:
+                # Transient state, NOT an error: see module docstring.
+                logger.info(
+                    "activity %s: get_activities_by_date summary missing, file %s deferred.",
+                    activity_id,
+                    pending.fit_file_id,
+                )
+                # The read above opened a transaction this path never otherwise closes: a
+                # batch entirely deferred would leave the session `idle in transaction`
+                # and block VACUUM progress on raw.*.
+                conn.rollback()
+                return FileOutcome(
+                    pending.fit_file_id, activity_id, "skipped", "Garmin summary missing"
+                )
 
-        context = build_activity_context(summary)
-        decoded = decode_archived_file(Path(pending.storage_path), activity_id=activity_id)
+            context = build_activity_context(summary)
+            decoded = decode_archived_file(Path(pending.storage_path), activity_id=activity_id)
+
         threshold, all_threshold = select_thresholds(
             thresholds, context.discipline, context.start_time_local.date()
         )
@@ -421,16 +460,15 @@ def transform_one(
             sex=sex,
         )
         store_activity_bundle(conn, bundle)
-        # Après le commit du bundle, jamais avant : voir « ordre d'écriture » en tête de
-        # module.
+        # After bundle commit, never before: see "write order" at module start.
         _mark_parsed(conn, pending.fit_file_id)
-    except Exception as exc:  # isoler le fichier fautif, cf. docstring.
+    except Exception as exc:  # isolate this file's error, cf. docstring.
         message = f"{type(exc).__name__}: {exc}"
-        logger.warning("activité %s : transformation en échec -- %s", activity_id, message)
+        logger.warning("activity %s: transform failed -- %s", activity_id, message)
         _mark_failed(conn, pending.fit_file_id, message)
         return FileOutcome(pending.fit_file_id, activity_id, "failed", message)
 
-    logger.info("activité %s écrite dans core (%s échantillons).", activity_id, len(bundle.samples))
+    logger.info("activity %s written to core (%s samples).", activity_id, len(bundle.samples))
     return FileOutcome(pending.fit_file_id, activity_id, "stored")
 
 
@@ -441,40 +479,49 @@ def transform_pending_files(
     limit: int = DEFAULT_BATCH_LIMIT,
     retry_failed: bool = False,
 ) -> TransformReport:
-    """Traite un lot de fichiers en attente et renvoie le bilan du passage."""
+    """Process a batch of pending files and return the pass summary."""
     resolved_athlete = athlete_id if athlete_id is not None else resolve_athlete_id(conn)
     sex = load_athlete_sex(conn, resolved_athlete)
-    # Les seuils sont chargés UNE fois pour tout le lot : ils sont historisés par période
-    # de validité, pas par activité, et les relire à chaque fichier ferait des centaines
-    # de requêtes identiques pour un résultat invariant.
+    # Thresholds are loaded ONCE for the entire batch: they are historized by validity
+    # period, not per activity, and re-reading per file would be hundreds of identical
+    # queries for an invariant result.
     thresholds = load_thresholds(conn, athlete_id=resolved_athlete)
+    # Same reasoning for home_timezone: an invariant fallback value, read once rather
+    # than once per manual-upload file.
+    home_timezone = load_home_timezone(conn, resolved_athlete)
     pending = select_pending_files(conn, limit=limit, retry_failed=retry_failed)
-    logger.info("%s fichier(s) en attente de transformation.", len(pending))
+    logger.info("%s file(s) awaiting transformation.", len(pending))
     outcomes = tuple(
-        transform_one(conn, item, athlete_id=resolved_athlete, sex=sex, thresholds=thresholds)
+        transform_one(
+            conn,
+            item,
+            athlete_id=resolved_athlete,
+            sex=sex,
+            thresholds=thresholds,
+            home_timezone=home_timezone,
+        )
         for item in pending
     )
     return TransformReport(outcomes=outcomes, failed_backlog=count_failed_files(conn))
 
 
 def format_transform_report(report: TransformReport) -> str:
-    """Rapport lisible sur stdout, dans la même veine que les autres points d'entrée.
+    """Readable report to stdout, in line with other entry points.
 
-    Les activités écrites ne sont pas détaillées ligne à ligne : sur un rattrapage de
-    200 fichiers, seuls les cas anormaux méritent d'être lus.
+    Written activities are not detailed line-by-line: on a 200-file catchup, only
+    abnormal cases deserve reading.
     """
-    lignes = [
-        f"Transformation : {report.stored} écrite(s), {report.skipped} reportée(s), "
-        f"{report.failed} en échec."
+    lines = [
+        f"Transform: {report.stored} stored, {report.skipped} deferred, " f"{report.failed} failed."
     ]
-    lignes.extend(
-        f"  activité {o.garmin_activity_id} -- {o.status} : {o.detail}"
+    lines.extend(
+        f"  activity {o.garmin_activity_id} -- {o.status}: {o.detail}"
         for o in report.outcomes
         if o.status != "stored"
     )
     if report.failed_backlog:
-        lignes.append(
-            f"ATTENTION : {report.failed_backlog} fichier(s) en echec hors de la file "
-            "(voir docs/RUNBOOK.md section 10, puis --retry-failed)."
+        lines.append(
+            f"WARNING: {report.failed_backlog} file(s) failed outside queue "
+            "(see docs/RUNBOOK.md section 10, then --retry-failed)."
         )
-    return "\n".join(lignes)
+    return "\n".join(lines)

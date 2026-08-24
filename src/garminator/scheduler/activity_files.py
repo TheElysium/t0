@@ -1,76 +1,72 @@
-"""Archivage des fichiers « originaux » (FIT/TCX) d'activités individuelles (lot L12).
+"""Archive original (FIT/TCX) files of individual activities (batch L12).
 
-Le sondage JSON (:mod:`garminator.scheduler.service`) ne rend que le *résumé* d'une
-activité : la Running Power native et le détail des longueurs de natation, les deux
-signaux qui comptent réellement pour cet athlète (voir ``profil-athlete``), ne vivent que
-dans le fichier ``.FIT``/``.TCX`` original. Ce module enchaîne, pour une activité donnée,
-le téléchargement (:meth:`garminator.garmin.client.GarminClient.download_original`),
-l'archivage sur le PVC (:func:`garminator.fit.archive.archive_download`) et
-l'enregistrement de la ligne ``raw.fit_file`` (:func:`garminator.garmin.raw_store.
-insert_fit_file`) -- puis une fonction de niveau supérieur qui répète cette séquence sur
-la liste des activités d'une journée.
+The JSON poll (:mod:`garminator.scheduler.service`) yields only the *summary* of an
+activity: native Running Power and swim length detail—the two signals that truly matter
+for this athlete (see ``profil-athlete``)—live only in the original ``.FIT``/``.TCX``
+file. This module chains for any given activity: download
+(:meth:`garminator.garmin.client.GarminClient.download_original`), archive to PVC
+(:func:`garminator.fit.archive.archive_download`), and record the ``raw.fit_file`` row
+(:func:`garminator.garmin.raw_store.insert_fit_file`)—then a higher-level function
+repeats this sequence over the list of activities for one day.
 
-Invariant central, non négociable (repris de :mod:`garminator.fit.archive`) : **le
-fichier atterrit sur le PVC AVANT toute ligne en base, jamais l'inverse**. Une ligne
-``raw.fit_file`` pointant un ``storage_path`` absent est irrécupérable (le parsing L3
-échouera pour toujours sur cette activité) ; un fichier orphelin sur le PVC sans ligne
-associée est au pire un peu d'espace disque gaspillé, retrouvable et ré-enregistrable au
-passage suivant. Le code ci-dessous respecte cet ordre par construction : ``archive_download``
-est appelé, puis SEULEMENT s'il réussit, ``insert_fit_file`` l'est à son tour --
-jamais l'inverse, et aucune écriture en base n'est tentée si l'archivage a levé.
+Core invariant, non-negotiable (drawn from :mod:`garminator.fit.archive`): **the file
+lands on PVC BEFORE any row in the database, never the reverse**. A ``raw.fit_file``
+row pointing to a missing ``storage_path`` is unrecoverable (L3 parsing will fail
+forever on that activity); a PVC file with no associated row is at worst wasted disk
+space, discoverable and re-recordable on the next pass. The code below respects this
+order by construction: ``archive_download`` is called, then ONLY if it succeeds,
+``insert_fit_file`` is called in turn—never the other way, and no database write is
+attempted if archiving raised.
 
-Ce module n'importe ``garminconnect`` que pour ``GarminConnectAuthenticationError`` --
-même choix que :mod:`garminator.garmin.client` : ``dl_fmt`` reste un paramètre opaque
-(``Any``) fourni par l'appelant réel, qui possède déjà
-``garminconnect.Garmin.ActivityDownloadFormat.ORIGINAL``. Garder CE symbole-là hors de ce
-module le laisse testable avec un faux client minimal, sans dépendre de la bibliothèque
-réseau. ``GarminConnectAuthenticationError`` est différent : c'est un TYPE d'exception
-que ce module doit reconnaître explicitement pour ne jamais la ravaler (voir la note sur
-la propagation de l'authentification plus bas), pas un symbole spécifique au transport.
+This module imports ``garminconnect`` only for ``GarminConnectAuthenticationError``—
+same choice as :mod:`garminator.garmin.client`: ``dl_fmt`` stays an opaque parameter
+(``Any``) supplied by the actual caller, who already has
+``garminconnect.Garmin.ActivityDownloadFormat.ORIGINAL``. Keeping that symbol out of
+this module leaves it testable with a minimal fake client, with no network-library
+dependency. ``GarminConnectAuthenticationError`` is different: it is an exception TYPE
+that this module must explicitly recognize to never swallow (see the note on auth
+propagation below)—not a symbol specific to transport.
 
-Idempotence, revue et corrigée (bug bloquant identifié en revue -- l'ancienne version de
-ce module traitait « une ligne ``raw.fit_file`` existe pour cette activité » comme
-équivalent à « le fichier est définitivement complet et correct », ce qui verrouillait à
-vie une activité longue re-sondée en cours d'enregistrement Garmin, ou tout simplement
-tronquée lors d'un premier passage) :
+Idempotence, revised and corrected (blocking bug found in review—the old version of
+this module treated "a ``raw.fit_file`` row exists for this activity" as equivalent to
+"the file is definitely complete and correct", which locked forever a long activity
+re-polled mid-Garmin-upload or simply truncated on first pass):
 
-- Le DDL (``migrations/002_raw.sql``) n'impose PAS qu'un ``garmin_activity_id`` n'ait
-  qu'une seule ligne ``raw.fit_file`` -- l'index ``fit_file_activity_idx ON
-  raw.fit_file (garmin_activity_id, downloaded_at DESC)`` documente au contraire un
-  modèle « plusieurs versions dans le temps », que ce module honore désormais.
-- Pour une fenêtre CLOSE (``window_date < today``, injecté explicitement par
-  l'appelant -- jamais ``date.today()`` inline, même convention que
-  ``run_scheduled_poll``/``garminator.ops.backfill``), la dernière version connue est
-  considérée définitive : aucun appel réseau n'est fait, ``"already_present"`` est
-  retourné directement. Garmin ne documente aucune notion de fichier original modifié
-  après la clôture d'une fenêtre passée.
-- Pour la fenêtre EN COURS (``window_date >= today``), le fichier est retéléchargé à
-  chaque passage et son sha256 comparé à la dernière version connue : contenu identique
-  -> ``"already_present"`` (rien de nouveau) ; contenu différent -> nouvelle ligne
-  ``raw.fit_file`` insérée, statut ``"refreshed"`` (l'activité était par exemple encore
-  en cours d'enregistrement lors du passage précédent et a grossi depuis).
+- The DDL (``migrations/002_raw.sql``) does NOT require a ``garmin_activity_id`` to have
+  only one ``raw.fit_file`` row—instead, the index ``fit_file_activity_idx ON
+  raw.fit_file (garmin_activity_id, downloaded_at DESC)`` documents a "multiple versions
+  over time" model, which this module now honors.
+- For a CLOSED window (``window_date < today``, explicitly injected by the caller—never
+  ``date.today()`` inline, same convention as ``run_scheduled_poll``/
+  ``garminator.ops.backfill``), the latest known version is treated as final: no network
+  call is made, ``"already_present"`` is returned immediately. Garmin documents no notion
+  of original file modified after a past window closes.
+- For the CURRENT window (``window_date >= today``), the file is re-downloaded on each
+  pass and its sha256 compared to the latest known version: identical content →
+  ``"already_present"`` (nothing new); different content → new ``raw.fit_file`` row
+  inserted, status ``"refreshed"`` (e.g., the activity was still uploading on the
+  previous pass and has grown since).
 
-Sur QUELS octets porte le sha256 (défaut réel trouvé en revue, corrigé ici) : le
-téléchargement « original » de Garmin est une ARCHIVE ZIP contenant le ``.fit``/``.tcx``
-(voir ``GarminClient.download_original``), tandis que ``raw.fit_file.sha256`` porte le
-sha du membre EXTRAIT -- c'est ``archive_bytes`` qui le calcule, après relecture du
-fichier écrit. Comparer le sha de l'enveloppe ZIP à celui d'une ligne ``raw.fit_file``
-ne peut donc JAMAIS coïncider : la comparaison d'idempotence échouait systématiquement,
-chaque activité du jour courant était réarchivée et rapportée ``"refreshed"`` à chaque
-passage, et le nom de fichier (qualifié par ce même sha) pouvait varier d'un passage à
-l'autre si Garmin ne réémet pas un ZIP bit-à-bit identique -- laissant sur le PVC un
-orphelin par passage, qu'aucune ligne ``raw.fit_file`` ne référence. Ce module extrait
-donc le membre lui-même (:func:`garminator.fit.archive.extract_payload`) AVANT de hacher,
-et ne manipule plus que ces octets-là : un seul sha, celui qui finit en base.
+On WHICH bytes the sha256 is computed (real bug found in review, fixed here): Garmin's
+"original" download is a ZIP archive containing the ``.fit``/``.tcx`` (see
+``GarminClient.download_original``), while ``raw.fit_file.sha256`` holds the sha of the
+EXTRACTED member—``archive_bytes`` computes it after re-reading the written file.
+Comparing the ZIP envelope's sha to a ``raw.fit_file`` row's can NEVER match: the
+idempotence comparison failed systematically, every activity on the current day was
+re-archived and reported ``"refreshed"`` on each pass, and the filename (qualified by
+that same sha) could vary pass to pass if Garmin does not re-emit a bit-identical ZIP—
+leaving a PVC orphan per pass with no ``raw.fit_file`` row referencing it. This module
+thus extracts the member itself (:func:`garminator.fit.archive.extract_payload`) BEFORE
+hashing, and manipulates only those bytes: a single sha, the one that ends up in the
+database.
 
-Ce redesign a une conséquence pour le NOM de fichier sur le PVC : deux versions d'une
-même activité (une tronquée, une complète) ne doivent jamais partager le même chemin --
-sinon la seconde écrase silencieusement la première pendant la fenêtre atomique
-d'``archive_download`` (write temp -> fsync -> reread -> verify -> ``os.replace``), ce qui
-serait inoffensif pour le contenu final mais rendrait le ``storage_path`` de l'ANCIENNE
-ligne ``raw.fit_file`` incohérent avec les octets qu'il pointe désormais. Le nom de
-fichier inclut donc un extrait du sha256 du contenu (``activity-{id}-{sha256[:12]}``),
-pas seulement l'identifiant d'activité.
+This redesign has a consequence for the filename on PVC: two versions of the same
+activity (one truncated, one complete) must never share the same path—else the second
+silently overwrites the first during the atomic window of ``archive_download`` (write
+temp → fsync → reread → verify → ``os.replace``), which would be harmless for final
+content but would leave the ``storage_path`` of the OLD ``raw.fit_file`` row incoherent
+with the bytes it now points to. The filename thus includes an excerpt of the sha256 of
+the content (``activity-{id}-{sha256[:12]}``), not just the activity id.
 """
 
 from __future__ import annotations
@@ -97,12 +93,12 @@ logger = logging.getLogger(__name__)
 
 
 class OriginalFileDownloader(Protocol):
-    """Vue structurelle minimale sur :class:`garminator.garmin.client.GarminClient`.
+    """Structural view of :class:`garminator.garmin.client.GarminClient`.
 
-    Un Protocol plutôt qu'une dépendance directe à ``GarminClient`` : ce module n'a
-    besoin que de cette unique méthode, et les tests injectent un faux client qui
-    l'implémente seule -- sans reconstruire un ``GarminClient`` complet (transport,
-    tokenstore, rate limiter...) hors de propos ici.
+    A Protocol rather than a direct dependency on ``GarminClient``: this module needs
+    only this one method, and tests inject a fake client that implements it alone—
+    without rebuilding a complete ``GarminClient`` (transport, tokenstore, rate
+    limiter...) out of scope here.
     """
 
     def download_original(
@@ -116,7 +112,7 @@ class OriginalFileDownloader(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _LatestFitFile:
-    """Dernière ligne ``raw.fit_file`` connue pour une activité (voir :func:`_latest_fit_file`)."""
+    """Latest known ``raw.fit_file`` row for an activity (see :func:`_latest_fit_file`)."""
 
     fit_file_id: int
     sha256: bytes
@@ -124,16 +120,15 @@ class _LatestFitFile:
 
 
 def _latest_fit_file(conn: DBConnection, *, garmin_activity_id: int) -> _LatestFitFile | None:
-    """Dernière version archivée d'une activité, ou ``None`` si aucune n'existe encore.
+    """Latest archived version of an activity, or ``None`` if none exists yet.
 
-    ``ORDER BY downloaded_at DESC LIMIT 1`` -- pas un simple ``LIMIT 1`` sans tri (bug
-    signalé en revue : sans ``ORDER BY``, PostgreSQL ne garantit AUCUN ordre pour les
-    lignes retournées, donc « la » ligne choisie pouvait varier d'un appel à l'autre y
-    compris entre deux passages sur la MÊME activité multi-versions). Le tri par
-    ``downloaded_at`` décroissant rend le choix déterministe : toujours la version la
-    plus récemment archivée, cohérent avec l'index ``fit_file_activity_idx`` déjà posé
-    sur cette paire de colonnes par ``migrations/002_raw.sql`` (donc sans coût de tri
-    supplémentaire en pratique).
+    ``ORDER BY downloaded_at DESC LIMIT 1``—not a bare ``LIMIT 1`` without sorting (bug
+    found in review: without ``ORDER BY``, PostgreSQL guarantees NO order for returned
+    rows, so "the" chosen row could vary call to call, even across multiple passes on
+    the SAME multi-version activity). Sorting by ``downloaded_at`` descending makes the
+    choice deterministic: always the most recently archived version, consistent with the
+    ``fit_file_activity_idx`` index already placed on this column pair by
+    ``migrations/002_raw.sql`` (so no extra sorting cost in practice).
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -153,47 +148,46 @@ def _latest_fit_file(conn: DBConnection, *, garmin_activity_id: int) -> _LatestF
 
 
 def _dest_dir_for(archive_root: Path, window_date: date) -> Path:
-    """Sous-répertoire ``archive_root/AAAA/MM`` pour la date de la fenêtre sondée.
+    """Subdirectory ``archive_root/YYYY/MM`` for the polled window date.
 
-    Un seul répertoire plat pour toutes les activités de tout l'historique finirait avec
-    plusieurs dizaines de milliers d'entrées (des années d'historique, plusieurs séances
-    par jour) : certains systèmes de fichiers dégradent nettement au-delà de quelques
-    milliers d'entrées par répertoire, et tout outil qui liste le répertoire (sauvegarde,
-    inspection manuelle) devient pénible. Le découpage par année/mois donne des
-    répertoires de quelques dizaines à quelques centaines de fichiers au pire, pour un
-    athlète s'entraînant plusieurs fois par jour.
+    A single flat directory for all activities across all history would end up with tens
+    of thousands of entries (years of history, multiple sessions per day): some
+    filesystems degrade significantly beyond a few thousand entries per directory, and
+    any tool listing the directory (backup, manual inspection) becomes painful. Year/month
+    split yields directories with dozens to at most hundreds of files for an athlete
+    training multiple times a day.
 
-    La date utilisée est celle de la FENÊTRE sondée (le jour calendaire connu de
-    l'appelant, cohérent avec ``raw.poll_window``/``raw.api_response.scope_date``), pas
-    une date extraite du contenu du fichier : parser le FIT pour en tirer un horodatage
-    est le travail de L3, hors périmètre de ce module qui ne fait qu'archiver des octets.
+    The date used is from the POLLED window (the calendar day known to the caller,
+    consistent with ``raw.poll_window``/``raw.api_response.scope_date``), not a date
+    extracted from the file content: parsing the FIT for a timestamp is L3's job, out of
+    scope for this module which only archives bytes.
     """
     return archive_root / f"{window_date:%Y}" / f"{window_date:%m}"
 
 
 @dataclass(frozen=True, slots=True)
 class ActivityFileOutcome:
-    """Résultat du traitement d'une activité par :func:`archive_activity_file`.
+    """Result of processing one activity through :func:`archive_activity_file`.
 
-    ``status`` distingue cinq cas pour que l'appelant (et l'opérateur qui lit les logs)
-    n'ait jamais à déduire l'issue depuis la seule présence/absence de champs :
+    ``status`` distinguishes five cases so the caller (and the operator reading logs)
+    never has to infer the outcome from field presence/absence alone:
 
-    - ``"archived"`` : première version de cette activité -- téléchargement + archivage +
-      insertion réussis à ce passage.
-    - ``"refreshed"`` : une version existait déjà, mais le contenu retéléchargé diffère
-      (activité encore en cours d'enregistrement au passage précédent, par exemple) --
-      nouvelle ligne ``raw.fit_file`` insérée pour cette activité.
-    - ``"already_present"`` : rien de nouveau -- soit la fenêtre est close et une version
-      existait déjà (aucun appel réseau fait), soit le contenu retéléchargé est identique
-      à la dernière version connue.
-    - ``"duplicate_content"`` : le contenu téléchargé et archivé sur le PVC a le même
-      sha256 qu'une ligne ``raw.fit_file`` déjà associée à une AUTRE activité (voir
-      :class:`garminator.garmin.raw_store.FitFileShaConflictError` -- scénario
-      multisport/brick). Le fichier reste sur le PVC (orphelin assumé, voir
-      l'invariant PVC-avant-base en tête de module) mais aucune ligne n'est créée pour
-      CETTE activité : ``fit_file_id`` reste ``None``, ``error`` porte le détail.
-    - ``"failed"`` : téléchargement, archivage ou insertion en échec pour un autre motif ;
-      ``error`` porte le message, ``fit_file_id``/``storage_path`` restent ``None``.
+    - ``"archived"``: first version of this activity—download + archive + insert all
+      succeeded on this pass.
+    - ``"refreshed"``: a version existed already, but the re-downloaded content differs
+      (e.g., activity was still uploading on the previous pass)—new ``raw.fit_file`` row
+      inserted for this activity.
+    - ``"already_present"``: nothing new—either the window is closed and a version
+      existed (no network call made), or the re-downloaded content is identical to the
+      latest known version.
+    - ``"duplicate_content"``: the downloaded and archived content has the same sha256
+      as a ``raw.fit_file`` row already associated with a DIFFERENT activity (see
+      :class:`garminator.garmin.raw_store.FitFileShaConflictError`—multisport/brick
+      scenario). The file remains on PVC (assumed orphan, see PVC-before-database
+      invariant at the top of this module), but no row is created for THIS activity:
+      ``fit_file_id`` stays ``None``, ``error`` carries the detail.
+    - ``"failed"``: download, archive, or insert failed for some other reason; ``error``
+      carries the message, ``fit_file_id``/``storage_path`` stay ``None``.
     """
 
     activity_id: str
@@ -203,18 +197,18 @@ class ActivityFileOutcome:
     error: str | None = None
 
     def as_log_line(self) -> str:
-        """Rendu lisible par un opérateur, une ligne par activité traitée."""
+        """Human-readable output for an operator, one line per processed activity."""
         if self.status in ("archived", "refreshed"):
-            verbe = "archivée" if self.status == "archived" else "mise à jour"
+            verb = "archived" if self.status == "archived" else "updated"
             return (
-                f"activité {self.activity_id} : {verbe} -> {self.storage_path} "
+                f"activity {self.activity_id}: {verb} → {self.storage_path} "
                 f"(fit_file_id={self.fit_file_id})"
             )
         if self.status == "already_present":
-            return f"activité {self.activity_id} : déjà archivée (fit_file_id={self.fit_file_id})"
+            return f"activity {self.activity_id}: already archived (fit_file_id={self.fit_file_id})"
         if self.status == "duplicate_content":
-            return f"activité {self.activity_id} : CONTENU DUPLIQUÉ ({self.error})"
-        return f"activité {self.activity_id} : ÉCHEC ({self.error})"
+            return f"activity {self.activity_id}: DUPLICATE CONTENT ({self.error})"
+        return f"activity {self.activity_id}: FAILED ({self.error})"
 
 
 def archive_activity_file(
@@ -228,72 +222,69 @@ def archive_activity_file(
     dl_fmt: Any,
     tracker: IngestRunTracker | None = None,
 ) -> ActivityFileOutcome:
-    """Télécharge, archive et enregistre le fichier original d'UNE activité.
+    """Download, archive, and record the original file of ONE activity.
 
-    ``today`` est injecté explicitement par l'appelant (jamais ``date.today()`` inline,
-    même convention que ``run_scheduled_poll``/``garminator.ops.backfill``) : c'est ce qui
-    distingue une fenêtre close (idempotence stricte, aucun appel réseau) d'une fenêtre en
-    cours (retéléchargement + comparaison de contenu -- voir la note d'idempotence en tête
-    de module pour le raisonnement complet).
+    ``today`` is explicitly injected by the caller (never ``date.today()`` inline, same
+    convention as ``run_scheduled_poll``/``garminator.ops.backfill``): this is what
+    distinguishes a closed window (strict idempotence, no network call) from an open
+    window (re-download + content comparison—see the idempotence note at the top of this
+    module for the full reasoning).
 
-    Séquence stricte -- voir la note d'invariant en tête de module :
+    Strict sequence—see the invariant note at the top of this module:
 
-    1. Conversion de ``activity_id`` en entier, une seule fois, protégée : toute la suite
-       réutilise ``garmin_activity_id``. Un identifiant malformé ne lève JAMAIS hors de
-       cette fonction (contrat inchangé : isolation par activité), il produit un
-       ``"failed"``.
-    2. Recherche de la dernière version connue (:func:`_latest_fit_file`). Si la fenêtre
-       est close et qu'une version existe -> ``"already_present"`` immédiat, sans réseau.
-    3. ``client.download_original`` (réseau). Une ``GarminConnectAuthenticationError`` est
-       repropagée SANS être convertie en ``"failed"`` (voir plus bas) ; toute autre
-       exception -> ``"failed"``, rien n'est écrit nulle part. Le comptage
-       ``tracker.record_error()``/``record_success()`` de cette étape est déjà fait par
-       ``download_original`` lui-même -- ne pas le refaire ici évitrait un double comptage.
-    4. Si une version existait déjà et que le contenu retéléchargé a le MÊME sha256 ->
-       ``"already_present"`` : rien de nouveau à archiver.
-    5. ``archive_download`` (PVC), avec un nom de fichier qualifié par le sha256 du
-       contenu (voir la note en tête de module sur le risque d'écrasement inter-versions).
-       Toute exception (:class:`ArchiveError`, ``OSError``) -> ``"failed"`` ET
-       ``tracker.record_error()`` (cette étape n'est PAS déjà comptée par
-       ``download_original``) ; ``archive_download`` garantit déjà qu'aucun fichier
-       partiel ne reste sur le volume dans ce cas (voir sa docstring).
-    6. ``insert_fit_file`` (base), UNIQUEMENT si l'étape 5 a réussi.
-       :class:`FitFileShaConflictError` (scénario multisport/brick, voir
-       ``raw_store.py``) -> ``"duplicate_content"`` ET ``tracker.record_error()`` ; toute
-       AUTRE exception ici -> ``"failed"`` ET ``tracker.record_error()``, mais le fichier
-       archivé à l'étape 5 RESTE sur le PVC (orphelin, volontairement : voir l'invariant
-       en tête de module).
+    1. Convert ``activity_id`` to an integer, once, guarded: the rest reuses
+       ``garmin_activity_id``. A malformed identifier never raises outside this function
+       (unchanged contract: isolation per activity)—it yields a ``"failed"``.
+    2. Look up the latest known version (:func:`_latest_fit_file`). If the window is
+       closed and a version exists → immediate ``"already_present"``, no network.
+    3. ``client.download_original`` (network). A ``GarminConnectAuthenticationError`` is
+       re-raised WITHOUT being converted to ``"failed"`` (see below); any other exception
+       → ``"failed"``, nothing is written anywhere. Counting via
+       ``tracker.record_error()``/``record_success()`` for this step is already done by
+       ``download_original`` itself—not repeating it here avoids double-counting.
+    4. If a version existed and the re-downloaded content has the SAME sha256 →
+       ``"already_present"``: nothing new to archive.
+    5. ``archive_download`` (PVC), with a filename qualified by the content's sha256 (see
+       the note at the top of this module on inter-version overwrite risk). Any exception
+       (:class:`ArchiveError`, ``OSError``) → ``"failed"`` AND ``tracker.record_error()``
+       (this step is NOT already counted by ``download_original``); ``archive_download``
+       already guarantees no partial file is left on the volume in this case (see its
+       docstring).
+    6. ``insert_fit_file`` (database), ONLY if step 5 succeeded. :class:`FitFileShaConflictError`
+       (multisport/brick scenario, see ``raw_store.py``) → ``"duplicate_content"`` AND
+       ``tracker.record_error()``; any OTHER exception here → ``"failed"`` AND
+       ``tracker.record_error()``, but the file archived in step 5 STAYS on PVC
+       (orphan, by design—see the invariant at the top of this module).
 
-    Sur une authentification refusée (``GarminConnectAuthenticationError``), cette
-    fonction ne l'avale JAMAIS derrière un statut ``"failed"`` : elle se propage à
-    l'appelant. Un échec d'authentification réessayé activité par activité, en boucle sur
-    des dizaines d'activités d'une journée, est exactement le schéma qui fait bloquer un
-    compte Garmin sans 2FA (même raisonnement que ``client.py``/``retry.py``) -- il doit
-    interrompre tout le traitement du jour, pas être compté comme un échec parmi d'autres.
+    On a denied authentication (``GarminConnectAuthenticationError``), this function never
+    swallows it behind a ``"failed"`` status: it propagates to the caller. An
+    authentication failure retried activity by activity, looping over dozens of daily
+    activities, is exactly the pattern that locks a 2FA-free Garmin account (same
+    reasoning as ``client.py``/``retry.py``)—it must interrupt all day processing, not be
+    counted as one failure among others.
 
-    En dehors de ce cas, chaque activité reste isolée : cette fonction ne lève jamais pour
-    un échec de téléchargement/archivage/insertion (elle les capture et les rend dans
-    ``ActivityFileOutcome.error``) -- c'est :func:`archive_activities_for_day` qui appelle
-    ceci en boucle sans qu'un échec individuel n'interrompe le traitement des autres
-    activités du jour.
+    Apart from that case, each activity stays isolated: this function never raises on a
+    download/archive/insert failure (it captures them and returns them in
+    ``ActivityFileOutcome.error``)—it is :func:`archive_activities_for_day` that calls
+    this in a loop without one failure interrupting the others.
     """
     try:
         garmin_activity_id = int(activity_id)
     except (TypeError, ValueError) as exc:
-        logger.warning("Identifiant d'activité invalide %r : %s", activity_id, exc)
+        logger.warning("Invalid activity id %r: %s", activity_id, exc)
         return ActivityFileOutcome(activity_id=activity_id, status="failed", error=str(exc))
 
     latest = _latest_fit_file(conn, garmin_activity_id=garmin_activity_id)
     if latest is not None and window_date < today:
-        # Fenêtre close : Garmin ne documente aucune notion de fichier original modifié
-        # après coup, épargner le réseau est sûr -- voir la note d'idempotence en tête
-        # de module.
+        # Closed window: Garmin documents no notion of original file modified after
+        # the fact—skipping network is safe (see the idempotence note at the top of
+        # this module).
         return _already_present(activity_id, latest)
 
-    # Découpé en deux sous-fonctions (téléchargement+comparaison, puis archivage+
-    # insertion) uniquement pour rester sous la limite PLR0911 (nombre de `return` par
-    # fonction) sans sacrifier la lisibilité linéaire de la séquence -- voir leurs
-    # docstrings respectives pour le détail de chaque étape, déjà documenté ci-dessus.
+    # Split into two sub-functions (download+compare, then archive+insert) only to
+    # stay under the PLR0911 limit (return statements per function) without
+    # sacrificing linear readability of the sequence—see their docstrings for details
+    # of each step, already documented above.
     download_result = _download_and_check_content(
         client, activity_id=activity_id, dl_fmt=dl_fmt, tracker=tracker, latest=latest
     )
@@ -315,7 +306,7 @@ def archive_activity_file(
 
 
 def _already_present(activity_id: str, latest: _LatestFitFile) -> ActivityFileOutcome:
-    """Raccourci commun aux deux cas « rien de nouveau » (fenêtre close, ou contenu inchangé)."""
+    """Shortcut common to both "nothing new" cases (closed window, or identical content)."""
     return ActivityFileOutcome(
         activity_id=activity_id,
         status="already_present",
@@ -332,29 +323,29 @@ def _download_and_check_content(
     tracker: IngestRunTracker | None,
     latest: _LatestFitFile | None,
 ) -> tuple[bytes, bytes] | ActivityFileOutcome:
-    """Télécharge, désenveloppe le ZIP, puis compare au sha256 de la dernière version connue.
+    """Download, unwrap the ZIP, then compare to the sha256 of the latest known version.
 
-    Retourne soit ``(octets à archiver, leur sha256)`` pour que l'appelant poursuive vers
-    l'archivage, soit directement un ``ActivityFileOutcome`` terminal (échec, ou contenu
-    identique à la dernière version -- rien à archiver).
+    Returns either ``(bytes to archive, their sha256)`` for the caller to proceed to
+    archiving, or directly a terminal ``ActivityFileOutcome`` (failure, or identical
+    content to the latest version—nothing to archive).
 
-    Les octets rendus sont ceux du MEMBRE de l'archive, pas l'enveloppe ZIP servie par
-    Garmin : c'est la seule façon d'obtenir un sha256 comparable à
-    ``raw.fit_file.sha256`` (voir la note « Sur QUELS octets porte le sha256 » en tête de
-    module -- comparer l'enveloppe ne coïncidait jamais).
+    The bytes returned are from the ARCHIVE MEMBER, not the ZIP envelope served by
+    Garmin: this is the only way to get a sha256 comparable to ``raw.fit_file.sha256``
+    (see the "On WHICH bytes the sha256 is computed" note at the top of this module—
+    comparing the envelope never matched).
 
-    Le comptage ``tracker.record_error()``/``record_success()`` du téléchargement
-    lui-même est déjà fait par ``client.download_original`` -- ne pas le refaire ici
-    évite un double comptage. L'extraction, elle, n'est comptée par personne d'autre :
-    son échec appelle donc bien ``record_error()`` (même traitement que l'archivage).
+    Counting via ``tracker.record_error()``/``record_success()`` for the download itself
+    is already done by ``client.download_original``—not repeating it here avoids
+    double-counting. Extraction is not counted by anyone else: its failure thus does
+    call ``record_error()`` (same handling as archiving).
     """
     try:
         downloaded = client.download_original(activity_id, dl_fmt=dl_fmt, tracker=tracker)
     except GarminConnectAuthenticationError:
-        # Propagation délibérée, jamais ravalée -- voir la docstring d'archive_activity_file.
+        # Deliberate propagation, never swallowed—see archive_activity_file docstring.
         raise
-    except Exception as exc:  # isolation d'échec par activité, voir docstring
-        logger.warning("Téléchargement de l'activité %s en échec : %s", activity_id, exc)
+    except Exception as exc:  # isolation per activity, see docstring
+        logger.warning("Activity %s download failed: %s", activity_id, exc)
         return ActivityFileOutcome(activity_id=activity_id, status="failed", error=str(exc))
 
     try:
@@ -362,13 +353,13 @@ def _download_and_check_content(
     except (ArchiveError, OSError) as exc:
         if tracker is not None:
             tracker.record_error()
-        logger.warning("Téléchargement de l'activité %s illisible (archive) : %s", activity_id, exc)
+        logger.warning("Activity %s download unreadable (archive): %s", activity_id, exc)
         return ActivityFileOutcome(activity_id=activity_id, status="failed", error=str(exc))
 
     content_sha256 = hashlib.sha256(payload).digest()
     if latest is not None and content_sha256 == latest.sha256:
-        # Contenu identique à la dernière version connue : rien de nouveau à archiver,
-        # même si la fenêtre était encore ouverte au moment du passage.
+        # Identical to the latest known version: nothing new to archive, even if the
+        # window was still open at pass time.
         return _already_present(activity_id, latest)
     return payload, content_sha256
 
@@ -385,21 +376,21 @@ def _archive_and_insert(
     latest: _LatestFitFile | None,
     tracker: IngestRunTracker | None,
 ) -> ActivityFileOutcome:
-    """Archive sur le PVC puis enregistre la ligne ``raw.fit_file`` -- ordre strict.
+    """Archive to PVC then record the ``raw.fit_file`` row—strict order.
 
-    Voir l'invariant PVC-avant-base en tête de module : ``insert_fit_file`` n'est appelé
-    QUE si ``archive_download`` a réussi, jamais l'inverse.
+    See the PVC-before-database invariant at the top of this module: ``insert_fit_file``
+    is called ONLY if ``archive_download`` succeeded, never the other way.
     """
     dest_dir = _dest_dir_for(archive_root, window_date)
-    # Le sha256 du contenu qualifie le nom de fichier : deux versions de la même activité
-    # (tronquée puis complète) ne doivent jamais partager le même chemin sur le PVC, sous
-    # peine d'écraser silencieusement la version que l'ANCIENNE ligne raw.fit_file pointe
-    # encore -- voir la note en tête de module.
-    # ``content`` est déjà le membre extrait (voir _download_and_check_content), donc
-    # ``content_sha256`` est bien le sha qu'``archive_bytes`` recalculera après relecture :
-    # le passer en ``expected_sha256`` transforme l'écriture en vérification de bout en
-    # bout, et garantit que le sha du nom de fichier, celui vérifié sur disque et celui
-    # inséré en base sont un seul et même nombre.
+    # The content's sha256 qualifies the filename: two versions of the same activity
+    # (truncated then complete) must never share the same path on PVC, else the second
+    # silently overwrites the version the OLD raw.fit_file row still points to—see the
+    # note at the top of this module.
+    # ``content`` is already the extracted member (see _download_and_check_content), so
+    # ``content_sha256`` is indeed the sha that ``archive_bytes`` will recalculate after
+    # re-reading: passing it as ``expected_sha256`` turns writing into end-to-end
+    # verification, and guarantees that the sha in the filename, the one verified on
+    # disk, and the one inserted in the database are a single number.
     filename_stem = f"activity-{activity_id}-{content_sha256.hex()[:12]}"
     try:
         archived = archive_download(
@@ -408,7 +399,7 @@ def _archive_and_insert(
     except (ArchiveError, OSError) as exc:
         if tracker is not None:
             tracker.record_error()
-        logger.warning("Archivage de l'activité %s en échec : %s", activity_id, exc)
+        logger.warning("Activity %s archiving failed: %s", activity_id, exc)
         return ActivityFileOutcome(activity_id=activity_id, status="failed", error=str(exc))
 
     try:
@@ -422,12 +413,12 @@ def _archive_and_insert(
     except FitFileShaConflictError as exc:
         if tracker is not None:
             tracker.record_error()
-        # Le fichier reste volontairement sur le PVC (orphelin) : voir l'invariant en
-        # tête de module. Ne PAS le supprimer ici -- un échec base ne doit jamais faire
-        # disparaître un fichier déjà écrit et vérifié.
+        # File deliberately stays on PVC (orphan): see the invariant at the top of this
+        # module. Do NOT delete it here—a database failure must never cause a file
+        # already written and verified to disappear.
         logger.warning(
-            "Insertion raw.fit_file pour l'activité %s : contenu dupliqué avec une autre "
-            "activité (fichier conservé sur %s) : %s",
+            "Inserting raw.fit_file for activity %s: content duplicate with another "
+            "activity (file kept at %s): %s",
             activity_id,
             archived.storage_path,
             exc,
@@ -435,11 +426,11 @@ def _archive_and_insert(
         return ActivityFileOutcome(
             activity_id=activity_id, status="duplicate_content", error=str(exc)
         )
-    except Exception as exc:  # isolation d'échec par activité, voir docstring
+    except Exception as exc:  # isolation per activity, see docstring
         if tracker is not None:
             tracker.record_error()
         logger.warning(
-            "Insertion raw.fit_file pour l'activité %s en échec (fichier conservé sur " "%s) : %s",
+            "Inserting raw.fit_file for activity %s failed (file kept at %s): %s",
             activity_id,
             archived.storage_path,
             exc,
@@ -456,7 +447,7 @@ def _archive_and_insert(
 
 @dataclass(slots=True)
 class DayArchiveSummary:
-    """Bilan d'un appel à :func:`archive_activities_for_day`, une entrée par activité."""
+    """Summary of a call to :func:`archive_activities_for_day`, one entry per activity."""
 
     outcomes: list[ActivityFileOutcome] = field(default_factory=list)
 
@@ -481,7 +472,7 @@ class DayArchiveSummary:
         return [o for o in self.outcomes if o.status == "failed"]
 
     def as_log_lines(self) -> list[str]:
-        """Une ligne lisible par activité, dans l'ordre de traitement."""
+        """One human-readable line per activity, in processing order."""
         return [outcome.as_log_line() for outcome in self.outcomes]
 
 
@@ -496,20 +487,20 @@ def archive_activities_for_day(
     dl_fmt: Any,
     tracker: IngestRunTracker | None = None,
 ) -> DayArchiveSummary:
-    """Applique :func:`archive_activity_file` à chaque activité de ``activity_ids``.
+    """Apply :func:`archive_activity_file` to each activity in ``activity_ids``.
 
-    Isolation d'échec au niveau du jour : une activité qui échoue (réseau, format non
-    reconnu, I/O, base) n'empêche jamais le traitement des suivantes -- exactement le
-    même principe que ``run_scheduled_poll`` (lot L6) au niveau des fenêtres. Le filet
-    ``except Exception`` ci-dessous est délibérément redondant avec celui déjà présent
-    dans :func:`archive_activity_file` : il protège contre toute exception inattendue qui
-    proviendrait malgré tout de ce niveau, pour que l'invariant « une activité en échec
-    n'interrompt jamais les autres » tienne aussi dans ce cas limite.
+    Failure isolation at the day level: an activity that fails (network, unrecognized
+    format, I/O, database) never blocks processing of the following ones—exactly the
+    same principle as ``run_scheduled_poll`` (batch L6) at the window level. The
+    ``except Exception`` catch below is deliberately redundant with the one already in
+    :func:`archive_activity_file`: it guards against any unexpected exception that
+    might still bubble up here, ensuring the invariant "a failed activity never
+    interrupts others" holds even in this edge case.
 
-    ``GarminConnectAuthenticationError`` fait délibérément EXCEPTION à cette isolation :
-    elle traverse cette boucle sans être ravalée par le filet défensif ci-dessous (même
-    raisonnement que dans :func:`archive_activity_file` -- un échec d'authentification
-    réessayé activité par activité est le schéma qui fait bloquer un compte Garmin).
+    ``GarminConnectAuthenticationError`` deliberately makes an EXCEPTION to this
+    isolation: it traverses this loop without being swallowed by the defensive catch
+    below (same reasoning as in :func:`archive_activity_file`—an authentication failure
+    retried activity by activity is exactly the pattern that locks a Garmin account).
     """
     summary = DayArchiveSummary()
     for activity_id in activity_ids:
@@ -525,12 +516,12 @@ def archive_activities_for_day(
                 tracker=tracker,
             )
         except GarminConnectAuthenticationError:
-            # Propagation délibérée, jamais ravalée -- voir la docstring ci-dessus.
+            # Deliberate propagation, never swallowed—see docstring above.
             raise
-        except Exception as exc:  # isolation d'échec, voir docstring
+        except Exception as exc:  # isolation per failure, see docstring
             logger.warning(
-                "Traitement de l'activité %s : exception inattendue en dehors du chemin "
-                "normal d'archive_activity_file : %s",
+                "Processing activity %s: unexpected exception outside the normal "
+                "archive_activity_file path: %s",
                 activity_id,
                 exc,
             )

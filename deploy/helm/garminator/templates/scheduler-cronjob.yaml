@@ -1,26 +1,25 @@
 {{- /*
-CronJob de sondage planifie -- le poller quotidien proprement dit.
+Scheduled polling CronJob -- the daily poller proper.
 
-Execute `python -m garminator.scheduler`, qui : lit l'etat persiste des fenetres
-(raw.poll_window), sonde aupres de Garmin UNIQUEMENT les jours dus, enregistre les
-payloads bruts, puis archive sur le PVC les fichiers originaux (.FIT/.TCX) des
-activites du jour -- seule source des donnees seconde-par-seconde, que l'API JSON
-ne fournit pas.
+Runs `python -m garminator.scheduler`, which reads the persisted window state
+(raw.poll_window), polls Garmin ONLY for the days that are due, records the raw
+payloads, then archives the day's original activity files (.FIT/.TCX) on the PVC --
+the only source of second-by-second data, which the JSON API does not provide.
 
-Ce Job REMPLACE fonctionnellement l'ancienne intention d'une boucle interne au
-Deployment ingest (values `ingest.config.pollIntervalMinutes`, sans effet) : un
-CronJob redemarre proprement apres panne, ne consomme rien entre deux runs, et son
-etat d'avancement vit en base plutot qu'en memoire de processus.
+This Job functionally REPLACES the former intent of an internal loop inside the
+ingest Deployment (values `ingest.config.pollIntervalMinutes`, now inert): a CronJob
+restarts cleanly after a failure, consumes nothing between runs, and keeps its
+progress state in the database rather than in process memory.
 
-`concurrencyPolicy: Forbid` n'est PAS un detail de confort : deux runs simultanes
-authentifieraient deux sessions Garmin en parallele sur le meme compte, et une salve
-d'authentifications est precisement ce qui fait bloquer un compte Garmin Connect.
-Le token store est monte depuis le PVC pour la meme raison : sans persistance, chaque
-run refait un SSO complet.
+`concurrencyPolicy: Forbid` is NOT a comfort detail: two simultaneous runs would
+authenticate two Garmin sessions in parallel on the same account, and a burst of
+authentications is precisely what gets a Garmin Connect account locked. The token
+store is mounted from the PVC for the same reason: without persistence, every run
+would redo a full SSO.
 
-Le rattrapage historique n'a pas de Job distinct : le scheduler comble lui-meme les
-fenetres manquantes depuis `historyStart`, au rythme de `--max-windows-per-endpoint`
-par run et par endpoint. `ops-backfill-status` en publie l'avancement.
+Historical catch-up has no separate Job: the scheduler fills the missing windows
+since `historyStart` itself, at a rate of `--max-windows-per-endpoint` per run and
+per endpoint. `ops-backfill-status` publishes the progress.
 */ -}}
 {{- if .Values.scheduler.enabled }}
 apiVersion: batch/v1
@@ -39,10 +38,10 @@ spec:
   failedJobsHistoryLimit: {{ .Values.scheduler.failedJobsHistoryLimit }}
   jobTemplate:
     spec:
-      # Aucun reessai automatique : une fenetre en echec est deja marquee 'failed' en
-      # base et rejouee au run suivant. Relancer immediatement le Job entier ne ferait
-      # que repeter un appel qui vient d'echouer -- et, si la cause est une
-      # authentification refusee, accelererait le blocage du compte.
+      # No automatic retry: a failed window is already marked 'failed' in the
+      # database and replayed on the next run. Immediately retrying the entire Job
+      # would only repeat a call that just failed -- and if the cause is
+      # authentication refused, it would accelerate account lockout.
       backoffLimit: 0
       template:
         metadata:
@@ -102,8 +101,8 @@ spec:
                 - name: GARMINATOR_POSTGRES_DSN
                   value: >-
                     postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
-                # Racine en lecture seule : tout ce que le runtime Python ecrit par
-                # defaut sous $HOME ou dans les caches doit aller dans /tmp.
+                # Read-only root: everything Python runtime writes by default under
+                # $HOME or in caches must go to /tmp.
                 - name: HOME
                   value: /tmp
                 - name: TMPDIR
@@ -119,12 +118,12 @@ spec:
               resources:
                 {{- toYaml .Values.scheduler.resources | nindent 16 }}
               volumeMounts:
-                # Archive des fichiers originaux : ecrits ET fsyncs avant l'insertion
-                # en base (principe ELT, lot L3).
+                # Original file archive: written AND fsynced before database insert
+                # (ELT principle, batch L3).
                 - name: fit-archive
                   mountPath: {{ .Values.ingest.config.fitArchivePath }}
                   subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
-                # Token store Garmin -- persistant, voir l'entete de ce fichier.
+                # Garmin token store -- persistent, see the file header.
                 - name: fit-archive
                   mountPath: {{ .Values.ingest.config.garminTokensPath }}
                   subPath: {{ .Values.fitArchive.subPaths.garminTokens }}

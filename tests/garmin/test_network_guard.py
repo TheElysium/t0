@@ -1,13 +1,12 @@
-"""Preuve que le garde-fou réseau de ``conftest.py`` couvre bien les deux piles HTTP.
+"""Proof that network guard in ``conftest.py`` covers both HTTP stacks.
 
-Ces tests existent parce que la version initiale du garde-fou ne neutralisait que
-``socket.socket`` — ce qui laisse passer ``curl_cffi`` (libcurl ouvre ses sockets en
-natif), soit 3 des 5 stratégies d'authentification de ``garminconnect``, donc exactement
-le chemin qui peut faire bloquer le compte. Si quelqu'un affaiblit ``conftest.py``, ces
-tests tombent.
+These tests exist because the initial guard version only mocked ``socket.socket`` —
+which lets ``curl_cffi`` through (libcurl opens sockets natively), i.e., 3 of 5
+``garminconnect`` auth strategies, exactly the path that can lock out an account.
+If someone weakens ``conftest.py``, these tests fail.
 
-Aucune adresse externe n'apparaît ici : les URL visées sont ``127.0.0.1`` sur un port
-fermé, et de toute façon l'appel doit lever **avant** toute tentative de connexion.
+No external address appears here: targeted URLs are ``127.0.0.1`` on closed port, and
+the call must raise **before** any connection attempt anyway.
 """
 
 from __future__ import annotations

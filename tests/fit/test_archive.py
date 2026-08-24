@@ -120,7 +120,7 @@ def test_archive_download_handles_direct_fit_without_zip_wrapper(tmp_path: Path)
 def test_archive_download_rejects_empty_zip_with_no_side_effect(tmp_path: Path) -> None:
     zip_data = _zip_bytes({})
 
-    with pytest.raises(ArchiveError, match="vide"):
+    with pytest.raises(ArchiveError, match="Empty ZIP archive"):
         archive_download(zip_data, tmp_path, "empty")
 
     assert list(tmp_path.iterdir()) == []
@@ -129,14 +129,14 @@ def test_archive_download_rejects_empty_zip_with_no_side_effect(tmp_path: Path) 
 def test_archive_download_rejects_multi_member_zip(tmp_path: Path) -> None:
     zip_data = _zip_bytes({"a.fit": _FAKE_FIT, "b.fit": _FAKE_FIT})
 
-    with pytest.raises(ArchiveError, match="fichiers"):
+    with pytest.raises(ArchiveError, match="exactly one expected"):
         archive_download(zip_data, tmp_path, "multi")
 
     assert list(tmp_path.iterdir()) == []
 
 
 def test_archive_download_rejects_malformed_zip_with_no_side_effect(tmp_path: Path) -> None:
-    with pytest.raises(ArchiveError, match="invalide"):
+    with pytest.raises(ArchiveError, match="Invalid ZIP archive"):
         archive_download(b"PK\x03\x04not a real zip stream", tmp_path, "corrupt")
 
     assert list(tmp_path.iterdir()) == []
@@ -170,7 +170,7 @@ def test_decompression_bounded_by_actual_content_not_claimed_size() -> None:
             info.file_size / info.compress_size < 1.1
         ), "setup must produce innocent-ratio archive"
 
-    with pytest.raises(ArchiveError, match="bombe de décompression"):
+    with pytest.raises(ArchiveError, match="decompression bomb"):
         _extract_single_member(brut, max_uncompressed_bytes=1_000)
 
     # Countertest: sufficient bound, same archive accepted intact.

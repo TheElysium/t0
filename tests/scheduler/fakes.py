@@ -1,14 +1,13 @@
-"""Doublure DB en mémoire pour les tests du lot L6 -- aucun PostgreSQL requis.
+"""In-memory DB stub for batch L6 tests -- no PostgreSQL required.
 
-Contrairement à ``tests/garmin/fakes.py::FakeConnection`` (qui se contente d'enregistrer
-les requêtes reçues), ``FakePollDB`` simule réellement l'effet des requêtes de
-:mod:`garminator.scheduler.store` sur deux tables en mémoire : c'est nécessaire pour
-tester l'orchestration de bout en bout de :func:`garminator.scheduler.service.
-run_scheduled_poll` (reprise après panne, fenêtre glissante, déduplication) sans jamais
-ouvrir de vraie connexion.
+Unlike ``tests/garmin/fakes.py::FakeConnection`` (which merely records received queries),
+``FakePollDB`` actually simulates the effect of :mod:`garminator.scheduler.store`
+queries on two in-memory tables : necessary to end-to-end test :func:`garminator.
+scheduler.service.run_scheduled_poll` (crash recovery, sliding window, deduplication)
+without ever opening a real connection.
 
-La reconnaissance des requêtes se fait par préfixe de texte normalisé (espaces
-compressés), même motif que ``FakeCursor`` de ``tests/garmin/fakes.py``.
+Query recognition uses normalized text prefix (compressed whitespace), same pattern as
+``FakeCursor`` from ``tests/garmin/fakes.py``.
 """
 
 from __future__ import annotations
@@ -17,11 +16,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-#: Vocabulaire accepté par ``ingest_run_mode_ck`` (migrations/002_raw.sql). Les doublures
-#: qui simulent ``INSERT INTO raw.ingest_run`` DOIVENT le faire respecter : le lot L11 a
-#: livré un ``mode="scheduled"`` rigoureusement inopérant en production (CheckViolation dès
-#: le premier run) précisément parce que la doublure était plus permissive que le schéma.
-#: ``tests/test_config_coherence.py`` vérifie que cette liste reste celle de la migration.
+#: Vocabulary accepted by ``ingest_run_mode_ck`` (migrations/002_raw.sql). Stubs that
+#: simulate ``INSERT INTO raw.ingest_run`` MUST enforce this: batch L11 shipped a
+#: ``mode="scheduled"`` that was completely inoperable in production (CheckViolation on
+#: first run) precisely because the stub was more permissive than the schema.
+#: ``tests/test_config_coherence.py`` verifies this list remains the migration's list.
 INGEST_RUN_MODES = frozenset({"backfill", "daily", "reprocess", "manual"})
 
 
@@ -100,7 +99,7 @@ class FakeCursor:
             self._result = []
             return
 
-        raise AssertionError(f"FakeCursor : requête inattendue -> {normalized}")
+        raise AssertionError(f"FakeCursor: unexpected query -> {normalized}")
 
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._result[0] if self._result else None
@@ -117,7 +116,7 @@ class FakeCursor:
 
 @dataclass
 class FakePollDB:
-    """Satisfait ``garminator.scheduler.store.DBConnection``, entièrement en mémoire."""
+    """Satisfies ``garminator.scheduler.store.DBConnection``, entirely in memory."""
 
     poll_window: dict[tuple[str, date], _PollWindowRow] = field(default_factory=dict)
     payload_seen: dict[tuple[str, date, str, bytes], int] = field(default_factory=dict)

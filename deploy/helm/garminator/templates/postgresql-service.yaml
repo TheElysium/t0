@@ -7,8 +7,8 @@ metadata:
     app.kubernetes.io/component: postgresql
 spec:
   clusterIP: None
-  # Service headless (accès local uniquement) : découverte DNS interne au
-  # cluster, aucun LoadBalancer, aucun Ingress.
+  # Headless Service (local access only): internal DNS discovery within
+  # cluster, no LoadBalancer, no Ingress.
   publishNotReadyAddresses: true
   selector:
     {{- include "garminator.selectorLabels" . | nindent 4 }}

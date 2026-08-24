@@ -1,17 +1,17 @@
-"""Adaptateur entre :mod:`garminator.garmin.client` et le ``WindowFetcher`` de
-:mod:`garminator.scheduler.service` (lot L11).
+"""Adapter between :mod:`garminator.garmin.client` and the ``WindowFetcher`` of
+:mod:`garminator.scheduler.service` (batch L11).
 
-``run_scheduled_poll`` n'importe ni ``GarminClient`` ni le catalogue -- il ne connaît
-que le ``Protocol WindowFetcher``. C'est ce module qui referme la boucle : il consulte
-:mod:`garminator.scheduler.catalog` pour savoir comment appeler un endpoint donné, invoque
-:meth:`~garminator.garmin.client.GarminClient.fetch` (qui gère débit, backoff, et écrit
-lui-même dans ``raw.api_response``), puis traduit le payload obtenu en
+``run_scheduled_poll`` imports neither ``GarminClient`` nor the catalog -- it knows
+only the ``Protocol WindowFetcher``. This module closes the loop: it consults
+:mod:`garminator.scheduler.catalog` to learn how to call a given endpoint, invokes
+:meth:`~garminator.garmin.client.GarminClient.fetch` (which handles rate limit, backoff,
+and writes to ``raw.api_response`` itself), then translates the obtained payload into
 ``Sequence[FetchedWindow]``.
 
-Aucun ``try/except`` défensif ici, délibérément : ``run_scheduled_poll`` capture déjà
-toute exception levée par le ``WindowFetcher`` injecté et marque la fenêtre ``failed`` --
-en rajouter un ici ne ferait que masquer l'erreur réelle (réseau, authentification,
-endpoint inconnu) derrière un état "réussi avec zéro payload" trompeur.
+No defensive ``try/except`` here, deliberately : ``run_scheduled_poll`` already captures
+any exception raised by the injected ``WindowFetcher`` and marks the window ``failed`` --
+adding one here would only mask the real error (network, authentication,
+unknown endpoint) behind a misleading "succeeded with zero payload" state.
 """
 
 from __future__ import annotations
@@ -31,48 +31,48 @@ if TYPE_CHECKING:
 
 
 def _validate_activities_payload(payload: object, window_date: date) -> list[dict[str, object]]:
-    """Valide la forme du payload de ``get_activities_by_date`` avant d'en extraire les
-    ``activityId`` -- lève une erreur PARLANTE plutôt que de laisser échouer
-    l'indexation, dont le message brut finirait tel quel dans
-    ``raw.poll_window.last_error`` (illisible pour l'opérateur).
+    """Validates the shape of ``get_activities_by_date`` payload before extracting
+    ``activityId`` from it -- raises a MEANINGFUL error rather than letting indexing fail,
+    whose raw message would end up as-is in ``raw.poll_window.last_error`` (unreadable
+    to operator).
 
-    Deux formes malformées réelles, observées en amont de ce lot :
+    Two real malformed shapes, observed upstream of this batch:
 
-    1. Garmin répond parfois par un dict d'erreur en HTTP 200 (ex.
-       ``{"errorMessage": "..."}``) plutôt que la liste attendue : truthy, donc pas
-       absorbé par le cas "payload vide" -- sans cette validation, itérer dessus
-       donnerait des ``str`` (les clés du dict) et ``activity["activityId"]`` lèverait
-       ``TypeError: string indices must be integers``, un message qui ne dit rien de la
-       fenêtre en cause.
-    2. Une activité de la liste sans clé ``activityId`` : sans validation,
-       ``activity["activityId"]`` lève ``KeyError: 'activityId'`` -- une fois stringifié
-       par ``run_scheduled_poll`` (``str(exc)``), ce message ne vaut littéralement que
+    1. Garmin sometimes answers with an error dict in HTTP 200 (e.g.
+       ``{"errorMessage": "..."}``) rather than the expected list: truthy, so not
+       absorbed by "empty payload" case -- without this validation, iterating over it
+       would yield ``str`` (dict keys) and ``activity["activityId"]`` would raise
+       ``TypeError: string indices must be integers``, a message saying nothing about
+       the window in question.
+    2. An activity in the list without ``activityId`` key: without validation,
+       ``activity["activityId"]`` raises ``KeyError: 'activityId'`` -- once stringified
+       by ``run_scheduled_poll`` (``str(exc)``), this message is literally just
        ``'activityId'``.
 
-    Délibérément SANS ``try/except`` autour de l'appel réseau lui-même (voir le docstring
-    du module) : cette fonction lève encore, elle ne fait que lever un message exploitable
-    plutôt qu'une ``KeyError``/``TypeError`` opaque -- la fenêtre est toujours marquée
-    ``failed`` par ``run_scheduled_poll``, et reste rejouable.
+    Deliberately NO ``try/except`` around the network call itself (see module docstring) :
+    this function still raises, it just raises a meaningful message rather than opaque
+    ``KeyError``/``TypeError`` -- the window is still marked ``failed`` by
+    ``run_scheduled_poll``, and remains replayable.
     """
     if not payload:
         return []
     if not isinstance(payload, list):
-        keys_hint = f" (clés : {sorted(payload.keys())!r})" if isinstance(payload, dict) else ""
+        keys_hint = f" (keys: {sorted(payload.keys())!r})" if isinstance(payload, dict) else ""
         raise ValueError(
-            f"get_activities_by_date/{window_date.isoformat()} : payload inattendu -- "
-            f"liste attendue, {type(payload).__name__} reçu{keys_hint}."
+            f"get_activities_by_date/{window_date.isoformat()} : unexpected payload -- "
+            f"list expected, {type(payload).__name__} received{keys_hint}."
         )
     activities: list[dict[str, object]] = []
     for index, item in enumerate(payload):
         if not isinstance(item, dict):
             raise ValueError(
-                f"get_activities_by_date/{window_date.isoformat()} : élément {index} "
-                f"inattendu -- dict attendu, {type(item).__name__} reçu."
+                f"get_activities_by_date/{window_date.isoformat()} : element {index} "
+                f"unexpected -- dict expected, {type(item).__name__} received."
             )
         if "activityId" not in item:
             raise ValueError(
-                f"get_activities_by_date/{window_date.isoformat()} : élément {index} sans "
-                f"clé 'activityId' -- clés présentes : {sorted(item.keys())!r}."
+                f"get_activities_by_date/{window_date.isoformat()} : element {index} without "
+                f"'activityId' key -- present keys: {sorted(item.keys())!r}."
             )
         activities.append(item)
     return activities
@@ -80,42 +80,40 @@ def _validate_activities_payload(payload: object, window_date: date) -> list[dic
 
 @dataclass(slots=True)
 class GarminWindowFetcher:
-    """``WindowFetcher`` réel : sonde effectivement Garmin via un :class:`GarminClient`.
+    """Real ``WindowFetcher`` : actually polls Garmin via a :class:`GarminClient`.
 
-    ``tracker`` est optionnel pour rester utilisable hors d'un ``ingest_run(...)`` (ex.
-    un script ponctuel d'opérateur) -- ``GarminClient.fetch`` accepte déjà ``tracker=None``.
+    ``tracker`` is optional to remain usable outside an ``ingest_run(...)`` (e.g.
+    an ad-hoc operator script) -- ``GarminClient.fetch`` already accepts ``tracker=None``.
 
-    Décision de conception -- traçage brut des activités individuelles (voir le rapport
-    de lot pour la discussion complète) : ``GarminClient.fetch`` n'est appelé **qu'une
-    seule fois** par fenêtre, quel que soit l'endpoint, jamais une fois par activité.
+    Design decision -- tracing individual activities in raw (see batch report for full
+    discussion) : ``GarminClient.fetch`` is called **exactly once** per window, regardless
+    of endpoint, never once per activity.
 
-    La VRAIE raison, seule et suffisante : ``get_activities_by_date`` renvoie déjà
-    toutes les activités du jour en un seul appel. Rappeler ``client.fetch`` une fois par
-    activité (pour obtenir une ligne ``raw.api_response`` par activité, avec
-    ``scope_key = activityId``) ferait exploser le volume de requêtes contre une API
-    Garmin non publique -- particulièrement sur un backfill courant depuis 2025-04-03,
-    où chaque jour peut porter plusieurs activités (multisport, brick). Ce n'est PAS une
-    question de frontière de responsabilité entre modules : le point d'entrée de ce lot
-    importe déjà ``ingest_run`` de ``client.py``, et ``activity_files.py`` (lot L12) écrit
-    déjà, lui, directement dans une autre table brute (``raw.fit_file``) -- "un seul
-    module écrit du brut" n'a jamais été une règle du dépôt.
+    The TRUE reason, sole and sufficient : ``get_activities_by_date`` already returns
+    all day's activities in a single call. Calling ``client.fetch`` once per activity
+    (to get one ``raw.api_response`` row per activity, with ``scope_key = activityId``)
+    would explode request volume against a non-public Garmin API -- especially on a
+    current backfill from 2025-04-03, where each day can carry multiple activities
+    (multisport, brick). This is NOT a module boundary question : this batch's entry point
+    already imports ``ingest_run`` from ``client.py``, and ``activity_files.py`` (batch L12)
+    already writes directly to another raw table (``raw.fit_file``) -- "only one module
+    writes raw" was never a repo rule.
 
-    La ligne ``raw.api_response`` unique porte donc ``scope_key=None`` et contient
-    l'intégralité de la liste telle que Garmin l'a renvoyée -- rien n'est perdu du point
-    de vue du stockage brut. La discrimination par activité (``scope_key`` =
-    ``activityId``) n'existe qu'au niveau de ``raw.payload_seen``, via les
-    ``FetchedWindow`` retournés ici : c'est le niveau exact dont a besoin
-    ``run_scheduled_poll`` pour détecter qu'une activité précise a changé de contenu
-    d'un run à l'autre, sans dupliquer le stockage brut ni multiplier les requêtes.
+    So the single ``raw.api_response`` row carries ``scope_key=None`` and contains
+    the entire list as Garmin returned it -- nothing lost from raw storage standpoint.
+    Activity discrimination (``scope_key`` = ``activityId``) exists only at the
+    ``raw.payload_seen`` level, via the ``FetchedWindow`` returned here: this is the
+    exact level ``run_scheduled_poll`` needs to detect that a specific activity changed
+    content from one run to the next, without duplicating raw storage or multiplying requests.
 
-    Limite réelle assumée, à la charge d'un futur lot de transformation : ``payload_seen``
-    sait dire QU'une activité a changé (son ``payload_sha256`` a changé), mais retrouver
-    la ligne ``raw.api_response`` brute correspondante impose alors un filtrage ``jsonb``
-    sur ``(endpoint, scope_date)`` puis une recherche de l'``activityId`` dans le tableau
-    JSON -- l'index partiel ``api_response_scope_key_idx ... WHERE scope_key IS NOT NULL``
-    (``migrations/002_raw.sql``) reste inutilisé pour cet endpoint, puisque la ligne
-    unique porte ``scope_key=None``. Un futur lot qui a besoin de cet index devra soit
-    l'accepter (le volume par jour reste faible), soit revisiter cette décision.
+    Real limit assumed, burden of a future transform batch: ``payload_seen`` can say
+    THAT an activity changed (its ``payload_sha256`` changed), but finding the raw
+    ``raw.api_response`` row requires ``jsonb`` filtering on ``(endpoint, scope_date)``
+    then searching the ``activityId`` in the JSON array -- the partial index
+    ``api_response_scope_key_idx ... WHERE scope_key IS NOT NULL`` (``migrations/002_raw.sql``)
+    stays unused for this endpoint, since the single row carries ``scope_key=None``.
+    A future batch needing this index must either accept it (daily volume stays small)
+    or revisit this decision.
     """
 
     client: GarminClient
@@ -138,10 +136,10 @@ class GarminWindowFetcher:
                 for activity in activities
             ]
 
-        # Jour sans donnée (repos sans capteur porté, endpoint non pertinent ce jour-là,
-        # ...) : Garmin répond par ``None``, ``{}`` ou ``[]`` selon l'endpoint. Ce n'est
-        # pas une erreur -- une séquence vide permet à ``run_scheduled_poll`` de marquer
-        # la fenêtre ``done`` sans rien enregistrer dans ``raw.payload_seen``.
+        # Day with no data (rest without worn device, endpoint not relevant today,
+        # ...) : Garmin answers with ``None``, ``{}``, or ``[]`` depending on endpoint.
+        # This is not an error -- an empty sequence lets ``run_scheduled_poll`` mark
+        # the window ``done`` without recording anything in ``raw.payload_seen``.
         if not payload:
             return []
         return [FetchedWindow(scope_key=None, payload_sha256=payload_sha256(payload))]

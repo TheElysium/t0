@@ -1,17 +1,16 @@
-"""Écriture/lecture de ``raw.poll_window`` et ``raw.payload_seen`` (migrations 002 et 009).
+"""Read/write ``raw.poll_window`` and ``raw.payload_seen`` (migrations 002 and 009).
 
-Même choix de frontière DB que :mod:`garminator.garmin.raw_store` (dont ce module
-s'inspire délibérément, sans lui être couplé) : les fonctions ci-dessous acceptent une
-connexion typée par un protocole structurel minimal (:class:`DBConnection`), pas
-``psycopg.Connection`` concrètement -- ce qui permet aux tests d'injecter une fausse
-connexion en mémoire, sans PostgreSQL, tout en restant vérifié par mypy puisqu'une vraie
-connexion psycopg 3 satisfait ce protocole.
+Same DB boundary choice as :mod:`garminator.garmin.raw_store` (which this module
+deliberately mimics without coupling to): functions below accept connections typed
+by a minimal structural protocol (:class:`DBConnection`), not ``psycopg.Connection``
+concretely—which lets tests inject a fake in-memory connection, no PostgreSQL, while
+staying verified by mypy since a real psycopg 3 connection satisfies the protocol.
 
-``DBConnection`` est redéfini ici (plutôt que réimporté de ``garminator.garmin.raw_store``)
-parce que ce module a en plus besoin de ``fetchall`` -- protocole structurel donc
-composition naturelle, pas de duplication de logique.
+``DBConnection`` is redefined here (not re-imported from ``garminator.garmin.raw_store``)
+because this module additionally needs ``fetchall``—structural protocol so natural
+composition, no logic duplication.
 
-Ce module n'ouvre lui-même aucune connexion et ne fait aucun appel réseau.
+This module opens no connections itself and makes no network calls.
 """
 
 from __future__ import annotations
@@ -33,25 +32,25 @@ class _Cursor(Protocol):
 
 
 class DBConnection(Protocol):
-    """Vue structurelle minimale sur une connexion psycopg 3, pour l'injection en test."""
+    """Minimal structural view of a psycopg 3 connection, for test injection."""
 
     def cursor(self) -> _Cursor: ...
     def commit(self) -> None: ...
 
 
 def _normalize_scope_key(scope_key: str | None) -> str:
-    """``NULL`` -> ``''`` : identique au ``DEFAULT ''`` de ``raw.payload_seen.scope_key``
-    (migration 002), nécessaire car la colonne est ``NOT NULL`` (elle participe à la clé
-    primaire). Ce n'est PAS un zéro déguisé en absence : c'est la même sentinelle que le
-    DDL figé utilise déjà pour « sans discriminant secondaire », documentée là-bas."""
+    """``NULL`` → ``''``: identical to ``DEFAULT ''`` of ``raw.payload_seen.scope_key``
+    (migration 002), needed because the column is ``NOT NULL`` (participates in primary
+    key). Not zero disguised as absence: it is the same sentinel the frozen DDL already
+    uses for "no secondary discriminant", documented there."""
     return scope_key if scope_key is not None else ""
 
 
 def load_window_states(conn: DBConnection, *, endpoint: str) -> dict[date, WindowState]:
-    """Lit l'état connu de toutes les fenêtres de ``endpoint`` dans ``raw.poll_window``.
+    """Load known state of all ``endpoint`` windows from ``raw.poll_window``.
 
-    Une date absente du résultat signifie « jamais tentée » -- c'est
-    :func:`garminator.scheduler.planning.due_windows` qui l'interprète comme due.
+    A missing date in the result means "never attempted"—it is
+    :func:`garminator.scheduler.planning.due_windows` that interprets it as due.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -71,13 +70,13 @@ def load_window_states(conn: DBConnection, *, endpoint: str) -> dict[date, Windo
 def begin_window(
     conn: DBConnection, *, endpoint: str, window_date: date, ingest_run_id: int | None
 ) -> None:
-    """Marque une fenêtre ``in_progress`` AVANT tout appel réseau, incrémente ``attempts``.
+    """Mark a window ``in_progress`` BEFORE any network call, increment ``attempts``.
 
-    Appelée avant le sondage réel : si le processus meurt pendant celui-ci, la ligne
-    reste ``in_progress`` -- ni ``done`` (ce qui masquerait la perte), ni ``failed`` (ce
-    qui exigerait d'avoir déjà capturé l'exception). C'est
-    :func:`~garminator.scheduler.planning.due_windows` qui, au run suivant, reconnaît une
-    ligne ``in_progress`` périmée comme un run interrompu à rejouer.
+    Called before actual poll: if process dies during it, the row stays ``in_progress``—
+    neither ``done`` (which would hide loss) nor ``failed`` (which would require already
+    having caught the exception). It is :func:`~garminator.scheduler.planning.due_windows`
+    that on the next run recognizes a stale ``in_progress`` row as an interrupted run
+    to replay.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -97,10 +96,10 @@ def begin_window(
 
 
 def complete_window(conn: DBConnection, *, endpoint: str, window_date: date) -> None:
-    """Marque une fenêtre ``done`` -- appelée seulement après un sondage intégralement réussi.
+    """Mark a window ``done``—called only after a fully successful poll.
 
-    Efface ``last_error`` : une erreur d'une tentative antérieure ne doit jamais rester
-    affichée à côté d'un succès plus récent.
+    Clears ``last_error``: an error from a prior attempt must never remain
+    displayed alongside a more recent success.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -112,7 +111,7 @@ def complete_window(conn: DBConnection, *, endpoint: str, window_date: date) -> 
 
 
 def fail_window(conn: DBConnection, *, endpoint: str, window_date: date, error: str) -> None:
-    """Marque une fenêtre ``failed`` avec son message d'erreur -- rejouable au run suivant."""
+    """Mark a window ``failed`` with its error message—replayable next run."""
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE raw.poll_window SET status = 'failed', last_error = %s "
@@ -130,8 +129,8 @@ def has_payload_been_seen(
     scope_key: str | None,
     payload_sha256: bytes,
 ) -> bool:
-    """``True`` si ce contenu exact (même hash) a déjà été vu pour ``(endpoint, scope_date,
-    scope_key)`` -- interroge ``raw.payload_seen`` (migration 002), sans jamais y écrire."""
+    """``True`` if this exact content (same hash) has been seen for ``(endpoint,
+    scope_date, scope_key)``—queries ``raw.payload_seen`` (migration 002), never writes."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM raw.payload_seen WHERE endpoint = %s AND scope_date = %s "
@@ -150,12 +149,12 @@ def record_payload_seen(
     scope_key: str | None,
     payload_sha256: bytes,
 ) -> None:
-    """Enregistre (ou republie) ce contenu dans ``raw.payload_seen``.
+    """Record (or republish) this content in ``raw.payload_seen``.
 
-    ``ON CONFLICT ... DO UPDATE`` incrémentant ``seen_count`` : exactement le motif
-    documenté par le ``COMMENT ON TABLE raw.payload_seen`` de la migration 002. Idempotent
-    par construction : appeler deux fois avec le même hash ne crée jamais de doublon, se
-    contente d'incrémenter le compteur de republications.
+    ``ON CONFLICT ... DO UPDATE`` incrementing ``seen_count``: exactly the pattern
+    documented by the ``COMMENT ON TABLE raw.payload_seen`` in migration 002.
+    Idempotent by design: calling twice with the same hash never creates a duplicate,
+    merely increments the rebroadcast counter.
     """
     with conn.cursor() as cur:
         cur.execute(

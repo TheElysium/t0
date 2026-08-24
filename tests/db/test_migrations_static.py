@@ -1,13 +1,12 @@
-"""Tests statiques du lot L1 : ne nécessitent aucun PostgreSQL, aucun réseau.
+"""Static tests for L1 batch: require no PostgreSQL, no network.
 
-Deux familles de vérifications :
+Two families of checks:
 
-1. Propriétés pures du runner (:mod:`garminator.db.runner`) : découverte de migrations,
-   empreinte, détection de dérive, planification — testées sur des fichiers ``.sql``
-   jetables dans ``tmp_path``.
-2. Régressions sur le contenu réel de ``migrations/`` du dépôt : nommage, absence de
-   doublon de version, présence de ``ON CONFLICT DO NOTHING`` sur les seeds de
-   référentiels (exigence explicite du lot, absente du DDL figé lui-même).
+1. Pure runner properties (:mod:`garminator.db.runner`): migration discovery, checksum,
+   drift detection, planning — tested on disposable ``.sql`` files in ``tmp_path``.
+2. Regressions on actual ``migrations/`` content in the repository: naming, no version
+   duplicates, presence of ``ON CONFLICT DO NOTHING`` on reference-data seeds (explicit
+   batch requirement, absent from frozen DDL itself).
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ def _write(tmp_path: Path, filename: str, content: str = "SELECT 1;") -> Path:
     return path
 
 
-# --- Propriétés pures -------------------------------------------------------------
+# --- Pure properties ---
 
 
 def test_discover_migrations_orders_by_numeric_version(tmp_path: Path) -> None:
@@ -63,7 +62,7 @@ def test_discover_migrations_orders_by_numeric_version(tmp_path: Path) -> None:
 
 def test_discover_migrations_ignores_files_not_matching_the_pattern(tmp_path: Path) -> None:
     _write(tmp_path, "001_schemas.sql")
-    _write(tmp_path, "README.sql")  # pas de préfixe numérique
+    _write(tmp_path, "README.sql")  # no numeric prefix
     _write(tmp_path, "notes.txt")
 
     migrations = discover_migrations(tmp_path)
@@ -75,7 +74,7 @@ def test_discover_migrations_rejects_duplicate_version(tmp_path: Path) -> None:
     _write(tmp_path, "001_a.sql")
     _write(tmp_path, "001_b.sql")
 
-    with pytest.raises(MigrationError, match="présente deux fois"):
+    with pytest.raises(MigrationError, match="present twice"):
         discover_migrations(tmp_path)
 
 
@@ -86,7 +85,7 @@ def test_checksum_is_deterministic_and_content_sensitive(tmp_path: Path) -> None
 
     assert compute_checksum(path_a) == compute_checksum(path_b)
     assert compute_checksum(path_a) != compute_checksum(path_c)
-    # stable d'un appel à l'autre
+    # stable across calls
     assert compute_checksum(path_a) == compute_checksum(path_a)
 
 
@@ -108,7 +107,7 @@ def test_detect_drift_is_empty_when_everything_matches(tmp_path: Path) -> None:
 def test_detect_drift_flags_a_modified_file(tmp_path: Path) -> None:
     path = _write(tmp_path, "001_schemas.sql", "SELECT 1;")
     original_checksum = compute_checksum(path)
-    # une migration appliquée ne devrait jamais être modifiée -- on simule l'incident
+    # an applied migration should never be modified — simulate the incident
     path.write_text("SELECT 2;", encoding="utf-8")
     migrations = discover_migrations(tmp_path)
     applied = [
@@ -119,17 +118,17 @@ def test_detect_drift_flags_a_modified_file(tmp_path: Path) -> None:
 
     assert len(issues) == 1
     assert "1" in issues[0]
-    assert "empreinte modifiée" in issues[0]
+    assert "checksum changed" in issues[0]
 
 
 def test_detect_drift_flags_a_deleted_file(tmp_path: Path) -> None:
-    migrations: list[Migration] = []  # rien sur disque
+    migrations: list[Migration] = []  # nothing on disk
     applied = [AppliedMigration(version=1, name="schemas", checksum="deadbeef", applied_at=_now())]
 
     issues = detect_drift(migrations, applied)
 
     assert len(issues) == 1
-    assert "disparu" in issues[0]
+    assert "vanished" in issues[0]
 
 
 def test_plan_pending_excludes_already_applied_versions(tmp_path: Path) -> None:
@@ -158,7 +157,7 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-# --- Régressions sur le contenu réel de migrations/ -------------------------------
+# --- Regressions on actual migrations/ content ----------------------------
 
 
 EXPECTED_MIGRATION_FILES = [
@@ -172,18 +171,20 @@ EXPECTED_MIGRATION_FILES = [
     "008_mart_activity_load_fix.sql",
     "009_scheduler.sql",
     "010_raw_fit_file_sha_comment.sql",
-    "011_arbitrage_intensity_factor.sql",
+    "011_intensity_factor_arbitration.sql",
     "012_raw_fit_file_manual_upload.sql",
     "013_threshold_power_source_home_trainer.sql",
+    "014_core_activity_manual_source.sql",
+    "015_core_sport_fit_map.sql",
 ]
 
 
 def test_repo_migrations_directory_matches_the_expected_split() -> None:
-    """Verrouille la liste EXACTE des migrations du depot, et leur contiguite depuis 1.
+    """Lock down the EXACT list of repository migrations and their contiguity from 1.
 
-    Volontairement sans enumeration commentee des migrations : une docstring qui les liste
-    perime a chaque ajout, et une docstring perimee ment plus qu'elle n'informe. Chaque
-    fichier porte son propre POURQUOI dans son en-tete, qui lui ne peut pas diverger.
+    Deliberately no commented migration enumeration: a docstring listing them becomes
+    stale with each addition, and a stale docstring misleads more than it informs. Each
+    file carries its own WHY in its header, which cannot diverge.
     """
     migrations = discover_migrations(REPO_MIGRATIONS_DIR)
 
@@ -203,30 +204,30 @@ def test_repo_migrations_have_no_checksum_collision() -> None:
     ["003_core_ref.sql", "006_core_wellness.sql"],
 )
 def test_seed_inserts_are_idempotent(filename: str) -> None:
-    """Exigence explicite du lot : les seeds doivent être réapplicables sans effet.
+    """Explicit batch requirement: seeds must be reapplicable without effect.
 
-    Le DDL figé lui-même (research/05-schema-postgres.md §3) n'a pas cette clause sur ses
-    INSERT de seed -- c'est un ajout volontaire et documenté de ce lot, vérifié ici par
-    régression : chaque INSERT INTO d'un fichier de seed doit être suivi (avant le point-virgule
-    de fin) par ON CONFLICT DO NOTHING.
+    The frozen DDL itself (research/05-postgres-schema.md §3) lacks this clause on its
+    seed INSERT — this is a deliberate and documented batch addition, verified here by
+    regression: each INSERT INTO in a seed file must be followed (before final semicolon)
+    by ON CONFLICT DO NOTHING.
     """
     content = (REPO_MIGRATIONS_DIR / filename).read_text(encoding="utf-8")
     insert_blocks = re.findall(r"INSERT INTO.*?;", content, flags=re.S)
 
-    assert insert_blocks, f"aucun INSERT trouvé dans {filename}"
+    assert insert_blocks, f"no INSERT found in {filename}"
     for block in insert_blocks:
         assert (
             "ON CONFLICT DO NOTHING" in block
-        ), f"seed non idempotent dans {filename} :\n{block[:120]}..."
+        ), f"non-idempotent seed in {filename}:\n{block[:120]}..."
 
 
 def test_all_31_tables_and_views_are_commented_in_the_concatenated_migrations() -> None:
-    """Contrôle de couverture des COMMENT ON, sans dépendre de pglast (pas une dépendance
-    d'exécution du lot) : comptage textuel des CREATE TABLE / CREATE MATERIALIZED VIEW d'un
-    côté, des COMMENT ON TABLE / COMMENT ON MATERIALIZED VIEW de l'autre.
+    """COMMENT ON coverage check, without depending on pglast (not a batch runtime
+    dependency): textual count of CREATE TABLE / CREATE MATERIALIZED VIEW on one side,
+    COMMENT ON TABLE / COMMENT ON MATERIALIZED VIEW on the other.
 
-    31 objets du DDL figé (research/05-schema-postgres.md) + 1 (raw.poll_window, lot L6,
-    migration 009) = 32.
+    31 objects from frozen DDL (research/05-postgres-schema.md) + 1 (raw.poll_window, L6
+    batch, migration 009) + 1 (core.sport_fit_map, L1 batch, migration 015) = 33.
     """
     full_text = "\n".join(
         (REPO_MIGRATIONS_DIR / name).read_text(encoding="utf-8")
@@ -237,23 +238,23 @@ def test_all_31_tables_and_views_are_commented_in_the_concatenated_migrations() 
         r"COMMENT ON (?:TABLE|MATERIALIZED VIEW)\s+([a-z_]+\.[a-z_]+)", full_text
     )
 
-    assert len(set(created)) == 32, f"attendu 32 objets, trouvé {len(set(created))} : {created}"
+    assert len(set(created)) == 33, f"expected 33 objects, found {len(set(created))}: {created}"
     missing = set(created) - set(commented)
-    assert not missing, f"objets créés sans COMMENT ON correspondant : {missing}"
+    assert not missing, f"created objects without matching COMMENT ON: {missing}"
 
 
-# --- La fixture de seuils n'est pas une migration ----------------------------------
+# --- Thresholds fixture is not a migration ---
 
 
 def test_thresholds_fixture_is_never_discovered_as_a_migration(tmp_path: Path) -> None:
-    """Point non négociable : la fixture de seuils ne doit JAMAIS être appliquée automatiquement.
+    """Non-negotiable: the thresholds fixture must NEVER be applied automatically.
 
-    Trois angles, parce que « le nom ne correspond pas au motif » se vérifie par l'exécution et
-    non par la lecture :
-    1. le répertoire migrations/ du dépôt ne contient que les 7 migrations attendues ;
-    2. scanner le répertoire de fixtures ne découvre rien ;
-    3. même *copiée dans* un répertoire de migrations, la fixture reste ignorée -- c'est le
-       nom de fichier qui décide, pas l'emplacement.
+    Three angles, because "name doesn't match pattern" verifies by execution, not by
+    reading:
+    1. the repository's migrations/ directory contains only expected migrations;
+    2. scanning the fixtures directory discovers nothing;
+    3. even *copied into* a migrations directory, the fixture stays ignored — filename
+       decides, not location.
     """
     assert THRESHOLDS_FIXTURE.is_file()
     assert [m.path.name for m in discover_migrations(REPO_MIGRATIONS_DIR)] == (
@@ -269,16 +270,15 @@ def test_thresholds_fixture_is_never_discovered_as_a_migration(tmp_path: Path) -
 
 
 def test_thresholds_fixture_leaves_rftp_null_and_matches_the_communicated_values() -> None:
-    """Régression sur les valeurs de seuils : un seuil faux ne lève aucune erreur.
+    """Regression on threshold values: a wrong threshold raises no error.
 
-    Il produit des nombres plausibles et faux sur tout l'historique de charge. Les valeurs
-    proviennent de l'addendum §5 (communiquées par l'athlète le 2026-08-19, la LTHR le
-    2026-08-21) ; rftp_watts doit rester NULL -- ni dérivé du FTP vélo, ni estimé depuis
-    l'allure seuil.
+    It produces plausible and wrong numbers across training history. Values come from
+    addendum §5 (communicated by athlete 2026-08-19, LTHR 2026-08-21); rftp_watts must
+    stay NULL — neither derived from bike FTP nor estimated from threshold pace.
 
-    La borne basse de validité est le **2026-05-19** : rétrodatage de trois mois tranché par
-    l'athlète le 2026-08-21. C'est une hypothèse assumée, pas une mesure ; la changer déplace
-    silencieusement le début de toute la charge d'entraînement, d'où cette garde.
+    The validity lower bound is **2026-05-19**: three-month backdating confirmed by
+    athlete 2026-08-21. This is an assumed hypothesis, not a measurement; changing it
+    silently shifts the start of all training load, hence this guard.
     """
     content = THRESHOLDS_FIXTURE.read_text(encoding="utf-8")
     statements = re.findall(r"INSERT INTO.*?;", content, flags=re.S)
@@ -287,25 +287,25 @@ def test_thresholds_fixture_leaves_rftp_null_and_matches_the_communicated_values
     }
 
     assert "220, 190, 55, 70.0," in by_discipline["bike"]
-    # 4:30 min/km = 270 s/km ; rFTP explicitement NULL dans la liste de valeurs.
+    # 4:30 min/km = 270 s/km; rFTP explicitly NULL in value list.
     assert "270, NULL, 190, 55, 70.0," in by_discipline["run"]
-    # 1:50 min/100 m = 1,000000 m/s, mesurée (css_estimated = false).
+    # 1:50 min/100 m = 0.909091 m/s, measured (css_estimated = false).
     assert "0.909091, false, 190, 55, 70.0," in by_discipline["swim"]
-    # LTHR 170 bpm, portée par la ligne transversale : condition d'existence du hrTSS.
+    # LTHR 170 bpm, carried by cross-discipline row: condition for hrTSS existence.
     assert "170, 190, 55, 70.0," in by_discipline["all"]
     for block in by_discipline.values():
         assert "daterange('2026-05-19', NULL, '[)')" in block
     assert not re.search(
         r"rftp_watts\s*(=|,)?\s*\d", content
-    ), "rftp_watts doit rester NULL : aucune valeur numérique ne doit lui être affectée"
+    ), "rftp_watts must stay NULL: no numeric value should be assigned to it"
 
 
 def test_thresholds_fixture_athlete_insert_is_really_idempotent() -> None:
-    """core.athlete n'a AUCUNE contrainte unique ni d'exclusion dans le DDL figé.
+    """core.athlete has NO unique or exclusion constraints in frozen DDL.
 
-    ``ON CONFLICT DO NOTHING`` y serait donc inopérant : chaque exécution ajouterait un athlète
-    de plus, et les INSERT de seuils (qui résolvent athlete_id par display_name) créeraient un
-    seuil par doublon. L'idempotence doit passer par ``WHERE NOT EXISTS``.
+    ``ON CONFLICT DO NOTHING`` would be ineffective there: each execution adds another
+    athlete, and threshold INSERT (resolving athlete_id by display_name) creates one
+    threshold per duplicate. Idempotence must use ``WHERE NOT EXISTS``.
     """
     content = THRESHOLDS_FIXTURE.read_text(encoding="utf-8")
     athlete_insert = next(
@@ -323,10 +323,10 @@ def test_thresholds_fixture_athlete_insert_is_really_idempotent() -> None:
     assert athlete_ddl is not None
     assert "UNIQUE" not in athlete_ddl.group(
         0
-    ), "core.athlete a gagné une contrainte unique : ce test et la fixture sont à revoir"
+    ), "core.athlete gained a unique constraint: this test and fixture need review"
 
 
-# --- Verrou d'avis ----------------------------------------------------------------
+# --- Advisory lock ---
 
 
 class _FakeCursor:
@@ -364,9 +364,9 @@ class _FakeConnection:
 
 
 def test_acquire_lock_uses_a_non_blocking_session_scoped_lock() -> None:
-    """Non bloquant (``pg_try_advisory_lock``) : un second runner dans un conteneur doit
-    échouer tout de suite, pas attendre indéfiniment. Portée session et non transaction :
-    le runner enchaîne une transaction par migration, le verrou doit couvrir la séquence.
+    """Non-blocking (``pg_try_advisory_lock``): a second runner in a container must
+    fail immediately, not wait indefinitely. Session-scoped not transaction-scoped: the
+    runner chains one transaction per migration, the lock must cover the sequence.
     """
     conn = _FakeConnection(result=True)
 
@@ -390,101 +390,97 @@ def test_release_lock_unlocks_the_same_key() -> None:
 
     release_lock(cast("Any", conn))
 
-    # rollback() d'abord : après une migration en échec la connexion est en transaction
-    # avortée, où toute commande -- y compris le déverrouillage -- échouerait.
+    # rollback() first: after a failed migration the connection is in aborted-transaction
+    # state, where any command — including unlock — would fail.
     assert conn.rollbacks == 1
     sql, params = conn.cursor_obj.executed[0]
     assert "pg_advisory_unlock" in sql
     assert params == (ADVISORY_LOCK_KEY,)
 
 
-def test_migration_008_corrige_les_trois_defauts_de_activity_load() -> None:
-    """Garde sur les trois corrections de la migration 008.
+def test_migration_008_fixes_three_activity_load_defects() -> None:
+    """Guard on migration 008's three corrections.
 
-    Elles sont invisibles à l'exécution : un ``hr_tss`` NULL et un ``intensity_factor``
-    NULL ne lèvent aucune erreur, ils vident silencieusement des colonnes entières. Si
-    quelqu'un recrée un jour ``mart.activity_load`` sans ces deux points, rien ne
-    protestera -- d'où ce test.
+    They are invisible at runtime: a NULL hr_tss and NULL intensity_factor raise
+    no error, they silently empty entire columns. If someone recreates mart.activity_load
+    without these two points someday, nothing protests—hence this test.
     """
     sql = (REPO_MIGRATIONS_DIR / "008_mart_activity_load_fix.sql").read_text(encoding="utf-8")
 
-    # Défaut 1 : la LTHR n'existe que sur la ligne de seuil transversale.
+    # Defect 1: LTHR exists only on cross-discipline threshold row.
     assert "th_all.discipline = 'all'" in sql
     assert "coalesce(th.lthr_bpm, th_all.lthr_bpm)" in sql
 
-    # Défaut 2 : sans branche GAP, l'IF course est NULL tant que rftp_watts l'est.
+    # Defect 2: without GAP branch, run IF is NULL as long as rftp_watts is.
     assert "r.ngp_speed_mps * r.ftp_pace_s_per_km / 1000.0" in sql
     assert "'run_gap'" in sql
-    # La branche puissance reste PRIORITAIRE : le jour où un rFTP validé arrive, il gagne.
+    # Power branch stays priority: when validated rFTP arrives, it wins.
     assert sql.index("'run_power'") < sql.index("'run_gap'")
 
-    # Défaut 3 : la cascade est LUE dans core.metric_method_priority, jamais recopiée.
-    # Sans ce garde-fou, une branche GAP appliquée à toute la discipline `run` produirait
-    # sur `treadmill` un IF que la matrice de priorité, elle, n'autorise pas.
+    # Defect 3: priority cascade READ from core.metric_method_priority, never copied.
+    # Without safeguard, GAP branch on entire run discipline produces IF on treadmill
+    # that priority matrix doesn't allow.
     assert "FROM core.metric_method_priority p" in sql
     assert "p.metric = 'tss'" in sql
     for method in ("bike_power", "run_power", "run_gap", "swim_css"):
         assert re.search(rf"'{method}' +=+ ANY\(b\.allowed_methods\)", sql), method
 
-    # La valeur et la méthode ne peuvent pas diverger : un seul CASE les résout, le second
-    # se contente de brancher SUR ce résultat.
+    # Value and method cannot diverge: one CASE resolves both, second just branches ON
+    # result.
     assert "CASE r.intensity_factor_method" in sql
 
-    # La migration 007 est figée : 008 corrige en remplaçant la vue, sans la réécrire.
+    # Migration 007 frozen: 008 fixes by replacing view, not rewriting.
     sql_007 = (REPO_MIGRATIONS_DIR / "007_mart.sql").read_text(encoding="utf-8")
     assert "th_all" not in sql_007
     assert "DROP MATERIALIZED VIEW mart.activity_load;" in sql
 
 
-def _sql_sans_commentaires_ni_litteraux(sql: str) -> str:
-    """Retire les commentaires ``--`` et le contenu des littéraux ``'...'``.
+def _strip_sql_comments_and_literals(sql: str) -> str:
+    """Strip -- comments and content of '...' literals.
 
-    Les lignes sont conservées (aucune n'est supprimée) pour que les messages d'erreur
-    restent lisibles. Les quotes doublées ``''`` à l'intérieur d'un littéral sont gérées
-    naturellement : elles ferment puis rouvrent le littéral, ce qui laisse le contenu
-    neutralisé dans les deux cas.
+    Lines preserved (none deleted) so error messages stay readable. Double quotes ''
+    inside literal handled naturally: close then reopen, leaving content neutralized.
     """
-    lignes: list[str] = []
-    dans_litteral = False
-    for ligne in sql.splitlines():
-        sortie: list[str] = []
+    lines: list[str] = []
+    in_literal = False
+    for line in sql.splitlines():
+        output: list[str] = []
         i = 0
-        while i < len(ligne):
-            car = ligne[i]
-            if dans_litteral:
-                if car == "'":
-                    dans_litteral = False
-                    sortie.append("'")
+        while i < len(line):
+            char = line[i]
+            if in_literal:
+                if char == "'":
+                    in_literal = False
+                    output.append("'")
                 i += 1
                 continue
-            if car == "'":
-                dans_litteral = True
-                sortie.append("'")
+            if char == "'":
+                in_literal = True
+                output.append("'")
                 i += 1
                 continue
-            if ligne.startswith("--", i):
+            if line.startswith("--", i):
                 break
-            sortie.append(car)
+            output.append(char)
             i += 1
-        lignes.append("".join(sortie))
-    return chr(10).join(lignes)
+        lines.append("".join(output))
+    return chr(10).join(lines)
 
 
-def test_migration_008_nentraine_aucune_vue_dependante() -> None:
-    """``DROP MATERIALIZED VIEW`` sans CASCADE échouerait si une autre vue lisait
-    ``mart.activity_load``. Vérifié : daily_load, pmc, activity_wide et power_curve_best
-    lisent toutes ``core.*``, jamais ``mart.activity_load``. Ce test échoue si une future
-    migration crée cette dépendance sans adapter 008."""
+def test_migration_008_brings_no_dependent_views() -> None:
+    """DROP MATERIALIZED VIEW without CASCADE fails if another view reads
+    mart.activity_load. Verified: daily_load, pmc, activity_wide, power_curve_best
+    all read core.*, never mart.activity_load. Test fails if future migration creates
+    dependency without updating 008."""
     others = [
         p for p in REPO_MIGRATIONS_DIR.glob("*.sql") if p.name != "008_mart_activity_load_fix.sql"
     ]
     for path in others:
-        # On cherche une dépendance SQL RÉELLE, pas une mention. Commentaires `--` et
-        # littéraux entre quotes (les COMMENT ON, qui citent volontiers les vues voisines
-        # pour expliquer un arbitrage) sont donc neutralisés AVANT la recherche : sans
-        # cela, documenter mart.activity_load fait échouer un test qui parle de
-        # dépendances de vues, et le réflexe devient de retirer la documentation.
-        code = _sql_sans_commentaires_ni_litteraux(path.read_text(encoding="utf-8"))
+        # Look for REAL SQL dependency, not mention. Comments -- and string literals
+        # (COMMENT ON, which readily cite neighboring views) neutralized BEFORE search:
+        # without this, documenting mart.activity_load fails view dependency test,
+        # reflex becomes removing docs.
+        code = _strip_sql_comments_and_literals(path.read_text(encoding="utf-8"))
         reads = [
             line
             for line in code.splitlines()
@@ -493,19 +489,19 @@ def test_migration_008_nentraine_aucune_vue_dependante() -> None:
             and "CREATE UNIQUE INDEX" not in line
             and "COMMENT ON" not in line
         ]
-        assert not reads, f"{path.name} lit mart.activity_load : {reads}"
+        assert not reads, f"{path.name} reads mart.activity_load: {reads}"
 
 
-def test_la_garde_de_dependance_ignore_bien_commentaires_et_litteraux() -> None:
-    """Contre-épreuve du neutraliseur : il doit taire la prose ET voir le vrai SELECT.
+def test_dependency_guard_ignores_comments_and_literals() -> None:
+    """Counterproof of neutralizer: must silence prose AND see real SELECT.
 
-    Une garde qui se contente d'ignorer les commentaires sans plus rien voir passerait
-    inaperçue — elle ne dirait plus jamais rien.
+    Guard just ignoring comments without more would go unnoticed—would never say
+    anything again.
     """
-    prose = "-- mart.activity_load est cité ici\nSELECT 1;\n"
-    litteral = "COMMENT ON VIEW x IS 'voir mart.activity_load pour l''audit';\n"
-    vrai = "SELECT a.* FROM mart.activity_load a;\n"
+    prose = "-- mart.activity_load mentioned here\nSELECT 1;\n"
+    literal = "COMMENT ON VIEW x IS 'see mart.activity_load for audit';\n"
+    real = "SELECT a.* FROM mart.activity_load a;\n"
 
-    assert "mart.activity_load" not in _sql_sans_commentaires_ni_litteraux(prose)
-    assert "mart.activity_load" not in _sql_sans_commentaires_ni_litteraux(litteral)
-    assert "mart.activity_load" in _sql_sans_commentaires_ni_litteraux(vrai)
+    assert "mart.activity_load" not in _strip_sql_comments_and_literals(prose)
+    assert "mart.activity_load" not in _strip_sql_comments_and_literals(literal)
+    assert "mart.activity_load" in _strip_sql_comments_and_literals(real)

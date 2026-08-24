@@ -1,50 +1,47 @@
-"""Logique d'ingestion d'un envoi manuel (lot L7), indépendante de tout framework HTTP.
+"""Business logic for manual upload ingestion (L7 batch), independent of any HTTP
+framework.
 
-Ce module ne connaît pas FastAPI : il prend des octets déjà lus en mémoire et un
-répertoire de destination, et retourne un résultat structuré ou lève une des erreurs de
-:mod:`garminator.api.errors` / :mod:`garminator.fit.errors`. C'est ``garminator.api.upload``
-(la couche HTTP) qui traduit ces erreurs en codes de statut. Cette séparation permet de
-tester toute la logique métier sans dépendre de ``python-multipart`` ni ``httpx`` (voir
-le rapport de fin de lot : aucun des deux n'est installé dans le venv du dépôt).
+This module knows nothing of FastAPI: it takes bytes already read into memory and a
+destination directory, and returns a structured result or raises an error from
+:mod:`garminator.api.errors` / :mod:`garminator.fit.errors`. It is ``garminator.api.upload``
+(the HTTP layer) that maps these errors to status codes. This separation allows testing
+all business logic without depending on ``python-multipart`` or ``httpx`` (see batch
+end report: neither is installed in the repository venv).
 
-Séquence imposée par la mission du lot, dans cet ordre et jamais autrement :
+Sequence mandated by the batch mission, in this order and never otherwise:
 
-1. Borne de taille sur les octets reçus (:class:`~garminator.api.errors.PayloadTooLargeError`).
-2. Si le contenu est une archive ZIP, pré-inspection des métadonnées membres (noms,
-   tailles annoncées) AVANT toute décompression réelle, pour écarter les chemins
-   d'échappement et les bombes de décompression
+1. Size bound on received bytes (:class:`~garminator.api.errors.PayloadTooLargeError`).
+2. If content is a ZIP archive, pre-inspect member metadata (names, declared sizes)
+   BEFORE any real decompression, to reject path escapes and decompression bombs
    (:class:`~garminator.api.errors.HostileArchiveError`).
-3. Archivage brut-d'abord via :func:`garminator.fit.archive.archive_download` : le
-   fichier est écrit et vérifié sur le volume avant toute tentative de parsing — c'est
-   la garantie déjà offerte par ce module (L3), reprise ici telle quelle.
-4. Tentative de parsing (:func:`garminator.fit.reader.decode_fit` /
-   :func:`garminator.tcx.reader.decode_tcx`) pour valider que le contenu archivé est
-   effectivement exploitable, pas seulement reconnu par sa signature.
+3. Archive-first storage via :func:`garminator.fit.archive.archive_download`: file is
+   written and verified to disk before any parsing attempt — this is the guarantee
+   already offered by that module (L3), carried through as-is here.
+4. Attempt parsing (:func:`garminator.fit.reader.decode_fit` /
+   :func:`garminator.tcx.reader.decode_tcx`) to validate that archived content is
+   actually usable, not just recognized by its signature.
 
-5. Si un appelant fournit une connexion (``conn``), enregistrement de la ligne
-   ``raw.fit_file`` via :func:`garminator.garmin.raw_store.insert_fit_file` avec
-   ``garmin_activity_id=None`` — la convention posée par
-   ``migrations/012_raw_fit_file_manual_upload.sql`` pour marquer un envoi manuel.
-   Fait APRÈS l'étape 3 (jamais avant) : c'est l'invariant central de tout le module
-   ``raw.fit_file``, qui ne dépend pas de la provenance de la ligne.
+5. If a caller provides a connection (``conn``), record the ``raw.fit_file`` row via
+   :func:`garminator.garmin.raw_store.insert_fit_file` with ``garmin_activity_id=None``
+   — the convention set by ``migrations/012_raw_fit_file_manual_upload.sql`` to mark a
+   manual upload. Done AFTER step 3 (never before): this is the central invariant of the
+   ``raw.fit_file`` module, independent of row provenance.
 
-``conn`` reste optionnel (voir :func:`ingest_upload`) : ce lot ne force pas la présence
-d'une base pour valider un envoi (utile en test, ou pour un futur usage hors-ligne),
-mais la couche HTTP (:mod:`garminator.api.upload`) en fournit toujours une réelle — sans
-quoi le fichier archivé resterait hors de la file de transformation, exactement le
-problème que la migration 012 a résolu côté schéma. L'``activity_id`` passé à
-``decode_fit``/``decode_tcx`` ci-dessous est un identifiant-sentinelle purement interne
-à la validation de parsing (étape 4) : il n'est jamais persisté, jamais renvoyé à
-l'appelant, et ne doit jamais être confondu avec un identifiant d'activité Garmin réel
-ni avec le ``garmin_activity_id=None`` inséré à l'étape 5.
+``conn`` remains optional (see :func:`ingest_upload`): this batch does not require a
+database to validate an upload (useful in tests, or for future offline use), but the
+HTTP layer (:mod:`garminator.api.upload`) always provides a real one — otherwise the
+archived file would stay out of the transformation queue, exactly the problem migration
+012 solved on the schema side. The ``activity_id`` passed to ``decode_fit``/``decode_tcx``
+below is a sentinel identifier purely internal to parsing validation (step 4): it is
+never persisted, never returned to the caller, and must never be confused with a real
+Garmin activity ID nor with the ``garmin_activity_id=None`` inserted in step 5.
 
-Note de périmètre AB (limite assumée, documentée dans docs/RUNBOOK.md) : un envoi
-manuel n'a jamais de résumé Garmin associé (pas d'``activityId``, donc aucune ligne
-``raw.api_response`` correspondante) — :mod:`garminator.transform.runner` laisse donc
-ces lignes en file avec un statut « reporté » (``skipped``), jamais transformées en
-``core.*`` tant qu'aucun résumé ne leur est manuellement associé. Ce n'est pas un bug de
-ce module : rien ici ne peut inventer un sport, un fuseau horaire ou une durée que
-Garmin seul fournit.
+Scope note AB (documented limit in docs/RUNBOOK.md): a manual upload never has an
+associated Garmin summary (no ``activityId``, thus no matching ``raw.api_response`` row)
+— :mod:`garminator.transform.runner` thus leaves these rows in queue with "deferred"
+status (``skipped``), never transformed to ``core.*`` until a summary is manually
+associated. This is not a bug in this module: nothing here can invent a sport, timezone,
+or duration that only Garmin provides.
 """
 
 from __future__ import annotations
@@ -68,27 +65,24 @@ if TYPE_CHECKING:
 
     from garminator.garmin.raw_store import DBConnection
 
-#: Taille maximale acceptée pour le corps d'un envoi (200 Mio). Un fichier FIT ou TCX
-#: réel d'activité, même une ultra-distance de plusieurs heures, tient très largement
-#: en dessous : cette borne protège la mémoire du service contre un envoi anormal, pas
-#: contre un usage légitime.
+#: Maximum accepted size for upload body (200 MiB). A real FIT or TCX activity file,
+#: even a multi-hour ultramarathon, fits well below this: this bound protects service
+#: memory against abnormal uploads, not legitimate use.
 DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
-#: Taille maximale acceptée pour le contenu DÉCOMPRESSÉ d'un membre d'archive ZIP.
-#: Même borne que ci-dessus : un FIT/TCX légitime n'a aucune raison de dépasser 200 Mio
-#: une fois décompressé.
+#: Maximum accepted size for DECOMPRESSED content of a ZIP archive member. Same bound
+#: as above: legitimate FIT/TCX has no reason to exceed 200 MiB once decompressed.
 DEFAULT_MAX_MEMBER_UNCOMPRESSED_BYTES = DEFAULT_MAX_UPLOAD_BYTES
 
-#: Ratio (taille décompressée / taille compressée) au-delà duquel un membre est traité
-#: comme une bombe de décompression plutôt qu'un fichier légitime. Un TCX (XML, texte
-#: répétitif) compresse bien mais reste très en dessous de ce seuil en pratique ; les
-#: bombes de décompression classiques (ex. 42.zip) visent des ratios de plusieurs
-#: milliers, largement au-dessus.
+#: Ratio (decompressed size / compressed size) beyond which a member is treated as a
+#: decompression bomb rather than legitimate file. TCX (XML, repetitive text) compresses
+#: well but stays well below this threshold in practice; classic decompression bombs
+#: (e.g. 42.zip) target ratios of many thousands, well above.
 DEFAULT_MAX_COMPRESSION_RATIO = 200.0
 
-#: Signatures ZIP reconnues (mêmes que ``garminator.fit.archive._ZIP_SIGNATURES`` :
-#: dupliquées ici plutôt qu'importées, car ce nom est privé à ce module-là et cette
-#: pré-inspection est un besoin propre à la couche HTTP, pas à l'archivage lui-même).
+#: ZIP signatures recognized (same as ``garminator.fit.archive._ZIP_SIGNATURES``:
+#: duplicated here rather than imported because that name is private to that module, and
+#: this pre-inspection is specific to the HTTP layer, not archiving itself).
 _ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06")
 
 
@@ -97,17 +91,16 @@ def _looks_like_zip(data: bytes) -> bool:
 
 
 def _is_safe_member_name(name: str) -> bool:
-    """Refuse tout nom de membre ZIP portant un chemin d'échappement.
+    """Reject any ZIP member name bearing a path escape.
 
-    Défense en profondeur : ``garminator.fit.archive`` n'utilise déjà jamais ce nom pour
-    écrire sur le volume (il lit le contenu par index et choisit lui-même le nom final),
-    donc une évasion de chemin n'est pas exploitable dans l'état actuel du code. Mais un
-    nom de membre suspect reste un signal fort d'archive malveillante ou mal formée, à
-    rejeter explicitement plutôt qu'à laisser passer silencieusement.
+    Defense in depth: ``garminator.fit.archive`` already never uses this name to write
+    to disk (it reads content by index and picks its own final name), so path escape is
+    not exploitable in current code. But a suspicious member name remains a strong signal
+    of a hostile or malformed archive, to reject explicitly rather than pass silently.
     """
     if not name or name.startswith(("/", "\\")):
         return False
-    if ":" in name:  # chemin absolu Windows, ex. "C:\\evil"
+    if ":" in name:  # Windows absolute path, e.g. "C:\\evil"
         return False
     parts = name.replace("\\", "/").split("/")
     return ".." not in parts
@@ -119,22 +112,21 @@ def check_zip_safety(
     max_member_uncompressed_bytes: int = DEFAULT_MAX_MEMBER_UNCOMPRESSED_BYTES,
     max_compression_ratio: float = DEFAULT_MAX_COMPRESSION_RATIO,
 ) -> None:
-    """Pré-inspecte les métadonnées d'une archive ZIP, sans rien décompresser.
+    """Pre-inspect ZIP archive metadata without decompressing anything.
 
-    N'ouvre que :meth:`zipfile.ZipFile.infolist` (métadonnées de l'en-tête central,
-    déjà lues par un ``ZipFile()`` normal) : aucun octet de contenu membre n'est
-    décompressé ici, donc une bombe de décompression ne peut pas consommer de mémoire
-    pendant cette vérification elle-même.
+    Only reads :meth:`zipfile.ZipFile.infolist` (central directory metadata, already
+    read by normal ``ZipFile()`` init): no member content bytes are decompressed here,
+    so a decompression bomb cannot consume memory during this check itself.
 
-    Une archive simplement invalide (:class:`zipfile.BadZipFile`) n'est PAS une archive
-    hostile : ce n'est pas ici qu'elle doit être signalée. Cette fonction se tait dans ce
-    cas et laisse :func:`garminator.fit.archive.archive_download`, appelé juste après,
-    lever la :class:`~garminator.fit.errors.ArchiveError` appropriée (message « archive
-    ZIP invalide »).
+    A simply invalid archive (:class:`zipfile.BadZipFile`) is NOT a hostile archive:
+    this is not where it should be reported. This function stays silent in that case and
+    lets :func:`garminator.fit.archive.archive_download`, called right after, raise the
+    appropriate :class:`~garminator.fit.errors.ArchiveError` (message "invalid ZIP
+    archive").
 
     Raises:
-        HostileArchiveError: nom de membre portant un chemin d'échappement, taille
-            décompressée annoncée excessive, ou ratio de compression excessif.
+        HostileArchiveError: member name bearing path escape, excessive declared
+            decompressed size, or excessive compression ratio.
     """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
@@ -146,37 +138,36 @@ def check_zip_safety(
                 continue
             if not _is_safe_member_name(info.filename):
                 raise HostileArchiveError(
-                    f"Archive ZIP refusée : nom de membre suspect « {info.filename} » "
-                    "(chemin d'échappement)."
+                    f"ZIP archive rejected: suspicious member name {info.filename!r} "
+                    "(path escape)."
                 )
             if info.file_size > max_member_uncompressed_bytes:
                 raise HostileArchiveError(
-                    f"Archive ZIP refusée : membre « {info.filename} » annonce "
-                    f"{info.file_size} octets décompressés, au-dessus de la borne "
+                    f"ZIP archive rejected: member {info.filename!r} declares "
+                    f"{info.file_size} decompressed bytes, above bound "
                     f"({max_member_uncompressed_bytes})."
                 )
             compressed = max(info.compress_size, 1)
             ratio = info.file_size / compressed
             if ratio > max_compression_ratio:
                 raise HostileArchiveError(
-                    f"Archive ZIP refusée : membre « {info.filename} » a un ratio de "
-                    f"compression de {ratio:.0f} (borne {max_compression_ratio:.0f}), "
-                    "signature caractéristique d'une bombe de décompression."
+                    f"ZIP archive rejected: member {info.filename!r} has compression "
+                    f"ratio {ratio:.0f} (bound {max_compression_ratio:.0f}), "
+                    "characteristic signature of a decompression bomb."
                 )
 
 
-#: Identifiant-sentinelle interne, jamais persisté (voir docstring du module).
+#: Internal sentinel identifier, never persisted (see module docstring).
 _VALIDATION_ACTIVITY_ID = -1
 
 
 @dataclass(frozen=True, slots=True)
 class ParsedSummary:
-    """Résumé du parsing d'un fichier archivé, pour la réponse HTTP.
+    """Summary of parsing a stored file, for HTTP response.
 
-    Ne reprend jamais les échantillons eux-mêmes (potentiellement des dizaines de
-    milliers) : seulement des comptes et la présence/absence des informations clés,
-    de quoi confirmer que le fichier est réellement exploitable sans gonfler la
-    réponse HTTP.
+    Never includes samples themselves (potentially tens of thousands): only counts and
+    presence/absence of key information, enough to confirm the file is actually usable
+    without bloating the HTTP response.
     """
 
     n_samples: int
@@ -188,15 +179,15 @@ class ParsedSummary:
 
 @dataclass(frozen=True, slots=True)
 class UploadOutcome:
-    """Résultat complet d'un envoi traité : toujours archivé si retourné sans lever.
+    """Complete result of processed upload: always archived if returned without raising.
 
-    ``parsed`` est ``None`` exactement quand ``parse_error`` n'est pas ``None`` — les
-    deux ne sont jamais renseignés ensemble, jamais ni l'un ni l'autre absent.
+    ``parsed`` is ``None`` exactly when ``parse_error`` is not ``None`` — the two are
+    never both set, never both absent.
 
-    ``fit_file_id`` est ``None`` exactement quand :func:`ingest_upload` a été appelée
-    sans ``conn`` (validation pure, sans base) : ce n'est jamais un signe d'échec
-    d'insertion, une insertion en échec lève (``FitFileShaConflictError`` notamment)
-    plutôt que de retourner silencieusement un résultat sans identifiant.
+    ``fit_file_id`` is ``None`` exactly when :func:`ingest_upload` was called without
+    ``conn`` (pure validation, no database): this is never a sign of insertion failure;
+    failed insertion raises (``FitFileShaConflictError`` in particular) rather than
+    silently returning a result without ID.
     """
 
     archived: ArchivedFile
@@ -210,8 +201,8 @@ def _summarize(data: bytes, source_format: str) -> ParsedSummary:
         parsed = decode_fit(data, activity_id=_VALIDATION_ACTIVITY_ID)
     elif source_format == "tcx":
         parsed = decode_tcx(data, activity_id=_VALIDATION_ACTIVITY_ID)
-    else:  # pragma: no cover - archive_download ne retourne jamais autre chose
-        raise SourceParseError(f"Format source inattendu après archivage : {source_format!r}.")
+    else:  # pragma: no cover - archive_download never returns anything else
+        raise SourceParseError(f"Unexpected source format after archiving: {source_format!r}.")
     return ParsedSummary(
         n_samples=len(parsed.samples),
         n_laps=len(parsed.laps),
@@ -228,48 +219,44 @@ def ingest_upload(
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     conn: DBConnection | None = None,
 ) -> UploadOutcome:
-    """Point d'entrée unique du lot L7 : borne de taille, garde anti-ZIP-hostile,
-    archivage brut-d'abord, insertion ``raw.fit_file`` (si ``conn`` fourni), puis
-    validation de parsing.
+    """Single entry point for L7 batch: size bound, hostile-ZIP guard, archive-first
+    storage, ``raw.fit_file`` insert (if ``conn`` provided), then parsing validation.
 
-    Le nom de fichier stocké est dérivé du sha256 du contenu ENVOYÉ (avant extraction
-    ZIP éventuelle), jamais du nom de fichier annoncé par le client HTTP ni d'un nom de
-    membre d'archive : contenu-adressé, donc insensible à toute tentative d'évasion de
-    chemin côté nommage, et naturellement idempotent (un même envoi produit toujours le
-    même nom final).
+    Stored filename is derived from sha256 of UPLOADED content (before any ZIP
+    extraction), never from the HTTP client's announced filename or archive member name:
+    content-addressed, thus immune to path-escape attempts in naming, and naturally
+    idempotent (same upload always produces same final name).
 
-    ``conn`` reste optionnel : sans elle, cette fonction ne fait QUE valider et archiver
-    (utile en test unitaire, aucun PostgreSQL requis) ; avec elle, la ligne ``raw.fit_file``
-    est insérée avec ``garmin_activity_id=None`` (voir la docstring du module) et le
-    fichier entre réellement dans la file de transformation. C'est la couche HTTP
-    (:mod:`garminator.api.upload`) qui décide d'en fournir une réelle — sans quoi
-    l'envoi manuel resterait archivé mais invisible pour ``garminator.transform``,
-    exactement le défaut que la migration 012 corrige côté schéma.
+    ``conn`` remains optional: without it, this function only validates and archives
+    (useful in unit tests, no PostgreSQL required); with it, the ``raw.fit_file`` row is
+    inserted with ``garmin_activity_id=None`` (see module docstring) and the file truly
+    enters the transformation queue. The HTTP layer (:mod:`garminator.api.upload`)
+    decides whether to provide a real one — otherwise the manual upload would stay
+    archived but invisible to ``garminator.transform``, exactly the problem migration 012
+    solved on the schema side.
 
-    L'insertion a lieu APRÈS que le fichier a été écrit et fsync sur le volume par
-    :func:`~garminator.fit.archive.archive_download` — jamais avant : voir l'invariant
-    documenté sur ``raw.fit_file`` (``migrations/002_raw.sql``, repris par la 012). Elle
-    a lieu même si le parsing de validation (étape suivante) échoue ensuite : un envoi
-    archivé-mais-non-reparsable-localement doit quand même entrer en file, exactement
-    comme une ligne Garmin fraîchement téléchargée — c'est ``garminator.transform`` qui
-    tentera le parsing réel et posera ``parse_error`` le cas échéant, pas cette fonction.
+    Insert happens AFTER the file is written and fsync'd to disk by
+    :func:`~garminator.fit.archive.archive_download` — never before: see the invariant
+    documented on ``raw.fit_file`` (``migrations/002_raw.sql``, carried through by 012).
+    It happens even if validation parsing (next step) fails afterward: an archived-but-
+    locally-unparse-able upload must still enter the queue, exactly like a freshly
+    downloaded Garmin row — it is ``garminator.transform`` that attempts real parsing
+    and sets ``parse_error`` if needed, not this function.
 
     Raises:
-        garminator.api.errors.PayloadTooLargeError: ``data`` dépasse ``max_upload_bytes``.
-        garminator.api.errors.HostileArchiveError: archive ZIP au motif dangereux.
-        garminator.fit.errors.ArchiveError: format non reconnu, archive vide/à plusieurs
-            membres/invalide (délégué à :func:`garminator.fit.archive.archive_download`).
-            Rien n'est laissé sur le volume dans ce cas.
-        garminator.garmin.raw_store.FitFileShaConflictError: ``conn`` fourni et le
-            sha256 du contenu envoyé est déjà associé en base à une AUTRE provenance
-            (activité Garmin réelle, ou envoi manuel distinct partageant le même
-            contenu). Le fichier reste archivé sur le volume (aucune perte), mais aucune
-            ligne n'est insérée pour cette demande.
+        garminator.api.errors.PayloadTooLargeError: ``data`` exceeds ``max_upload_bytes``.
+        garminator.api.errors.HostileArchiveError: ZIP archive with dangerous pattern.
+        garminator.fit.errors.ArchiveError: unrecognized format, empty/multi-member/
+            invalid archive (delegated to :func:`garminator.fit.archive.archive_download`).
+            Nothing left on disk in this case.
+        garminator.garmin.raw_store.FitFileShaConflictError: ``conn`` provided and the
+            sha256 of uploaded content is already associated in database to a DIFFERENT
+            source (real Garmin activity, or distinct manual upload sharing same content).
+            File stays archived on disk (no loss), but no row inserted for this request.
     """
     if len(data) > max_upload_bytes:
         raise PayloadTooLargeError(
-            f"Envoi refusé : {len(data)} octets reçus, au-dessus de la borne "
-            f"({max_upload_bytes})."
+            f"Upload rejected: {len(data)} bytes received, above bound " f"({max_upload_bytes})."
         )
     if _looks_like_zip(data):
         check_zip_safety(data)

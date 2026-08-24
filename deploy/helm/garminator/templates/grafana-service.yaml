@@ -7,7 +7,7 @@ metadata:
     {{- include "garminator.labels" . | nindent 4 }}
     app.kubernetes.io/component: grafana
 spec:
-  # ClusterIP uniquement : accès par `kubectl port-forward`, aucun Ingress.
+  # ClusterIP only: access via `kubectl port-forward`, no Ingress.
 {{- include "garminator.assertLocalOnlyService" (dict "key" "grafana.service.type" "type" .Values.grafana.service.type) }}
   type: {{ .Values.grafana.service.type }}
   selector:

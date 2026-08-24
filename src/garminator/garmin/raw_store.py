@@ -1,23 +1,23 @@
-"""Écriture dans ``raw.api_response`` et ``raw.ingest_run`` (migration ``002_raw.sql``).
+"""Write to ``raw.api_response`` and ``raw.ingest_run`` (migration ``002_raw.sql``).
 
-Principe ELT « brut d'abord » (research 05 §1) : ce module ne fait **aucune**
-transformation du payload — il le sérialise canoniquement (clés triées) pour le hash
-d'intégrité, et l'écrit tel quel. Toute la logique de parsing/typage vit dans les lots
-suivants (L3+), qui rejouent ``raw`` sans jamais re-solliciter Garmin.
+ELT principle "raw first" (research 05 §1): this module performs **no** transformation
+of the payload — it serializes it canonically (sorted keys) for integrity hash, and
+writes it as-is. All parsing/typing logic lives in downstream batches (L3+), which
+replay ``raw`` without ever re-requesting Garmin.
 
-Frontière DB choisie pour ce lot : les fonctions ci-dessous acceptent une connexion
-typée par le protocole structurel :class:`DBConnection` (une simple vue « curseur +
-commit » sur l'API psycopg 3), pas ``psycopg.Connection`` concrètement. Deux raisons :
+DB boundary chosen for this batch: the functions below accept a connection typed by the
+structural protocol :class:`DBConnection` (a simple "cursor + commit" view on the
+psycopg 3 API), not ``psycopg.Connection`` directly. Two reasons:
 
-1. :mod:`garminator.db` (lot L1) n'expose aucun utilitaire de requête générique — seulement
-   le runner de migrations — donc il n'y a rien à réutiliser depuis là.
-2. Typer contre un protocole structurel minimal permet aux tests d'injecter une fausse
-   connexion en mémoire (aucun PostgreSQL requis) tout en restant vérifié par mypy,
-   puisque ``psycopg.Connection`` satisfait ce protocole structurellement.
+1. :mod:`garminator.db` (batch L1) exposes no generic query utilities — only the
+   migrations runner — so nothing to reuse from there.
+2. Typing against a minimal structural protocol lets tests inject a fake in-memory
+   connection (no PostgreSQL required) while still verified by mypy, since
+   ``psycopg.Connection`` satisfies this protocol structurally.
 
-Ce module n'ouvre lui-même aucune connexion : c'est à l'appelant (le point d'entrée du
-service, hors périmètre de ce lot) de construire la connexion réelle via
-``psycopg.connect(settings.postgres_dsn.get_secret_value())`` et de la lui passer.
+This module opens no connection itself: the caller (the service entry point, out of scope
+for this batch) must construct the real connection via
+``psycopg.connect(settings.postgres_dsn.get_secret_value())`` and pass it here.
 """
 
 from __future__ import annotations
@@ -40,23 +40,23 @@ class _Cursor(Protocol):
 
 
 class DBConnection(Protocol):
-    """Vue structurelle minimale sur une connexion psycopg 3, pour l'injection en test."""
+    """Minimal structural view of a psycopg 3 connection for test injection."""
 
     def cursor(self) -> _Cursor: ...
     def commit(self) -> None: ...
 
 
 def canonical_json_dumps(payload: object) -> str:
-    """Sérialisation canonique : clés triées, séparateurs fixes — base du hash d'intégrité."""
+    """Canonical serialization: sorted keys, fixed separators — basis of integrity hash."""
     return json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
     )
 
 
 def payload_sha256(payload: object) -> bytes:
-    """sha256 (32 octets bruts) du payload sérialisé canoniquement.
+    """sha256 (32 raw bytes) of canonically serialized payload.
 
-    Correspond à ``raw.api_response.payload_sha256`` (``CHECK length = 32``).
+    Matches ``raw.api_response.payload_sha256`` (``CHECK length = 32``).
     """
     return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).digest()
 
@@ -71,12 +71,12 @@ def insert_api_response(
     scope_key: str | None = None,
     ingest_run_id: int | None = None,
 ) -> int:
-    """Insère une ligne dans ``raw.api_response`` et retourne son ``id``.
+    """Insert a row into ``raw.api_response`` and return its ``id``.
 
-    ``http_status`` vaut 200 par défaut : ``garminconnect`` 0.3.2 n'expose pas le code
-    HTTP réel d'un appel réussi (il désérialise directement le JSON), donc ce module ne
-    peut affirmer que le succès logique de l'appel — décision assumée, documentée dans
-    le rapport de lot plutôt que masquée derrière une valeur inventée sans commentaire.
+    ``http_status`` defaults to 200: ``garminconnect`` 0.3.2 does not expose the real
+    HTTP code for a successful call (it deserializes JSON directly), so this module can
+    only assert the logical success of the call — a deliberate choice, documented in
+    the batch report rather than hidden behind a made-up value without comment.
     """
     sha = payload_sha256(payload)
     with conn.cursor() as cur:
@@ -101,41 +101,41 @@ def insert_api_response(
         row = cur.fetchone()
     conn.commit()
     if row is None:
-        raise RuntimeError("INSERT raw.api_response n'a retourné aucune ligne (RETURNING id).")
+        raise RuntimeError("INSERT raw.api_response returned no row (RETURNING id).")
     return int(row[0])
 
 
 class FitFileShaConflictError(RuntimeError):
-    """``sha256`` déjà associé en base à une activité DIFFÉRENTE de celle demandée.
+    """``sha256`` already associated in DB with a DIFFERENT activity than requested.
 
-    « Différente » compare aussi la provenance : ``None`` (envoi manuel, migration
-    ``012_raw_fit_file_manual_upload.sql``) n'est jamais confondu avec un
-    ``garmin_activity_id`` réel. Un même contenu binaire réutilisé entre un envoi manuel
-    et une activité Garmin authentique — ou entre deux activités Garmin distinctes — est
-    exactement le genre de collision que cette exception rend visible plutôt que de
-    laisser une relecture silencieuse réattribuer la ligne à la mauvaise provenance.
+    "Different" also compares origin: ``None`` (manual upload, migration
+    ``012_raw_fit_file_manual_upload.sql``) is never confused with a real
+    ``garmin_activity_id``. Identical binary content reused between a manual upload and
+    an authentic Garmin activity — or between two distinct Garmin activities — is
+    exactly the kind of collision this exception makes visible rather than silently
+    attributing the row to the wrong origin.
 
-    Scénario réel identifié en revue (lot L12, cet athlète est triathlète) : une séance
-    brick/multisport produit une activité parente et des activités enfants (course, vélo,
-    natation), chacune avec son propre ``garmin_activity_id`` — et le téléchargement
-    « original » de plusieurs de ces ids peut servir EXACTEMENT le même fichier de
-    session (mêmes octets, donc même sha256). Autre cas plausible : un placeholder
-    d'erreur identique servi par Garmin pour deux activités indisponibles.
+    Real scenario identified in review (batch L12, this athlete is triathlon): a
+    brick/multisport session produces a parent activity and child activities (run, bike,
+    swim), each with its own ``garmin_activity_id`` — and the 'original' download of
+    several of these ids can serve EXACTLY the same session file (identical bytes, same
+    sha256). Another plausible case: an identical error placeholder served by Garmin for
+    two unavailable activities.
 
-    Sans cette détection, :func:`insert_fit_file` retournerait silencieusement le
-    ``fit_file_id`` de l'AUTRE activité (celle qui a gagné la course à l'insertion) :
-    aucune ligne ne référencerait alors l'activité demandée ici, son fichier fraîchement
-    archivé deviendrait un orphelin permanent, et un appelant qui construirait dessus un
-    ``fit_file_id`` de bonne foi pointerait vers une mauvaise activité (un L3 qui y
-    poserait ``parsed_at`` marquerait la ligne d'une autre activité que celle réellement
-    parsée). Cette exception rend le cas visible plutôt que de mentir sur le statut.
+    Without this detection, :func:`insert_fit_file` would silently return the
+    ``fit_file_id`` of the OTHER activity (the one that won the insertion race): no row
+    would reference the activity requested here, its freshly-archived file would become
+    a permanent orphan, and a caller building on it in good faith would point a
+    ``fit_file_id`` at the wrong activity (an L3 setting ``parsed_at`` would mark a row
+    for an activity other than the one actually parsed). This exception makes the case
+    visible rather than lying about status.
 
-    Limite assumée, documentée plutôt que masquée : la vraie correction de fond serait de
-    permettre plusieurs lignes ``raw.fit_file`` pour un même ``sha256`` (une par activité
-    qui le référence), ce qui suppose de retirer ``fit_file_sha_uq`` — une modification
-    du DDL figé (``migrations/002_raw.sql``), hors du périmètre de ce lot. Le minimum
-    exigé ici est de ne jamais prétendre qu'une insertion a réussi quand elle a en fait
-    été refusée pour le mauvais motif.
+    Accepted limit, documented rather than hidden: the real fix would be to allow
+    multiple ``raw.fit_file`` rows for one ``sha256`` (one per referencing activity),
+    which requires dropping ``fit_file_sha_uq`` — a change to frozen DDL
+    (``migrations/002_raw.sql``), out of scope for this batch. The minimum required
+    here is never claiming insertion succeeded when it was actually refused for the
+    wrong reason.
     """
 
 
@@ -147,37 +147,35 @@ def insert_fit_file(
     sha256: bytes,
     size_bytes: int,
 ) -> int:
-    """Insère une ligne dans ``raw.fit_file`` et retourne son ``fit_file_id``.
+    """Insert a row into ``raw.fit_file`` and return its ``fit_file_id``.
 
-    Appelée par :mod:`garminator.scheduler.activity_files` (lot L12) **après**, jamais
-    avant, que le fichier ait été écrit et vérifié sur le PVC par
-    :func:`garminator.fit.archive.archive_download` — cette fonction ne touche jamais le
-    volume, elle se contente d'enregistrer un fait déjà établi sur disque. Également
-    appelée par :func:`garminator.api.ingest.ingest_upload` (lot L7) pour un envoi
-    manuel, avec ``garmin_activity_id=None`` — voir
-    ``migrations/012_raw_fit_file_manual_upload.sql``, qui a rendu la colonne nullable
-    précisément pour ce second appelant et a fixé la convention : ``None`` ici signifie
-    « envoi manuel », jamais autre chose.
+    Called by :mod:`garminator.scheduler.activity_files` (batch L12) **after**, never
+    before, the file has been written and verified on PVC by
+    :func:`garminator.fit.archive.archive_download` — this function never touches the
+    volume, only records an already-established disk fact. Also called by
+    :func:`garminator.api.ingest.ingest_upload` (batch L7) for manual upload with
+    ``garmin_activity_id=None`` — see ``migrations/012_raw_fit_file_manual_upload.sql``,
+    which made the column nullable precisely for this second caller and set the
+    convention: ``None`` here means "manual upload", never anything else.
 
-    Gestion du conflit sur ``sha256`` (``fit_file_sha_uq``, ``UNIQUE``) : un même
-    contenu binaire retéléchargé pour la MÊME activité (cas courant : ``run_scheduled_poll``
-    du lot L6 re-sonde systématiquement le jour courant, donc ce module sera rappelé
-    plusieurs fois sur les mêmes activités récentes) signifie « déjà archivée » — la
-    relecture après conflit retourne alors l'``id`` déjà existant, sans dupliquer ni
-    écraser de ligne. Le choix reste ``DO NOTHING`` plutôt que ``DO UPDATE`` : une ligne
-    ``raw.fit_file`` existante ne doit **jamais** être réécrite silencieusement (elle
-    porte potentiellement déjà ``parsed_at``/``parser_version`` posés par L3 — un
-    ``DO UPDATE`` naïf sur les seules colonnes de ce module les écraserait avec des
-    ``NULL``). Un envoi manuel identique renvoyé deux fois (même sha256, les deux avec
-    ``garmin_activity_id=None``) suit exactement le même chemin : ``None == None`` est
-    un accord de provenance, pas une divergence.
+    Conflict management on ``sha256`` (``fit_file_sha_uq``, ``UNIQUE``): identical
+    binary content re-downloaded for the SAME activity (common case: ``run_scheduled_poll``
+    in batch L6 re-probes the current day, so this module is called multiple times on
+    recent activities) means "already archived" — conflict re-read then returns the
+    existing ``id``, without duplicating or overwriting a row. Choice remains ``DO
+    NOTHING`` rather than ``DO UPDATE``: an existing ``raw.fit_file`` row must **never**
+    be silently rewritten (it may already carry ``parsed_at``/``parser_version`` set by
+    L3 — naive ``DO UPDATE`` on only this module's columns would overwrite them with
+    ``NULL``). Identical manual upload returned twice (same sha256, both with
+    ``garmin_activity_id=None``) follows the exact same path: ``None == None`` is an
+    origin agreement, not a divergence.
 
-    Un même contenu binaire attaché à une AUTRE activité (``garmin_activity_id``
-    différent, ``None`` compris) n'est plus traité comme le même cas — voir
-    :class:`FitFileShaConflictError` pour le scénario multisport qui a motivé cette
-    distinction, identifié en revue, désormais étendu à la distinction Garmin/envoi
-    manuel. La relecture après conflit compare désormais l'activité (ou son absence),
-    pas seulement le sha256.
+    Identical binary content attached to a DIFFERENT activity (different
+    ``garmin_activity_id``, including ``None``) is no longer treated as the same case —
+    see :class:`FitFileShaConflictError` for the multisport scenario that motivated this
+    distinction, identified in review, now extended to the Garmin/manual-upload
+    distinction. Conflict re-read now compares the activity (or its absence), not just
+    the sha256.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -193,10 +191,9 @@ def insert_fit_file(
         inserted_row = cur.fetchone()
         conflict_row: tuple[Any, ...] | None = None
         if inserted_row is None:
-            # Conflit sur sha256 : la ligne existe déjà -- mais potentiellement pour une
-            # AUTRE activité (brick/multisport, voir FitFileShaConflictError), donc la
-            # relecture doit porter aussi sur garmin_activity_id, pas seulement sur
-            # fit_file_id comme avant la revue.
+            # Conflict on sha256: row already exists -- but potentially for a DIFFERENT
+            # activity (brick/multisport, see FitFileShaConflictError), so re-read must
+            # also check garmin_activity_id, not just fit_file_id as before review.
             cur.execute(
                 "SELECT fit_file_id, garmin_activity_id FROM raw.fit_file WHERE sha256 = %s;",
                 (sha256,),
@@ -209,26 +206,26 @@ def insert_fit_file(
 
     if conflict_row is None:
         raise RuntimeError(
-            "INSERT raw.fit_file en conflit sur sha256 mais aucune ligne existante "
-            "retrouvée par relecture : incohérence inattendue entre les deux requêtes."
+            "INSERT raw.fit_file conflicted on sha256 but no existing row found on "
+            "re-read: unexpected inconsistency between the two queries."
         )
     existing_fit_file_id = int(conflict_row[0])
-    # existing_activity_id N'EST PAS forcé en int : la ligne relue peut elle-même être un
-    # envoi manuel (NULL en base). int(None) lèverait ici exactement le défaut que ce lot
-    # corrige côté transform.runner -- ne pas le reproduire ici.
+    # existing_activity_id is NOT forced to int: the re-read row may itself be a manual
+    # upload (NULL in DB). int(None) would raise exactly the flaw this batch corrects
+    # in transform.runner -- do not reproduce it here.
     existing_activity_id: int | None = None if conflict_row[1] is None else int(conflict_row[1])
     if existing_activity_id != garmin_activity_id:
         existing_label = (
-            "envoi manuel" if existing_activity_id is None else str(existing_activity_id)
+            "manual upload" if existing_activity_id is None else str(existing_activity_id)
         )
-        requested_label = "envoi manuel" if garmin_activity_id is None else str(garmin_activity_id)
+        requested_label = "manual upload" if garmin_activity_id is None else str(garmin_activity_id)
         raise FitFileShaConflictError(
-            f"sha256 déjà associé à l'activité {existing_label} "
-            f"(fit_file_id={existing_fit_file_id}) ; insertion refusée pour l'activité "
-            f"{requested_label} -- contenu identique servi pour deux provenances "
-            "différentes (séance multisport/brick partageant un même fichier de "
-            "session, placeholder d'erreur identique, ou envoi manuel d'un fichier déjà "
-            "archivé depuis Garmin). Aucune ligne n'a été créée pour cette demande."
+            f"sha256 already associated with activity {existing_label} "
+            f"(fit_file_id={existing_fit_file_id}); insertion refused for activity "
+            f"{requested_label} -- identical content served for two different origins "
+            "(multisport/brick session sharing one session file, identical error "
+            "placeholder, or manual upload of a file already archived from Garmin). "
+            "No row was created for this request."
         )
     return existing_fit_file_id
 
@@ -239,7 +236,7 @@ def start_ingest_run(
     mode: str,
     code_version: str | None = None,
 ) -> int:
-    """Ouvre une ligne ``raw.ingest_run`` (statut ``running``) et retourne son id."""
+    """Open a ``raw.ingest_run`` row (status ``running``) and return its id."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -252,9 +249,7 @@ def start_ingest_run(
         row = cur.fetchone()
     conn.commit()
     if row is None:
-        raise RuntimeError(
-            "INSERT raw.ingest_run n'a retourné aucune ligne (RETURNING ingest_run_id)."
-        )
+        raise RuntimeError("INSERT raw.ingest_run returned no row (RETURNING ingest_run_id).")
     return int(row[0])
 
 
@@ -265,13 +260,12 @@ def finish_ingest_run(
     status: str,
     notes: dict[str, Any] | None = None,
 ) -> None:
-    """Clôture une ligne ``raw.ingest_run`` : ``finished_at``, ``status``, ``notes``.
+    """Close a ``raw.ingest_run`` row: ``finished_at``, ``status``, ``notes``.
 
-    ``status`` doit être l'une des valeurs autorisées par la contrainte
-    ``ingest_run_status_ck`` (``ok``, ``partial``, ``failed``) — ``running`` n'est jamais
-    un statut de clôture valide, ce module ne le valide pas lui-même : c'est PostgreSQL
-    qui refuse via la contrainte ``CHECK``, à dessein (une seule source de vérité pour
-    les valeurs permises).
+    ``status`` must be one of the values allowed by the ``ingest_run_status_ck``
+    constraint (``ok``, ``partial``, ``failed``) — ``running`` is never a valid closing
+    status, this module does not validate it itself: PostgreSQL refuses it via the
+    ``CHECK`` constraint, by design (single source of truth for permitted values).
     """
     with conn.cursor() as cur:
         cur.execute(

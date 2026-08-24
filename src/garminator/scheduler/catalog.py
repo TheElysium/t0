@@ -1,21 +1,20 @@
-"""Catalogue déclaratif des endpoints ``garminconnect`` sondables par jour (lot L11).
+"""Declarative catalog of daily-pollable ``garminconnect`` endpoints (batch L11).
 
-``garminconnect.Garmin`` expose environ 130 méthodes, sans convention de signature
-commune -- certaines prennent un jour unique, d'autres une plage ``[start, end]``,
-d'autres encore renvoient une liste plutôt qu'un objet agrégé au jour. Plutôt qu'une
-cascade de ``if`` par nom d'endpoint (ce que ce module refuse délibérément), le
-catalogue ci-dessous suit le même principe que ``core.metric_method_priority``
-(:mod:`garminator.load.method_priority`) : une table de données, une petite poignée de
-formes d'appel déclarées, et une fonction pure qui les traduit en arguments positionnels.
+``garminconnect.Garmin`` exposes about 130 methods, with no common signature convention --
+some take a single day, others a range ``[start, end]``, still others return a list rather
+than a day-aggregated object. Rather than a cascade of ``if`` by endpoint name (which this
+module deliberately refuses), the catalog below follows the same principle as
+``core.metric_method_priority`` (:mod:`garminator.load.method_priority`) : a data table,
+a small handful of declared call shapes, and a pure function that translates them to
+positional arguments.
 
-Les trois formes retenues ont été vérifiées par introspection de la bibliothèque
-installée (``inspect.signature(garminconnect.Garmin.<méthode>)``), jamais supposées à la
-lecture de la documentation -- c'est exactement ce que revérifie
-``tests/scheduler/test_catalog.py`` à chaque exécution des tests, pour détecter toute
-dérive d'une mise à jour de ``garminconnect`` sans jamais appeler Garmin.
+The three shapes retained were verified by introspection of the installed library
+(``inspect.signature(garminconnect.Garmin.<method>)``), never supposed from documentation --
+this is exactly what ``tests/scheduler/test_catalog.py`` reverifies at each test run,
+to detect any drift from a ``garminconnect`` update without ever calling Garmin.
 
-Ce module n'importe pas ``garminconnect`` : il décrit un contrat, il ne le consomme pas.
-Seul le test d'introspection l'importe (avec ``skipif`` si absent).
+This module does not import ``garminconnect`` : it describes a contract, it does not consume it.
+Only the introspection test imports it (with ``skipif`` if absent).
 """
 
 from __future__ import annotations
@@ -25,45 +24,45 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # ``date`` n'apparaît que dans l'annotation de paramètre de `call_args` ci-dessous --
-    # jamais évaluée à l'exécution grâce à `from __future__ import annotations`. Import
-    # sous `TYPE_CHECKING`, sans `noqa` : contrairement à ce qu'affirmait l'ancien
-    # commentaire, aucune signature de ce module n'exécute réellement ce type.
+    # ``date`` appears only in parameter annotation of `call_args` below --
+    # never evaluated at runtime thanks to `from __future__ import annotations`. Import
+    # under `TYPE_CHECKING`, no `noqa` : unlike the old comment claimed, no signature
+    # in this module actually executes this type at runtime.
     from datetime import date
 
 
 class CallShape(Enum):
-    """Formes d'appel distinctes observées parmi les méthodes de ``garminconnect.Garmin``
-    pertinentes pour un sondage journalier. Voir :func:`call_args` pour leur traduction
-    en arguments positionnels, et ``tests/scheduler/test_catalog.py`` pour la preuve que
-    chaque forme correspond bien à la signature réelle."""
+    """Distinct call shapes observed among ``garminconnect.Garmin`` methods
+    relevant for daily polling. See :func:`call_args` for their translation
+    to positional arguments, and ``tests/scheduler/test_catalog.py`` for proof that
+    each shape matches the real signature."""
 
-    #: ``f(cdate: str) -> dict | list | None`` -- un seul jour, agrégé.
+    #: ``f(cdate: str) -> dict | list | None`` -- single day, aggregated.
     DAY = "day"
-    #: ``f(startdate: str, enddate: str | None = None) -> dict | list`` -- une plage ;
-    #: appelée ici avec ``startdate == enddate == window_date`` pour n'interroger qu'un
-    #: seul jour, cette API n'offrant pas de forme "un seul jour" dédiée.
+    #: ``f(startdate: str, enddate: str | None = None) -> dict | list`` -- a range ;
+    #: called here with ``startdate == enddate == window_date`` to query only a
+    #: single day, this API not offering a dedicated "single day" form.
     RANGE = "range"
-    #: Même forme d'appel que ``RANGE``, mais le résultat est une liste d'objets
-    #: indépendants (une activité chacun) plutôt qu'un objet agrégé au jour -- traité à
-    #: part parce que c'est la seule forme dont le "scope_key" se dérive du payload lui
-    #: même plutôt que d'être toujours ``None``. Voir
+    #: Same call shape as ``RANGE``, but result is a list of independent
+    #: objects (one activity each) rather than a day-aggregated object -- handled separately
+    #: because it's the only shape whose "scope_key" derives from the payload itself
+    #: rather than always being ``None``. See
     #: :class:`garminator.scheduler.fetcher.GarminWindowFetcher`.
     ACTIVITIES_BY_DATE = "activities_by_date"
 
 
 @dataclass(frozen=True, slots=True)
 class EndpointSpec:
-    """Une entrée du catalogue : le nom exact de la méthode ``garminconnect.Garmin``
-    (résolue dynamiquement par :meth:`garminator.garmin.client.GarminClient.fetch` via
-    ``getattr``) et sa forme d'appel déclarée."""
+    """A catalog entry: the exact name of the ``garminconnect.Garmin`` method
+    (resolved dynamically by :meth:`garminator.garmin.client.GarminClient.fetch` via
+    ``getattr``) and its declared call shape."""
 
     name: str
     call_shape: CallShape
 
 
-#: Endpoints agrégés au jour, forme ``f(cdate: str)`` -- vérifiés par introspection le
-#: 2026-08-23 contre la version de ``garminconnect`` installée dans ``.venv``.
+#: Day-aggregated endpoints, call shape ``f(cdate: str)`` -- verified by introspection on
+#: 2026-08-23 against ``garminconnect`` version installed in ``.venv``.
 _DAY_ENDPOINTS: tuple[str, ...] = (
     "get_sleep_data",
     "get_stats",
@@ -84,7 +83,7 @@ _DAY_ENDPOINTS: tuple[str, ...] = (
     "get_daily_weigh_ins",
 )
 
-#: Endpoints en plage, forme ``f(startdate: str, enddate: str | None = None)``.
+#: Range endpoints, call shape ``f(startdate: str, enddate: str | None = None)``.
 _RANGE_ENDPOINTS: tuple[str, ...] = (
     "get_body_battery",
     "get_body_composition",
@@ -92,30 +91,30 @@ _RANGE_ENDPOINTS: tuple[str, ...] = (
     "get_hill_score",
 )
 
-#: Catalogue complet -- une entrée par endpoint connu de ce lot.
+#: Full catalog -- one entry per endpoint known to this batch.
 CATALOG: tuple[EndpointSpec, ...] = (
     *(EndpointSpec(name, CallShape.DAY) for name in _DAY_ENDPOINTS),
     *(EndpointSpec(name, CallShape.RANGE) for name in _RANGE_ENDPOINTS),
     EndpointSpec("get_activities_by_date", CallShape.ACTIVITIES_BY_DATE),
 )
 
-#: Index par nom, construit une seule fois -- ``CATALOG`` reste la source de vérité
-#: ordonnée (utile pour un affichage stable), cet index sert aux lectures ponctuelles.
+#: Index by name, built once -- ``CATALOG`` remains the ordered source of truth
+#: (useful for stable display), this index serves for point reads.
 _CATALOG_BY_NAME: dict[str, EndpointSpec] = {spec.name: spec for spec in CATALOG}
 
-#: Sous-ensemble par défaut pertinent pour un triathlète (cf. profil-athlete dans la
-#: mémoire du projet) : sommeil, HRV, FC repos, stress, Body Battery, readiness,
-#: training status, composition corporelle, activités. Volontairement plus restreint
-#: que ``CATALOG`` entier -- chaque endpoint ajouté ici multiplie le nombre d'appels
-#: réseau par run (cf. ``DEFAULT_MAX_WINDOWS_PER_ENDPOINT`` dans ``service.py``), un
-#: opérateur qui veut le catalogue complet le passe explicitement via ``--endpoint``.
+#: Default subset relevant for a triathlete (see profil-athlete in project memory):
+#: sleep, HRV, resting HR, stress, Body Battery, readiness, training status, body
+#: composition, activities. Intentionally more restricted than entire ``CATALOG`` --
+#: each endpoint added here multiplies network calls per run (see
+#: ``DEFAULT_MAX_WINDOWS_PER_ENDPOINT`` in ``service.py``) ; an operator wanting the
+#: full catalog passes it explicitly via ``--endpoint``.
 #:
-#: Poids/composition corporelle -- arbitrage TRANCHÉ, ne pas rouvrir : ``get_body_composition``
-#: est retenu, ``get_daily_weigh_ins`` non. Lequel des deux porte réellement de la donnée
-#: dépend de la façon dont le poids entre dans Garmin (balance Index contre saisie manuelle) ;
-#: l'athlète a explicitement indiqué que la question était sans enjeu pour lui. On garde donc
-#: le choix conservateur : un appel quotidien éventuellement vide coûte moins qu'un trou dans
-#: l'historique, et le second endpoint reste accessible via ``--endpoint`` sans modifier ce code.
+#: Body weight/composition -- trade-off DECIDED, do not reopen: ``get_body_composition``
+#: is kept, ``get_daily_weigh_ins`` is not. Which actually carries data depends on how
+#: weight enters Garmin (Index scale vs manual entry) ; the athlete explicitly indicated
+#: that distinction was immaterial. We keep the conservative choice: an empty daily call
+#: costs less than a history gap, and the second endpoint stays accessible via
+#: ``--endpoint`` without code changes.
 DEFAULT_ENDPOINTS: tuple[str, ...] = (
     "get_sleep_data",
     "get_hrv_data",
@@ -131,34 +130,34 @@ DEFAULT_ENDPOINTS: tuple[str, ...] = (
 
 
 def is_known_endpoint(name: str) -> bool:
-    """``True`` si ``name`` est déclaré dans :data:`CATALOG`."""
+    """``True`` if ``name`` is declared in :data:`CATALOG`."""
     return name in _CATALOG_BY_NAME
 
 
 def endpoint_spec(name: str) -> EndpointSpec:
-    """L'entrée du catalogue pour ``name``.
+    """The catalog entry for ``name``.
 
     Raises:
-        ValueError: si ``name`` n'est pas un endpoint connu -- erreur de configuration
-            (faute de frappe côté opérateur, ou endpoint jamais ajouté au catalogue),
-            pas un cas silencieux à absorber.
+        ValueError: if ``name`` is not a known endpoint -- configuration error
+            (typo by operator, or endpoint never added to catalog),
+            not a silent case to absorb.
     """
     try:
         return _CATALOG_BY_NAME[name]
     except KeyError:
         raise ValueError(
-            f"endpoint inconnu du catalogue : {name!r} -- endpoints déclarés : "
+            f"unknown endpoint in catalog: {name!r} -- declared endpoints: "
             f"{sorted(_CATALOG_BY_NAME)}"
         ) from None
 
 
 def call_args(spec: EndpointSpec, window_date: date) -> tuple[str, ...]:
-    """Traduit ``window_date`` en arguments positionnels pour l'endpoint de ``spec``.
+    """Translates ``window_date`` to positional arguments for the endpoint in ``spec``.
 
-    - :attr:`CallShape.DAY` : un seul argument ``cdate``.
-    - :attr:`CallShape.RANGE` et :attr:`CallShape.ACTIVITIES_BY_DATE` : ``startdate`` et
-      ``enddate`` identiques -- ces deux formes n'offrent aucune variante "un seul jour"
-      dédiée, la plage réduite à une seule date obtient le même effet.
+    - :attr:`CallShape.DAY` : single argument ``cdate``.
+    - :attr:`CallShape.RANGE` and :attr:`CallShape.ACTIVITIES_BY_DATE` : identical
+      ``startdate`` and ``enddate`` -- these two shapes offer no dedicated "single day"
+      variant, the range reduced to a single date achieves the same effect.
     """
     iso = window_date.isoformat()
     if spec.call_shape is CallShape.DAY:

@@ -1,6 +1,6 @@
-"""Tests de :mod:`garminator.transform.summary` -- fixtures 100% synthétiques, aucune
-connexion PostgreSQL réelle (:class:`_FakeThresholdDB` en mémoire pour ``load_thresholds``,
-cf. mandat du lot)."""
+"""Tests for :mod:`garminator.transform.summary` -- 100% synthetic fixtures, no real
+PostgreSQL connection (:class:`_FakeThresholdDB` in-memory for ``load_thresholds``, cf.
+layer mandate)."""
 
 from __future__ import annotations
 
@@ -23,11 +23,11 @@ ACTIVITY_ID = 123456789
 
 
 def base_summary(**overrides: Any) -> dict[str, Any]:
-    """Résumé Garmin minimal mais complet, dans le style d'un ``get_activities_by_date``
-    -- toutes les valeurs sont inventées et ne correspondent à aucune séance réelle."""
+    """Minimal but complete Garmin summary in the style of a ``get_activities_by_date``
+    -- all values are invented and match no real session."""
     summary: dict[str, Any] = {
         "activityId": ACTIVITY_ID,
-        "activityName": "Sortie du soir",
+        "activityName": "Evening ride",
         "activityType": {"typeKey": "running"},
         "startTimeLocal": "2026-06-01 19:00:00",
         "startTimeGMT": "2026-06-01 17:00:00",
@@ -44,17 +44,17 @@ def base_summary(**overrides: Any) -> dict[str, Any]:
     return summary
 
 
-class TestCorrespondanceSport:
+class TestSportMapping:
     @pytest.mark.parametrize("sport_code", sorted(set(SPORT_CODE_BY_TYPE_KEY.values())))
-    def test_les_12_sport_code_sont_tous_atteignables(self, sport_code: str) -> None:
-        # Contre-épreuve de la couverture attendue par la consigne : chaque sport_code
-        # existant en base doit être joignable par au moins un typeKey Garmin réel.
+    def test_all_12_sport_codes_are_reachable(self, sport_code: str) -> None:
+        # Counter-test of expected coverage per spec: each sport_code existing in the
+        # database must be reachable by at least one real Garmin typeKey.
         assert sport_code in DISCIPLINE_BY_SPORT_CODE
 
-    def test_exactement_douze_sport_code_dans_discipline_by_sport_code(self) -> None:
+    def test_exactly_twelve_sport_codes_in_discipline_by_sport_code(self) -> None:
         assert len(DISCIPLINE_BY_SPORT_CODE) == 12
 
-    def test_toutes_les_disciplines_sont_valides(self) -> None:
+    def test_all_disciplines_are_valid(self) -> None:
         assert set(DISCIPLINE_BY_SPORT_CODE.values()) <= {"bike", "run", "swim", "other"}
 
     @pytest.mark.parametrize(
@@ -80,7 +80,7 @@ class TestCorrespondanceSport:
             ("strength_training", "strength", "other"),
         ],
     )
-    def test_mapping_type_key_vers_sport_code_et_discipline(
+    def test_type_key_to_sport_code_and_discipline_mapping(
         self, type_key: str, sport_code: str, discipline: str
     ) -> None:
         context = build_activity_context(
@@ -89,7 +89,7 @@ class TestCorrespondanceSport:
         assert context.sport_code == sport_code
         assert context.discipline == discipline
 
-    def test_type_key_inconnu_leve_sport_inconnu_error_avec_le_type_key_et_lactivity_id(
+    def test_unknown_type_key_raises_sport_error_with_type_key_and_activity_id(
         self,
     ) -> None:
         summary = base_summary(activityType={"typeKey": "paddleboarding_v2_wat"})
@@ -100,103 +100,103 @@ class TestCorrespondanceSport:
         assert exc_info.value.type_key == "paddleboarding_v2_wat"
         assert exc_info.value.activity_id == ACTIVITY_ID
 
-    def test_type_key_inconnu_ne_retombe_ni_sur_running_ni_sur_other(self) -> None:
-        # Garde-fou explicite contre le repli silencieux que la consigne interdit.
+    def test_unknown_type_key_does_not_fall_back_to_running_or_other(self) -> None:
+        # Explicit safeguard against silent fallback that the spec forbids.
         with pytest.raises(SportInconnuError):
             build_activity_context(base_summary(activityType={"typeKey": "quidditch"}))
 
 
 class TestMultisport:
-    def test_multi_sport_est_marque_is_parent(self) -> None:
+    def test_multi_sport_is_marked_is_parent(self) -> None:
         context = build_activity_context(
             base_summary(activityType={"typeKey": "multi_sport"}, parentId=None)
         )
         assert context.is_parent is True
 
-    def test_activite_non_multisport_nest_pas_is_parent(self) -> None:
+    def test_non_multisport_activity_is_not_is_parent(self) -> None:
         context = build_activity_context(base_summary())
         assert context.is_parent is False
 
-    def test_parent_id_present_devient_parent_activity_id(self) -> None:
+    def test_parent_id_present_becomes_parent_activity_id(self) -> None:
         context = build_activity_context(base_summary(parentId=999))
         assert context.parent_activity_id == 999
 
-    def test_parent_activity_id_utilise_si_parent_id_absent(self) -> None:
+    def test_parent_activity_id_used_if_parent_id_missing(self) -> None:
         summary = base_summary()
         del summary["parentId"]
         summary["parentActivityId"] = 888
         context = build_activity_context(summary)
         assert context.parent_activity_id == 888
 
-    def test_aucun_parent_reste_none(self) -> None:
+    def test_no_parent_stays_none(self) -> None:
         context = build_activity_context(base_summary(parentId=None))
         assert context.parent_activity_id is None
 
 
 class TestTzOffset:
-    def test_offset_positif_deux_heures(self) -> None:
+    def test_positive_offset_two_hours(self) -> None:
         context = build_activity_context(
             base_summary(startTimeLocal="2026-06-01 19:00:00", startTimeGMT="2026-06-01 17:00:00")
         )
         assert context.tz_offset_s == 7200
         assert context.start_time_local == datetime(2026, 6, 1, 19, 0, 0)
 
-    def test_offset_negatif(self) -> None:
-        # Un fuseau à l'ouest de GMT (ex. UTC-5) : l'heure locale est AVANT le GMT.
+    def test_negative_offset(self) -> None:
+        # Timezone west of GMT (e.g. UTC-5): local time is BEFORE GMT.
         context = build_activity_context(
             base_summary(startTimeLocal="2026-06-01 12:00:00", startTimeGMT="2026-06-01 17:00:00")
         )
         assert context.tz_offset_s == -18000
 
-    def test_offset_heure_ete_une_heure_trente(self) -> None:
-        # Cas UTC+1:30 (ex. certains fuseaux non entiers) : vérifie qu'on ne suppose
-        # jamais un offset multiple d'une heure ronde.
+    def test_offset_summertime_one_hour_thirty(self) -> None:
+        # Case UTC+1:30 (e.g. some non-round timezones): verifies we never assume an
+        # offset multiple of a round hour.
         context = build_activity_context(
             base_summary(startTimeLocal="2026-06-01 18:30:00", startTimeGMT="2026-06-01 17:00:00")
         )
         assert context.tz_offset_s == 5400
 
-    def test_start_time_local_absent_leve_value_error(self) -> None:
+    def test_start_time_local_missing_raises_value_error(self) -> None:
         summary = base_summary()
         del summary["startTimeLocal"]
         with pytest.raises(ValueError, match="startTimeLocal"):
             build_activity_context(summary)
 
-    def test_start_time_gmt_absent_leve_value_error(self) -> None:
+    def test_start_time_gmt_missing_raises_value_error(self) -> None:
         summary = base_summary()
         del summary["startTimeGMT"]
         with pytest.raises(ValueError, match="startTimeGMT"):
             build_activity_context(summary)
 
-    def test_start_time_local_mal_forme_leve_value_error(self) -> None:
+    def test_start_time_local_malformed_raises_value_error(self) -> None:
         summary = base_summary(startTimeLocal="01/06/2026 19h00")
         with pytest.raises(ValueError, match="startTimeLocal"):
             build_activity_context(summary)
 
 
-class TestDuree:
-    def test_duree_nulle_leve_value_error(self) -> None:
+class TestDuration:
+    def test_zero_duration_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="duration"):
             build_activity_context(base_summary(duration=0.0))
 
-    def test_duree_negative_leve_value_error(self) -> None:
+    def test_negative_duration_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="duration"):
             build_activity_context(base_summary(duration=-10.0))
 
-    def test_duree_absente_leve_value_error(self) -> None:
+    def test_missing_duration_raises_value_error(self) -> None:
         summary = base_summary()
         del summary["duration"]
         with pytest.raises(ValueError, match="duration"):
             build_activity_context(summary)
 
-    def test_duree_devient_un_int_positif(self) -> None:
+    def test_duration_becomes_positive_int(self) -> None:
         context = build_activity_context(base_summary(duration=3600.7))
         assert context.duration_s == 3601
         assert isinstance(context.duration_s, int)
 
 
-class TestChampsOptionnelsAbsents:
-    def test_champs_optionnels_absents_restent_none_jamais_zero(self) -> None:
+class TestOptionalFieldsMissing:
+    def test_missing_optional_fields_stay_none_never_zero(self) -> None:
         summary = base_summary()
         for key in (
             "elapsedDuration",
@@ -219,7 +219,7 @@ class TestChampsOptionnelsAbsents:
         assert context.calories is None
         assert context.name is None
 
-    def test_champs_optionnels_presents_sont_bien_portes(self) -> None:
+    def test_present_optional_fields_are_carried(self) -> None:
         context = build_activity_context(base_summary())
         assert context.elapsed_s == 3650
         assert context.moving_s == 3580
@@ -227,44 +227,44 @@ class TestChampsOptionnelsAbsents:
         assert context.ascent_m == 120.0
         assert context.descent_m == 115.0
         assert context.calories == 650
-        assert context.name == "Sortie du soir"
+        assert context.name == "Evening ride"
 
 
 class TestSha256:
-    def test_summary_sha256_correspond_au_hash_canonique_du_payload(self) -> None:
+    def test_summary_sha256_matches_canonical_payload_hash(self) -> None:
         summary = base_summary()
         context = build_activity_context(summary)
         assert context.summary_sha256 == payload_sha256(summary)
 
-    def test_deux_resumes_differents_ont_des_hash_differents(self) -> None:
+    def test_two_different_summaries_have_different_hashes(self) -> None:
         c1 = build_activity_context(base_summary(activityName="A"))
         c2 = build_activity_context(base_summary(activityName="B"))
         assert c1.summary_sha256 != c2.summary_sha256
 
 
-class TestActivityIdEtTypeKey:
-    def test_activity_id_absent_leve_value_error(self) -> None:
+class TestActivityIdAndTypeKey:
+    def test_missing_activity_id_raises_value_error(self) -> None:
         summary = base_summary()
         del summary["activityId"]
         with pytest.raises(ValueError, match="activityId"):
             build_activity_context(summary)
 
-    def test_type_key_absent_leve_value_error(self) -> None:
+    def test_missing_type_key_raises_value_error(self) -> None:
         summary = base_summary(activityType={})
         with pytest.raises(ValueError, match="typeKey"):
             build_activity_context(summary)
 
-    def test_garmin_type_key_est_conserve_sur_le_contexte(self) -> None:
+    def test_garmin_type_key_is_preserved_on_context(self) -> None:
         context = build_activity_context(base_summary())
         assert context.garmin_type_key == "running"
 
 
-# -- load_thresholds : fausse connexion en mémoire, aucun PostgreSQL réel -----------------
+# -- load_thresholds: fake in-memory connection, no real PostgreSQL -----------------
 
 
 class _FakeCursor:
-    """Simule juste assez de l'API psycopg 3 pour ``load_thresholds`` : une requête
-    fixe, des résultats déjà « aplatis » comme le ferait ``lower()``/``upper()`` en SQL."""
+    """Simulates just enough of the psycopg 3 API for ``load_thresholds``: a fixed query,
+    results already "flattened" as ``lower()``/``upper()`` would in SQL."""
 
     def __init__(self, rows: list[tuple[Any, ...]]) -> None:
         self._rows = rows
@@ -283,8 +283,8 @@ class _FakeCursor:
 
 
 class _FakeThresholdDB:
-    """Connexion en mémoire : les lignes sont déjà au format que renverrait
-    ``SELECT threshold_id, discipline, lower(validity), upper(validity), ...``."""
+    """In-memory connection: rows are already in the format that
+    ``SELECT threshold_id, discipline, lower(validity), upper(validity), ...`` would return."""
 
     def __init__(self, rows: list[tuple[Any, ...]]) -> None:
         self._rows = rows
@@ -330,11 +330,11 @@ def _threshold_row(
 
 
 class TestLoadThresholds:
-    def test_liste_vide_sans_ligne(self) -> None:
+    def test_empty_list_without_rows(self) -> None:
         db = _FakeThresholdDB([])
         assert load_thresholds(db, athlete_id=1) == ()
 
-    def test_construit_des_threshold_a_partir_des_bornes_lower_upper(self) -> None:
+    def test_builds_thresholds_from_lower_upper_bounds(self) -> None:
         rows = [
             _threshold_row(1, "bike", date(2026, 1, 1), None, ftp_watts=220.0),
             _threshold_row(
@@ -354,7 +354,7 @@ class TestLoadThresholds:
         assert bike.threshold_id == 1
         assert bike.discipline == "bike"
         assert bike.valid_from == date(2026, 1, 1)
-        assert bike.valid_to is None  # borne haute NULL = seuil courant.
+        assert bike.valid_to is None  # upper bound NULL = current threshold.
         assert bike.ftp_watts == 220.0
         run = thresholds[1]
         assert run.valid_to == date(2026, 6, 1)
@@ -362,7 +362,7 @@ class TestLoadThresholds:
 
 
 class TestSelectThresholds:
-    def test_date_couverte_renvoie_les_deux_seuils(self) -> None:
+    def test_covered_date_returns_both_thresholds(self) -> None:
         rows = [
             _threshold_row(1, "bike", date(2026, 1, 1), None, ftp_watts=220.0),
             _threshold_row(2, "all", date(2026, 1, 1), None, hr_max_bpm=190, hr_rest_bpm=55),
@@ -376,28 +376,28 @@ class TestSelectThresholds:
         assert all_threshold is not None
         assert all_threshold.hr_max_bpm == 190
 
-    def test_date_non_couverte_renvoie_none_sans_lever(self) -> None:
+    def test_uncovered_date_returns_none_without_raising(self) -> None:
         rows = [
             _threshold_row(1, "bike", date(2026, 1, 1), None, ftp_watts=220.0),
         ]
         thresholds = load_thresholds(_FakeThresholdDB(rows), athlete_id=1)
 
-        # Activité antérieure à toute période de validité connue : None, pas d'exception
-        # (règle métier explicite de garminator.load.thresholds.threshold_for_date).
+        # Activity before any known validity period: None, no exception
+        # (explicit business rule of garminator.load.thresholds.threshold_for_date).
         threshold, all_threshold = select_thresholds(thresholds, "bike", date(2025, 1, 1))
 
         assert threshold is None
         assert all_threshold is None
 
 
-def test_les_durees_flottantes_sont_arrondies_et_non_tronquees() -> None:
-    """Garantie de COHÉRENCE entre duration_s et elapsed_s/moving_s.
+def test_floating_point_durations_are_rounded_not_truncated() -> None:
+    """Guarantee of CONSISTENCY between duration_s and elapsed_s/moving_s.
 
-    Garmin renvoie des secondes flottantes. ``duration_s`` étant arrondi, tronquer
-    ``elapsedDuration`` produirait un temps écoulé inférieur au temps de séance -- un
-    état physiquement impossible, dû uniquement à deux conversions divergentes.
+    Garmin returns floating-point seconds. Since ``duration_s`` is rounded, truncating
+    ``elapsedDuration`` would produce elapsed time less than session time -- a
+    physically impossible state, caused only by two divergent conversions.
     """
-    contexte = build_activity_context(
+    context = build_activity_context(
         {
             "activityId": 4242,
             "activityType": {"typeKey": "running"},
@@ -408,7 +408,7 @@ def test_les_durees_flottantes_sont_arrondies_et_non_tronquees() -> None:
             "movingDuration": 3599.6,
         }
     )
-    assert contexte.duration_s == 3600
-    assert contexte.elapsed_s == 3600
-    assert contexte.moving_s == 3600
-    assert contexte.elapsed_s >= contexte.duration_s
+    assert context.duration_s == 3600
+    assert context.elapsed_s == 3600
+    assert context.moving_s == 3600
+    assert context.elapsed_s >= context.duration_s

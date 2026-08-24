@@ -1,6 +1,6 @@
--- Migration 002: schéma raw (append-only, source de vérité)
--- Source : research/05-schema-postgres.md §3, transcrit tel quel (DDL figé).
--- Lot L1 (garminator) -- ne pas modifier la DDL manuellement hors migration.
+-- Migration 002: raw schema (append-only, source of truth)
+-- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
+-- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
 
 CREATE TABLE raw.api_response (
     id              bigint       GENERATED ALWAYS AS IDENTITY,
@@ -17,15 +17,15 @@ CREATE TABLE raw.api_response (
 );
 
 COMMENT ON TABLE  raw.api_response IS
-  'Réponse brute d''un appel à l''API Garmin (client garminconnect 0.3.2). APPEND-ONLY : aucune ligne n''est jamais modifiée ni supprimée. Chaque re-fetch d''une même journée crée une nouvelle ligne, ce qui rend l''historique des republications de Garmin (recalcul du sommeil, wellness/epoch/request) observable et auditable. Volontairement SANS contrainte UNIQUE : une unicité incluant payload_sha256 mais pas fetched_at empêcherait la conversion en hypertable. La déduplication est déportée dans raw.payload_seen.';
+  'Raw response from a Garmin API call (garminconnect 0.3.2 client). APPEND-ONLY: no row is ever modified or deleted. Each re-fetch of the same day creates a new row, making Garmin''s republication history (sleep recalculation, wellness/epoch/request) observable and auditable. Deliberately WITHOUT UNIQUE constraint: a uniqueness constraint including payload_sha256 but not fetched_at would prevent conversion to hypertable. Deduplication is deferred to raw.payload_seen.';
 COMMENT ON COLUMN raw.api_response.endpoint IS
-  'Nom de la méthode garminconnect appelée, ex. get_sleep_data, get_activity, get_stress_data. Sert de discriminant de parsing dans core.';
+  'Name of the garminconnect method called, e.g. get_sleep_data, get_activity, get_stress_data. Serves as parsing discriminant in core.';
 COMMENT ON COLUMN raw.api_response.scope_date IS
-  'Date LOCALE de l''athlète à laquelle la réponse se rapporte (paramètre cdate des 36 méthodes journalières). NULL pour les endpoints non journaliers. Ce n''est pas une date UTC : les endpoints wellness Garmin sont nativement clés par calendarDate locale.';
+  'Athlete''s LOCAL date that the response relates to (cdate parameter of the 36 daily methods). NULL for non-daily endpoints. This is not a UTC date: Garmin wellness endpoints are natively keyed by local calendarDate.';
 COMMENT ON COLUMN raw.api_response.scope_key IS
-  'Discriminant secondaire pour les endpoints non journaliers, ex. l''activityId pour get_activity. NULL sinon.';
+  'Secondary discriminant for non-daily endpoints, e.g. activityId for get_activity. NULL otherwise.';
 COMMENT ON COLUMN raw.api_response.payload_sha256 IS
-  'sha256 du payload jsonb sérialisé de façon canonique (clés triées, séparateurs fixes). Base de la détection de changement rétroactif (cf. §6).';
+  'sha256 of the jsonb payload serialized canonically (sorted keys, fixed separators). Basis for retroactive change detection (see section 6).';
 
 CREATE INDEX api_response_endpoint_scope_idx
     ON raw.api_response (endpoint, scope_date DESC NULLS LAST, fetched_at DESC);
@@ -47,7 +47,7 @@ CREATE TABLE raw.payload_seen (
 );
 
 COMMENT ON TABLE raw.payload_seen IS
-  'Sentinelle de déduplication, volontairement séparée de raw.api_response. Répond à la question « ce contenu exact a-t-il déjà été vu pour ce (endpoint, jour) ? » sans imposer de contrainte UNIQUE à raw.api_response — contrainte qui, n''incluant pas la colonne temporelle, bloquerait la conversion en hypertable. Table minuscule (une ligne par contenu distinct), entièrement en cache. Un INSERT ... ON CONFLICT DO UPDATE incrémentant seen_count sert à la fois de test « déjà vu » et de compteur de republications.';
+  'Deduplication sentinel, deliberately separate from raw.api_response. Answers the question "has this exact content already been seen for this (endpoint, day)?" without imposing a UNIQUE constraint on raw.api_response -- a constraint that, not including the temporal column, would block hypertable conversion. Tiny table (one row per distinct content), entirely cached. An INSERT ... ON CONFLICT DO UPDATE incrementing seen_count serves both as an "already seen" check and as a republication counter.';
 
 
 CREATE TABLE raw.fit_file (
@@ -66,11 +66,11 @@ CREATE TABLE raw.fit_file (
 );
 
 COMMENT ON TABLE raw.fit_file IS
-  'Métadonnées des fichiers .FIT archivés sur le PVC. Le binaire N''EST PAS en base (pas de bytea) : ~1 090 fichiers de plusieurs Mo gonfleraient TOAST et chaque dump PostgreSQL sans rien apporter de requêtable. RÈGLE D''ATOMICITÉ IMPÉRATIVE : le fichier est écrit ET fsync sur le PVC AVANT l''INSERT de cette ligne, jamais l''inverse. Un fichier orphelin (sans ligne) est inoffensif et rattrapable par un scan ; une ligne orpheline (sans fichier) rend la reconstructibilité de core fausse. Corollaire de sauvegarde : le dump PostgreSQL et le snapshot du PVC doivent être pris au MÊME point dans le temps (cf. §6.5).';
+  'Metadata for .FIT files archived on the PVC. The binary is NOT in the database (no bytea): ~1,090 files of several MB would bloat TOAST and every PostgreSQL dump without contributing anything queryable. MANDATORY ATOMICITY RULE: the file is written AND fsync''d on the PVC BEFORE the INSERT of this row, never the reverse. An orphaned file (no row) is harmless and recoverable by scanning; an orphaned row (no file) makes core reconstructibility false. Backup corollary: the PostgreSQL dump and the PVC snapshot must be taken at the SAME point in time (see section 6.5).';
 COMMENT ON COLUMN raw.fit_file.sha256 IS
-  'sha256 du binaire .FIT. UNIQUE : un même contenu n''est archivé qu''une fois. C''est le pivot de la détection de re-téléchargement effectif (§6.2). Distinct du hash du résumé JSON (§6.3).';
+  'sha256 of the .FIT binary. UNIQUE: the same content is archived only once. It is the pivot for detecting actual re-download (section 6.2). Distinct from the JSON summary hash (section 6.3).';
 COMMENT ON COLUMN raw.fit_file.parser_version IS
-  'Version du parseur (garmin-fit-sdk 21.213.0 + version du code garminator) ayant produit les lignes core. Permet de rejouer sélectivement les fichiers parsés par une version buguée.';
+  'Version of the parser (garmin-fit-sdk 21.213.0 + garminator code version) that produced the core rows. Allows selectively replaying files parsed by a buggy version.';
 
 CREATE INDEX fit_file_activity_idx ON raw.fit_file (garmin_activity_id, downloaded_at DESC);
 CREATE INDEX fit_file_unparsed_idx ON raw.fit_file (downloaded_at) WHERE parsed_at IS NULL;
@@ -89,4 +89,4 @@ CREATE TABLE raw.ingest_run (
 );
 
 COMMENT ON TABLE raw.ingest_run IS
-  'Journal d''exécution de l''ingestion. Permet de répondre à « quelle exécution a produit cette ligne ? » et de rejouer/annuler un lot. Le mode reprocess correspond au FORCE_REPROCESS_ACTIVITIES du projet de référence (VÉRIFIÉ 01 §3).';
+  'Ingestion execution log. Allows answering "which execution produced this row?" and replaying/canceling a batch. The reprocess mode corresponds to FORCE_REPROCESS_ACTIVITIES of the reference project (VERIFIED 01 section 3).';

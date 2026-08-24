@@ -7,7 +7,7 @@ __pycache__/
 secrets/
 *.secret.yaml
 
-# Données personnelles Garmin — jamais committées
+# Personal Garmin data -- never committed
 /Activities.csv
 /metrics&wellness_1year/
 /data/
@@ -20,18 +20,18 @@ htmlcov/
 dist/
 build/
 
-# Garmin exporte en .FIT majuscule et les motifs git sont sensibles a la casse
+# Garmin exports .FIT uppercase and git patterns are case-sensitive
 *.FIT
 *.Fit
 !tests/fixtures/fit/*.FIT
 
-# Les exports TCX (import manuel) ne sont pas couverts par les motifs *.fit
+# TCX exports (manual import) are not covered by *.fit patterns
 *.tcx
 *.TCX
 !tests/fixtures/tcx/*.tcx
 
-# Amorçage de l'athlète : le GABARIT est versionné, jamais le fichier rempli.
-# Il contient poids, fréquences cardiaques et seuils physiologiques — même
-# raisonnement que pour les .FIT et leurs traces GPS.
+# Athlete seeding: the TEMPLATE is versioned, never the filled file.
+# It contains weight, heart rates and physiological thresholds -- same
+# reasoning as for .FIT files and their GPS traces.
 deploy/seed/*.sql
 !deploy/seed/*.sql.example

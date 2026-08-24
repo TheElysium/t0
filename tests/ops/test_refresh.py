@@ -1,10 +1,9 @@
-"""Tests purs de :mod:`garminator.ops.refresh` -- aucun PostgreSQL requis.
+"""Pure tests of :mod:`garminator.ops.refresh` -- no PostgreSQL required.
 
-Seule :func:`~garminator.ops.refresh.refresh_plan` est pure (elle ne prend en entrée
-qu'un ``Mapping[str, bool]`` fourni par l'appelant) ; ``mart_views_populated`` et
-``refresh_all_mart_views`` exigent une vraie connexion psycopg et ne sont donc pas
-testées ici -- voir ``tests/ops/test_refresh_integration.py`` (gated par
-``GARMINATOR_TEST_POSTGRES_DSN``)."""
+Only :func:`~garminator.ops.refresh.refresh_plan` is pure (takes only a
+``Mapping[str, bool]`` supplied by caller); ``mart_views_populated`` and
+``refresh_all_mart_views`` require a real psycopg connection and are not tested here --
+see ``tests/ops/test_refresh_integration.py`` (gated by ``GARMINATOR_TEST_POSTGRES_DSN``)."""
 
 from __future__ import annotations
 
@@ -13,7 +12,7 @@ import pytest
 from garminator.ops.refresh import MART_VIEWS, refresh_plan
 
 
-def test_toutes_les_vues_peuplees_donnent_un_plan_entierement_concurrently() -> None:
+def test_all_populated_views_give_entirely_concurrent_plan() -> None:
     populated = dict.fromkeys(MART_VIEWS, True)
 
     plan = refresh_plan(populated)
@@ -22,7 +21,7 @@ def test_toutes_les_vues_peuplees_donnent_un_plan_entierement_concurrently() -> 
     assert all(step.mode == "concurrently" for step in plan)
 
 
-def test_une_vue_jamais_peuplee_bascule_en_with_data_pour_elle_seule() -> None:
+def test_unpopulated_view_switches_to_with_data_only_for_itself() -> None:
     populated = dict.fromkeys(MART_VIEWS, True)
     populated["mart.daily_load"] = False
 
@@ -34,7 +33,7 @@ def test_une_vue_jamais_peuplee_bascule_en_with_data_pour_elle_seule() -> None:
     assert by_view["mart.pmc"].mode == "concurrently"
 
 
-def test_le_plan_respecte_lordre_de_dependance_daily_load_avant_pmc() -> None:
+def test_plan_respects_dependency_order_daily_load_before_pmc() -> None:
     populated = dict.fromkeys(MART_VIEWS, True)
 
     plan = refresh_plan(populated)
@@ -43,20 +42,20 @@ def test_le_plan_respecte_lordre_de_dependance_daily_load_avant_pmc() -> None:
     assert views_in_order.index("mart.daily_load") < views_in_order.index("mart.pmc")
 
 
-def test_une_vue_absente_du_mapping_de_peuplement_leve_key_error() -> None:
+def test_view_missing_from_population_mapping_raises_key_error() -> None:
     populated = {view: True for view in MART_VIEWS if view != "mart.pmc"}
 
     with pytest.raises(KeyError):
         refresh_plan(populated)
 
 
-def test_le_sql_dune_etape_concurrently_contient_le_mot_cle_concurrently() -> None:
+def test_sql_of_concurrent_step_contains_concurrently_keyword() -> None:
     plan = refresh_plan({"mart.pmc": True}, views=["mart.pmc"])
 
     assert plan[0].sql == "REFRESH MATERIALIZED VIEW CONCURRENTLY mart.pmc;"
 
 
-def test_le_sql_dune_etape_with_data_ne_contient_pas_concurrently() -> None:
+def test_sql_of_with_data_step_does_not_contain_concurrently() -> None:
     plan = refresh_plan({"mart.pmc": False}, views=["mart.pmc"])
 
     assert plan[0].sql == "REFRESH MATERIALIZED VIEW mart.pmc WITH DATA;"

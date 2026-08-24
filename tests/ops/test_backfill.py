@@ -1,7 +1,7 @@
-"""Tests de :mod:`garminator.ops.backfill` contre
-:class:`tests.scheduler.fakes.FakePollDB`, sans PostgreSQL ni réseau -- même doublure
-que ``tests/scheduler/test_service.py``, réutilisée telle quelle (convention du dépôt :
-cf. son import dans ``tests/scheduler/test_store.py``)."""
+"""Tests of :mod:`garminator.ops.backfill` against
+:class:`tests.scheduler.fakes.FakePollDB`, no PostgreSQL or network -- same test double
+as ``tests/scheduler/test_service.py``, reused as-is (repo convention: see its import
+in ``tests/scheduler/test_store.py``)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from garminator.scheduler.store import begin_window, complete_window, fail_windo
 from tests.scheduler.fakes import FakePollDB
 
 
-def test_une_base_vierge_a_toutes_les_fenetres_dues_et_jamais_tentees() -> None:
+def test_empty_db_has_all_windows_due_and_never_attempted() -> None:
     db = FakePollDB()
     db.clock = datetime(2026, 8, 21, 6, 0)
 
@@ -35,20 +35,18 @@ def test_une_base_vierge_a_toutes_les_fenetres_dues_et_jamais_tentees() -> None:
     assert endpoint_progress.is_caught_up is False
 
 
-def test_un_rattrapage_complet_ne_laisse_plus_aucune_fenetre_due() -> None:
-    """``due_windows`` resonde TOUJOURS la fenêtre du jour courant (day >= refresh_floor
-    est vrai pour ``day == today`` quel que soit ``refresh_lookback_days`` >= 0) : une
-    fenêtre 'done' pour aujourd'hui ne compte donc comme non due que si elle est
-    ``in_progress`` récente (sondage en cours), pas ``done`` -- c'est le seul état qui
-    représente un « rattrapage complet, rien à faire de plus MAINTENANT »."""
+def test_complete_backfill_leaves_no_windows_due() -> None:
+    """``due_windows`` always resounds the current day window (day >= refresh_floor is
+    true for ``day == today`` regardless of ``refresh_lookback_days`` >= 0): a 'done'
+    window for today counts as not due only if it is recent ``in_progress`` (polling
+    in progress), not ``done`` -- this is the only state representing "complete backfill,
+    nothing more to do NOW"."""
     db = FakePollDB()
     db.clock = datetime(2026, 8, 21, 6, 0)
     for day in (18, 19, 20):
         window_date = date(2026, 8, day)
         begin_window(db, endpoint="get_sleep_data", window_date=window_date, ingest_run_id=None)
         complete_window(db, endpoint="get_sleep_data", window_date=window_date)
-    # Le sondage du jour courant est en cours, tout juste démarré : ni en échec, ni
-    # périmé -- due_windows ne le propose donc pas une seconde fois.
     begin_window(db, endpoint="get_sleep_data", window_date=date(2026, 8, 21), ingest_run_id=None)
 
     progress = backfill_progress(
@@ -57,7 +55,6 @@ def test_un_rattrapage_complet_ne_laisse_plus_aucune_fenetre_due() -> None:
         history_start=date(2026, 8, 18),
         today=date(2026, 8, 21),
         now=db.clock,
-        # Aucune fenêtre glissante : les fenêtres 'done' du passé ne redeviennent pas dues.
         refresh_lookback_days=0,
     )
 
@@ -67,7 +64,7 @@ def test_un_rattrapage_complet_ne_laisse_plus_aucune_fenetre_due() -> None:
     assert progress.by_endpoint[0].oldest_due is None
 
 
-def test_une_fenetre_en_echec_est_comptee_a_la_fois_dans_due_et_dans_failed() -> None:
+def test_failed_window_counted_in_both_due_and_failed() -> None:
     db = FakePollDB()
     db.clock = datetime(2026, 8, 21, 6, 0)
     window_date = date(2026, 8, 18)
@@ -87,12 +84,11 @@ def test_une_fenetre_en_echec_est_comptee_a_la_fois_dans_due_et_dans_failed() ->
     assert endpoint_progress.never_attempted == 0
 
 
-def test_plusieurs_endpoints_sont_rapportes_independamment() -> None:
-    """L'avancement se calcule par endpoint : le rattrapage de l'un ne masque pas le
-    retard de l'autre. Le sondage de ``get_sleep_data`` est ``in_progress`` frais et non
-    ``done``, pour la raison documentée sur
-    :func:`test_un_rattrapage_complet_ne_laisse_plus_aucune_fenetre_due` -- une fenêtre
-    'done' pour le jour courant reste due, quel que soit ``refresh_lookback_days``."""
+def test_multiple_endpoints_reported_independently() -> None:
+    """Progress is calculated per endpoint: backfill of one does not hide lag of another.
+    Polling of ``get_sleep_data`` is fresh ``in_progress`` not ``done``, for the reason
+    documented in :func:`test_complete_backfill_leaves_no_windows_due` -- a 'done'
+    window for current day stays due regardless of ``refresh_lookback_days``."""
     db = FakePollDB()
     db.clock = datetime(2026, 8, 21, 6, 0)
     begin_window(db, endpoint="get_sleep_data", window_date=date(2026, 8, 18), ingest_run_id=None)

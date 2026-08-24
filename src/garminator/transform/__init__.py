@@ -1,26 +1,21 @@
-"""Chaînage ``décodé (L3) + seuils (L5) -> lignes core.*``, puis écriture en base.
+"""Chains ``decoded (L3) + thresholds (L5) -> core.* rows``, then writes to the database.
 
-Le paquet se lit en deux moitiés, et cette séparation est la seule chose à retenir
-avant d'y toucher :
+The package splits in two halves, and that split is the one thing to know before
+touching it:
 
-- **Le noyau de calcul est PUR.** ``activity`` et ``rows`` ne touchent ni la base ni le
-  réseau : ils consomment ce que ``garminator.fit.decode_fit`` /
-  ``garminator.tcx.decode_tcx`` renvoient (``ParsedActivitySource``, cf.
-  ``garminator.fit.model``) et ce que ``garminator.load`` sait calculer (TSS, TRIMP,
-  hrTSS, seuils), pour produire des dataclasses immuables. Aucun SQL, aucune connexion,
-  donc testables sans PostgreSQL — ce qui compte ici : il n'y a pas d'instance
-  disponible dans l'environnement de développement, et cette pureté est ce qui permet
-  de couvrir la totalité du calcul de charge malgré cela.
-- **La frontière SQL est isolée dans trois modules.** ``summary`` (lecture des seuils et
-  construction de l'``ActivityContext`` depuis le résumé Garmin), ``store`` (écriture
-  idempotente d'une activité et de ses séries), ``runner`` (consommation de la file
-  ``raw.fit_file``). Tous trois passent par un ``Protocol`` structurel
-  ``DBConnection`` — jamais par un type psycopg concret — de sorte qu'une doublure en
-  mémoire suffise à les tester pendant que mypy vérifie l'usage réel.
-
-Cette organisation remplace celle du lot d'origine, où l'écrivain SQL était annoncé
-comme « un lot ultérieur » : il est ici, mais la pureté du noyau n'a pas été sacrifiée
-pour autant.
+- **The computation core is PURE.** ``activity`` and ``rows`` touch neither the
+  database nor the network: they consume what ``garminator.fit.decode_fit`` /
+  ``garminator.tcx.decode_tcx`` return (``ParsedActivitySource``, see
+  ``garminator.fit.model``) and what ``garminator.load`` computes (TSS, TRIMP, hrTSS,
+  thresholds), producing immutable dataclasses. No SQL, no connection, hence testable
+  without PostgreSQL — which matters because no instance is available in the
+  development environment, and this purity is what allows the whole load computation
+  to be covered regardless.
+- **The SQL boundary is confined to three modules.** ``summary`` (reads thresholds and
+  builds the ``ActivityContext`` from the Garmin summary), ``store`` (idempotent write
+  of an activity and its series), ``runner`` (consumes the ``raw.fit_file`` queue). All
+  three go through a structural ``Protocol`` ``DBConnection`` — never a concrete psycopg
+  type — so an in-memory double is enough to test them while mypy checks the real usage.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
-"""Tests de :mod:`garminator.garmin.archive`.
+"""Tests for :mod:`garminator.garmin.archive`.
 
-Vérifie qu'aucun format n'est présumé d'après l'URL : le fichier interne peut être
-``.fit`` ou ``.tcx`` (addendum athlète §2), seul le nom réel présent dans le ZIP compte.
+Verifies no format presumed from URL: internal file can be `.fit` or `.tcx`
+(athlete addendum §2), only real name in ZIP matters.
 """
 
 from __future__ import annotations
@@ -37,14 +37,14 @@ def test_extracts_tcx_filename() -> None:
 def test_empty_archive_raises() -> None:
     archive = _zip_bytes({})
 
-    with pytest.raises(ArchiveError, match="vide"):
+    with pytest.raises(ArchiveError, match="Empty"):
         extract_original_filename(archive)
 
 
 def test_multi_file_archive_raises() -> None:
     archive = _zip_bytes({"a.fit": b"1", "b.fit": b"2"})
 
-    with pytest.raises(ArchiveError, match="plusieurs fichiers"):
+    with pytest.raises(ArchiveError, match="multiple"):
         extract_original_filename(archive)
 
 

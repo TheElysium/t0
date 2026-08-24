@@ -1,25 +1,23 @@
 {{- /*
-CronJob de reconciliation PVC <-> raw.fit_file.
+CronJob for PVC <-> raw.fit_file reconciliation.
 
-Materialise le "scan" que le commentaire de table de migrations/002_raw.sql
-promet depuis le debut ("Un fichier orphelin est inoffensif et rattrapable par
-un scan") et qui n'existait pas. Lecture seule des deux cotes : ce Job ne
-supprime aucun fichier et ne modifie aucune ligne. Le rapport nomme les
-anomalies, l'operateur decide -- supprimer un "orphelin" sur la foi d'un scan
-est irreversible.
+Materializes the "scan" that the migration table comment in migrations/002_raw.sql
+promises from the start ("An orphan file is harmless and recoverable by a scan")
+and that did not exist. Read-only on both sides: this Job deletes no files and
+modifies no rows. The report names anomalies, the operator decides -- deleting an
+"orphan" on the word of a scan is irreversible.
 
-Le PVC est monte en readOnly: true, ce qui n'est pas decoratif : c'est la
-garantie mecanique, au niveau du kubelet, que meme un bug de ce module ne peut
-pas toucher a l'archive. Meme subPath que le CronJob de sondage
-(scheduler-cronjob.yaml), sans quoi le scan lirait un repertoire vide et
-rapporterait TOUTES les lignes comme "fichier absent".
+The PVC is mounted readOnly: true, which is not decorative: it is the mechanical
+guarantee at the kubelet level that even a bug in this module cannot touch the
+archive. Same subPath as the polling CronJob (scheduler-cronjob.yaml), otherwise
+the scan would read an empty directory and report ALL rows as "file missing".
 
-Reutilise l'image d'ingestion (`.Values.ingest.image`) : `garminator.ops` fait
-partie du meme paquet Python, livre dans la meme image -- aucune image separee.
+Reuses the ingest image (`.Values.ingest.image`): `garminator.ops` is part of
+the same Python package, delivered in the same image -- no separate image.
 
-Code de sortie : 1 uniquement sur anomalie GRAVE (ligne sans fichier). Un
-fichier orphelin laisse le Job en succes, deliberement -- un CronJob qui echoue
-pour un fichier inutilise finit par ne plus etre lu du tout.
+Exit code: 1 only on GRAVE anomaly (row without file). An orphan file leaves
+the Job in success, deliberately -- a CronJob that fails over an unused file
+eventually stops being read altogether.
 */ -}}
 {{- if .Values.opsReconcile.enabled }}
 apiVersion: batch/v1
@@ -31,22 +29,21 @@ metadata:
     app.kubernetes.io/component: ops-reconcile
 spec:
   schedule: {{ .Values.opsReconcile.schedule | quote }}
-  # Tous les CronJobs du chart partagent ce fuseau : sans ce champ le controleur
-  # applique UTC, et l'ordre quotidien annonce dans values.yaml ne serait plus
-  # celui reellement execute -- avec un decalage qui change deux fois par an.
+  # All chart CronJobs share this timezone: without this field the controller
+  # applies UTC, and the daily order announced in values.yaml would no longer
+  # be what is actually executed -- with a shift that changes twice a year.
   timeZone: {{ .Values.ingest.config.timezone | quote }}
-  # Un scan qui deborde sur le suivant n'apporterait rien : le second lirait le
-  # meme etat. Forbid evite l'empilement, et surtout evite deux parcours
-  # concurrents du PVC (le mode --deep relit tout le volume).
+  # A scan that runs into the next one adds nothing: the second would read the
+  # same state. Forbid prevents piling up, and especially prevents two concurrent
+  # PVC scans (--deep mode re-reads the entire volume).
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: {{ .Values.opsReconcile.startingDeadlineSeconds }}
   successfulJobsHistoryLimit: {{ .Values.opsReconcile.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.opsReconcile.failedJobsHistoryLimit }}
   jobTemplate:
     spec:
-      # Aucun reessai : un diagnostic en lecture seule qui rapporte une anomalie
-      # rapportera exactement la meme au reessai. Le relancer n'ajoute que du
-      # bruit dans les logs.
+      # No retry: a read-only diagnostic that reports an anomaly will report
+      # exactly the same on retry. Retrying only adds noise to the logs.
       backoffLimit: 0
       template:
         metadata:
@@ -55,8 +52,8 @@ spec:
             app.kubernetes.io/component: ops-reconcile
         spec:
           restartPolicy: Never
-          # Ce Job ne parle qu'a PostgreSQL et au PVC : aucun identifiant Garmin,
-          # aucun jeton de compte de service.
+          # This Job only talks to PostgreSQL and the PVC: no Garmin credentials,
+          # no service account token.
           automountServiceAccountToken: false
           securityContext:
             {{- toYaml .Values.ingest.securityContext | nindent 12 }}
@@ -73,18 +70,18 @@ spec:
                 - -m
                 - garminator.ops
                 - reconcile
-                # Doit etre le chemin de MONTAGE ci-dessous, qui est aussi celui
-                # utilise a l'ecriture (ingest.config.fitArchivePath) : les lignes
-                # raw.fit_file portent des chemins absolus.
+                # Must be the MOUNT path below, which is also the one used for
+                # writing (ingest.config.fitArchivePath): raw.fit_file rows carry
+                # absolute paths.
                 - --archive-root
                 - {{ .Values.ingest.config.fitArchivePath | quote }}
                 {{- if .Values.opsReconcile.deep }}
                 - --deep
                 {{- end }}
               env:
-                # PGUSER/PGPASSWORD DOIVENT etre definis avant
-                # GARMINATOR_POSTGRES_DSN : Kubernetes ne resout $(VAR) que parmi
-                # les variables DEJA declarees plus haut dans la meme liste `env`.
+                # PGUSER/PGPASSWORD MUST be defined before GARMINATOR_POSTGRES_DSN:
+                # Kubernetes only resolves $(VAR) among variables ALREADY declared
+                # earlier in the same `env` list.
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef:
@@ -95,15 +92,15 @@ spec:
                     secretKeyRef:
                       name: {{ include "garminator.postgresql.secretName" . }}
                       key: password
-                # DSN via variable d'environnement, JAMAIS via --dsn : un argument
-                # de commande est visible en clair dans la liste des processus,
-                # y compris via `kubectl describe pod`.
+                # DSN via environment variable, NEVER via --dsn: a command-line
+                # argument is visible in plain text in the process list, including
+                # via `kubectl describe pod`.
                 - name: GARMINATOR_POSTGRES_DSN
                   value: >-
                     postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "garminator.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
-                # Ce Job ne monte pas la ConfigMap d'ingestion (il n'a besoin
-                # d'aucun reglage Garmin) : la verbosite est reprise ici seule,
-                # depuis la meme valeur, pour qu'un unique reglage vaille partout.
+                # This Job does not mount the ingest ConfigMap (it needs no Garmin
+                # settings): verbosity is picked up here alone, from the same value,
+                # so a single setting applies everywhere.
                 - name: GARMINATOR_LOG_LEVEL
                   value: {{ .Values.ingest.config.logLevel | quote }}
                 - name: HOME
@@ -120,8 +117,8 @@ spec:
                 - name: fit-archive
                   mountPath: {{ .Values.ingest.config.fitArchivePath }}
                   subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
-                  # Garantie mecanique, pas une convention : ce Job ne peut pas
-                  # ecrire sur l'archive, quoi que fasse le code.
+                  # Mechanical guarantee, not a convention: this Job cannot write
+                  # to the archive, regardless of what the code does.
                   readOnly: true
                 - name: tmp
                   mountPath: /tmp

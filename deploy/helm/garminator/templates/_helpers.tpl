@@ -1,12 +1,12 @@
 {{/*
-Nom court du chart.
+Short chart name.
 */}}
 {{- define "garminator.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
-Nom complet (release + chart), tronque a 63 caracteres (limite DNS).
+Full name (release + chart), truncated to 63 characters (DNS limit).
 */}}
 {{- define "garminator.fullname" -}}
 {{- if .Values.fullnameOverride -}}
@@ -22,14 +22,14 @@ Nom complet (release + chart), tronque a 63 caracteres (limite DNS).
 {{- end -}}
 
 {{/*
-Chart + version, pour le label helm.sh/chart.
+Chart + version, for the helm.sh/chart label.
 */}}
 {{- define "garminator.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
-Labels communs.
+Common labels.
 */}}
 {{- define "garminator.labels" -}}
 helm.sh/chart: {{ include "garminator.chart" . }}
@@ -41,7 +41,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
-Labels de selection (stables entre upgrades — ne jamais y toucher).
+Selector labels (stable across upgrades -- never touch).
 */}}
 {{- define "garminator.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "garminator.name" . }}
@@ -49,7 +49,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
-Nom du Secret d'authentification PostgreSQL.
+Name of PostgreSQL authentication Secret.
 */}}
 {{- define "garminator.postgresql.secretName" -}}
 {{- if .Values.postgresql.auth.existingSecret -}}
@@ -60,22 +60,22 @@ Nom du Secret d'authentification PostgreSQL.
 {{- end -}}
 
 {{/*
-Nom du service PostgreSQL (headless).
+Name of PostgreSQL service (headless).
 */}}
 {{- define "garminator.postgresql.serviceName" -}}
 {{- printf "%s-postgresql" (include "garminator.fullname" .) -}}
 {{- end -}}
 
 {{/*
-Nom du PVC de l'archive FIT (partage : fichiers FIT, token store Garmin,
-dumps PostgreSQL — voir values.yaml fitArchive.subPaths).
+Name of FIT archive PVC (shared: FIT files, Garmin token store,
+PostgreSQL dumps -- see values.yaml fitArchive.subPaths).
 */}}
 {{- define "garminator.fitArchive.pvcName" -}}
 {{- printf "%s-fit-archive" (include "garminator.fullname" .) -}}
 {{- end -}}
 
 {{/*
-Nom du Secret admin Grafana.
+Name of Grafana admin Secret.
 */}}
 {{- define "garminator.grafana.secretName" -}}
 {{- if .Values.grafana.admin.existingSecret -}}
@@ -86,7 +86,7 @@ Nom du Secret admin Grafana.
 {{- end -}}
 
 {{/*
-Nom de la ConfigMap des dashboards Grafana (mecanisme prevu pour L9).
+Name of Grafana dashboards ConfigMap (mechanism planned for L9).
 */}}
 {{- define "garminator.grafana.dashboardsConfigMapName" -}}
 {{- if .Values.grafana.dashboards.configMapName -}}
@@ -97,55 +97,54 @@ Nom de la ConfigMap des dashboards Grafana (mecanisme prevu pour L9).
 {{- end -}}
 
 {{/*
-Tag d'image de l'ingestion : celui fourni, sinon AppVersion du chart.
+Ingest image tag: the provided one, otherwise chart AppVersion.
 */}}
 {{- define "garminator.ingest.imageTag" -}}
 {{- default .Chart.AppVersion .Values.ingest.image.tag -}}
 {{- end -}}
 
 {{/*
-Mot de passe PostgreSQL applicatif.
+PostgreSQL application password.
 
-DELIBEREMENT SANS GENERATION ALEATOIRE. Le mot de passe reel de PostgreSQL est
-fige par `initdb` a la creation du volume de donnees et n'est plus jamais relu
-depuis POSTGRES_PASSWORD ensuite. Toute valeur regeneree a un `helm upgrade`
-produirait un Secret desynchronise du volume, et donc un refus
-d'authentification sur une base qui fonctionnait la veille.
+DELIBERATELY NO RANDOM GENERATION. The real PostgreSQL password is frozen by
+`initdb` at data volume creation and is never read from POSTGRES_PASSWORD again.
+Any value regenerated at `helm upgrade` would create a Secret out of sync with
+the volume, and thus authentication rejection on a database that worked the day
+before.
 
-`lookup` ne peut pas servir de garde-fou : il rend une valeur vide pendant
-`helm template`, pendant `--dry-run`, et dans tout flux `helm template | kubectl
-apply`. Le mot de passe doit donc etre fourni explicitement, ou provenir d'un
-Secret preexistant (`postgresql.auth.existingSecret`).
+`lookup` cannot serve as a safeguard: it returns an empty value during
+`helm template`, during `--dry-run`, and in any `helm template | kubectl apply`
+flow. The password must therefore be provided explicitly, or come from a
+pre-existing Secret (`postgresql.auth.existingSecret`).
 */}}
 {{- define "garminator.postgresql.password" -}}
 {{- if .Values.postgresql.auth.password -}}
 {{- .Values.postgresql.auth.password -}}
 {{- else -}}
-{{- fail "\n\nERREUR : postgresql.auth.password est obligatoire.\n\nAucun mot de passe PostgreSQL n'est genere par ce chart : le mot de passe reel est\nfige par initdb a la creation du volume, et un mot de passe regenere a chaque\n`helm upgrade` casserait l'authentification de facon silencieuse et difficile a\ndiagnostiquer.\n\nDeux solutions :\n\n  1. Fournir le mot de passe dans les valeurs (le generer une fois, puis le\n     conserver dans le fichier de valeurs local, hors depot git) :\n\n       openssl rand -base64 32 | tr -d '/+=' | cut -c1-32\n       helm install ... --set postgresql.auth.password='<le mot de passe>'\n\n  2. Referencer un Secret Kubernetes preexistant contenant les cles `username`\n     et `password` :\n\n       kubectl create secret generic garminator-postgresql \\\n         --namespace garminator \\\n         --from-literal=username=garminator \\\n         --from-literal=password='<le mot de passe>'\n       helm install ... --set postgresql.auth.existingSecret=garminator-postgresql\n" -}}
+{{- fail "\n\nERROR: postgresql.auth.password is mandatory.\n\nNo PostgreSQL password is generated by this chart: the real password is frozen\nby initdb at volume creation, and a password regenerated on every `helm upgrade`\nwould silently break authentication in a hard-to-diagnose way.\n\nTwo solutions:\n\n  1. Provide the password in values (generate once, then keep in local values file,\n     outside git repository):\n\n       openssl rand -base64 32 | tr -d '/+=' | cut -c1-32\n       helm install ... --set postgresql.auth.password='<the password>'\n\n  2. Reference a pre-existing Kubernetes Secret with keys `username` and\n     `password`:\n\n       kubectl create secret generic garminator-postgresql \\\n         --namespace garminator \\\n         --from-literal=username=garminator \\\n         --from-literal=password='<the password>'\n       helm install ... --set postgresql.auth.existingSecret=garminator-postgresql\n" -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Mot de passe admin Grafana. Meme regle que ci-dessus : aucune generation
-aleatoire, pour qu'un `helm upgrade` ne fasse jamais deriver le contenu du
-Secret par rapport a ce que l'athlete connait.
+Grafana admin password. Same rule as above: no random generation, so a
+`helm upgrade` never drifts the Secret content from what the athlete knows.
 */}}
 {{- define "garminator.grafana.adminPassword" -}}
 {{- if .Values.grafana.admin.password -}}
 {{- .Values.grafana.admin.password -}}
 {{- else -}}
-{{- fail "\n\nERREUR : grafana.admin.password est obligatoire.\n\nAucun mot de passe n'est genere par ce chart (un mot de passe regenere a chaque\n`helm upgrade` derive silencieusement de ce que l'athlete a note).\n\n  helm install ... --set grafana.admin.password='<le mot de passe>'\n\nou referencer un Secret preexistant avec les cles `admin-user` et\n`admin-password` via grafana.admin.existingSecret.\n" -}}
+{{- fail "\n\nERROR: grafana.admin.password is mandatory.\n\nNo password is generated by this chart (a password regenerated on every `helm upgrade`\nsilently drifts from what the athlete noted).\n\n  helm install ... --set grafana.admin.password='<the password>'\n\nor reference a pre-existing Secret with keys `admin-user` and `admin-password`\nvia grafana.admin.existingSecret.\n" -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-Garde-fou d'exposition : l'exigence de l'athlete est un acces STRICTEMENT LOCAL
-(aucun Ingress, aucun TLS, aucune exposition hors cluster). On refuse donc les
-types de Service qui ouvriraient un acces externe.
+Exposure safeguard: the athlete's requirement is STRICTLY LOCAL access
+(no Ingress, no TLS, no exposure outside cluster). We therefore refuse Service
+types that would open external access.
 */}}
 {{- define "garminator.assertLocalOnlyService" -}}
 {{- $type := .type -}}
 {{- if not (eq $type "ClusterIP") -}}
-{{- fail (printf "\n\nERREUR : %s = %q.\n\nCe chart est concu pour un acces strictement local (aucun Ingress, aucun TLS).\nSeul le type ClusterIP est autorise ; l'acces se fait par `kubectl port-forward`.\nExposer ces services en NodePort ou LoadBalancer publierait Grafana et l'endpoint\nd'upload FIT sans TLS sur le reseau.\n" .key $type) -}}
+{{- fail (printf "\n\nERROR: %s = %q.\n\nThis chart is designed for strictly local access (no Ingress, no TLS).\nOnly ClusterIP type is allowed; access is via `kubectl port-forward`.\nExposing these services as NodePort or LoadBalancer would publish Grafana and the\nFIT upload endpoint without TLS on the network.\n" .key $type) -}}
 {{- end -}}
 {{- end -}}

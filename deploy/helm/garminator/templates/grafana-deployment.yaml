@@ -50,13 +50,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "garminator.grafana.secretName" . }}
                   key: admin-password
-            # Consommé par le provisioning de datasource via $POSTGRESQL_PASSWORD.
+            # Consumed by datasource provisioning via $POSTGRESQL_PASSWORD.
             - name: POSTGRESQL_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "garminator.postgresql.secretName" . }}
                   key: password
-            # Grafana en accès local uniquement : pas de domaine public.
+            # Grafana local access only: no public domain.
             - name: GF_SERVER_ROOT_URL
               value: "%(protocol)s://%(domain)s:%(http_port)s/"
             - name: GF_ANALYTICS_REPORTING_ENABLED

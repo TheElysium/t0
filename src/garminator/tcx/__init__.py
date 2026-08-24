@@ -1,1 +1,1 @@
-"""Lecture des fichiers TCX (import manuel, ex. home-trainer) vers la structure L3 commune."""
+"""Read TCX files (manual import, e.g. home-trainer) to shared L3 structure."""

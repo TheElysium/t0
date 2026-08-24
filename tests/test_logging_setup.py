@@ -1,9 +1,9 @@
-"""Tests de :mod:`garminator.logging_setup`.
+"""Tests for :mod:`garminator.logging_setup`.
 
-Ces tests reconfigurent le journal racine, ce qui est global au processus. Chacun
-restaure donc l'état d'origine dans un ``finally`` : sans cela, un test qui laisse le
-niveau à ``ERROR`` rendrait muet le ``caplog`` d'un test ultérieur, et le coupable serait
-introuvable puisque la panne apparaîtrait ailleurs.
+These tests reconfigure the root logger, which is process-global. Each restores the
+original state in a finally block: otherwise a test leaving level at ERROR would silence
+the caplog of a later test, and the culprit would be unfindable as failure appears
+elsewhere.
 """
 
 from __future__ import annotations
@@ -28,11 +28,10 @@ def _restore(state: tuple[int, list[logging.Handler]]) -> None:
     root.handlers[:] = state[1]
 
 
-def test_niveau_par_defaut_laisse_passer_info() -> None:
-    """Le point du correctif : ``logger.info`` doit désormais produire quelque chose.
+def test_default_level_lets_info_through() -> None:
+    """Fix point: logger.info must now produce output.
 
-    Sans configuration, le journal racine est à ``WARNING`` et les 23 appels du code
-    disparaissaient sans trace.
+    Unconfigured, root logger at WARNING and 23 code calls disappeared without trace.
     """
     state = _snapshot()
     try:
@@ -42,52 +41,52 @@ def test_niveau_par_defaut_laisse_passer_info() -> None:
         _restore(state)
 
 
-def test_le_format_porte_horodatage_niveau_et_module(capsys: pytest.CaptureFixture[str]) -> None:
-    """Sans ces trois champs, une ligne de journal ne se corrèle à rien après coup."""
+def test_format_includes_timestamp_level_and_module(capsys: pytest.CaptureFixture[str]) -> None:
+    """Without these three fields, a log line correlates to nothing later."""
     state = _snapshot()
     try:
         configure_logging("INFO")
-        logging.getLogger("garminator.garmin.retry").info("temporisation %ss", 30)
-        sortie = capsys.readouterr()
-        # stdout et non stderr : les CronJobs y écrivent déjà leur rapport, et
-        # Kubernetes ne garantit pas l'ordre relatif de deux flux distincts.
-        assert sortie.err == ""
-        assert "INFO" in sortie.out
-        assert "garminator.garmin.retry" in sortie.out
-        assert "temporisation 30s" in sortie.out
-        assert sortie.out.startswith("20")  # horodatage ISO en tête de ligne
+        logging.getLogger("garminator.garmin.retry").info("wait %ss", 30)
+        output = capsys.readouterr()
+        # stdout not stderr: CronJobs already write reports there, Kubernetes doesn't
+        # guarantee relative order of two streams.
+        assert output.err == ""
+        assert "INFO" in output.out
+        assert "garminator.garmin.retry" in output.out
+        assert "wait 30s" in output.out
+        assert output.out.startswith("20")  # ISO timestamp at line start
     finally:
         _restore(state)
 
 
-def test_valeur_inconnue_ne_fait_pas_echouer_le_processus() -> None:
-    """Une faute de frappe dans un réglage de confort ne doit pas coûter le sondage du jour.
+def test_unknown_value_does_not_fail_process() -> None:
+    """Typo in convenience setting must not cost the daily poll.
 
-    Un ``ValueError`` ici ferait échouer le CronJob avant même la première requête, et
-    l'athlète perdrait ses données de la journée pour un réglage sans rapport.
+    A ValueError here would fail the CronJob before first query, athlete loses daily
+    data for unrelated setting.
     """
     state = _snapshot()
     try:
-        configure_logging("VERBEUX")
+        configure_logging("VERBOSE")
         assert logging.getLogger().level == logging.INFO
     finally:
         _restore(state)
 
 
-def test_appels_repetes_ne_dupliquent_pas_les_lignes(capsys: pytest.CaptureFixture[str]) -> None:
-    """``force=True`` remplace le gestionnaire au lieu d'en empiler un second."""
+def test_repeated_calls_do_not_duplicate_lines(capsys: pytest.CaptureFixture[str]) -> None:
+    """force=True replaces handler instead of stacking another."""
     state = _snapshot()
     try:
         configure_logging("INFO")
         configure_logging("INFO")
-        logging.getLogger("garminator.test").info("une seule fois")
-        assert capsys.readouterr().out.count("une seule fois") == 1
+        logging.getLogger("garminator.test").info("once only")
+        assert capsys.readouterr().out.count("once only") == 1
     finally:
         _restore(state)
 
 
-def test_variable_d_environnement_est_bien_celle_du_chart(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Le nom lu ici est celui que la ConfigMap écrit -- l'accord que le chart suppose."""
+def test_env_var_is_the_chart_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name read here is what ConfigMap writes—the contract the chart assumes."""
     state = _snapshot()
     try:
         monkeypatch.setenv(LOG_LEVEL_ENV_VAR, "WARNING")
@@ -97,8 +96,8 @@ def test_variable_d_environnement_est_bien_celle_du_chart(monkeypatch: pytest.Mo
         _restore(state)
 
 
-def test_resolve_accepte_la_casse_et_les_espaces() -> None:
-    """Une valeur YAML recopiée à la main arrive souvent avec une casse ou un espace."""
+def test_resolve_accepts_case_and_whitespace() -> None:
+    """YAML value copied by hand often arrives with case or space variance."""
     assert resolve_log_level(" debug ") == logging.DEBUG
     assert resolve_log_level("Error") == logging.ERROR
     assert resolve_log_level("") == logging.INFO

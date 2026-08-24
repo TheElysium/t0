@@ -1,28 +1,28 @@
-"""Erreurs du lot L7 (endpoint d'upload).
+"""HTTP API layer L7 errors (upload endpoint).
 
-Séparées de :mod:`garminator.fit.errors` : celles-ci couvrent des refus qui ne
-relèvent ni du décodage ni de l'archivage (taille de requête, archive hostile), mais
-de la frontière HTTP elle-même. Le module ``garminator.api.upload`` les mappe vers des
-codes de statut explicites — voir sa docstring pour la table de correspondance.
+Separate from :mod:`garminator.fit.errors`: these cover rejections that are neither
+decoding nor archiving issues (request size, hostile archive), but HTTP boundary
+concerns. The :mod:`garminator.api.upload` module maps them to explicit status codes —
+see its docstring for the mapping table.
 """
 
 from __future__ import annotations
 
 
 class UploadError(RuntimeError):
-    """Racine des erreurs de ce lot. Jamais levée directement."""
+    """Root error of this group. Never raised directly."""
 
 
 class PayloadTooLargeError(UploadError):
-    """Le corps de la requête (ou un membre d'archive décompressé) dépasse la taille
-    maximale acceptée. Levée avant toute écriture sur le volume : aucun octet du
-    dépassement n'est conservé en mémoire au-delà du seuil."""
+    """Request body (or decompressed archive member) exceeds maximum accepted size.
+    Raised before any write to disk: no byte of overflow is retained in memory beyond
+    the threshold."""
 
 
 class HostileArchiveError(UploadError):
-    """L'archive ZIP porte un motif dangereux : chemin d'échappement (``../``, chemin
-    absolu) ou ratio de compression caractéristique d'une bombe de décompression.
+    """ZIP archive bears a dangerous pattern: path escape (``../``, absolute path) or
+    compression ratio characteristic of a decompression bomb.
 
-    Levée en pré-inspection, avant toute décompression réelle d'un membre : seuls les
-    métadonnées ``ZipInfo`` (nom, taille annoncée, taille compressée) sont lues.
+    Raised in pre-inspection, before any actual member decompression: only ``ZipInfo``
+    metadata (name, declared size, compressed size) is read.
     """

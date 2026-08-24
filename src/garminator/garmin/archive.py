@@ -1,14 +1,12 @@
-"""Lecture du nom de fichier réel dans l'archive ZIP du téléchargement « original ».
+"""Read real filename from original activity download's ZIP archive.
 
-Confirmé par l'addendum athlète (§2) : le téléchargement « original » d'une activité
-Garmin est **toujours** une archive ZIP, dont le contenu peut être ``.fit`` **ou**
-``.tcx`` selon que la séance a été enregistrée par une montre ou importée manuellement
-(home-trainer). Ce module ne présume jamais du format d'après l'URL ou l'extension
-attendue : il lit le nom réel depuis le répertoire central du ZIP.
+Confirmed by athlete addendum (§2): Garmin activity's "original" download is always a
+ZIP archive containing either `.fit` OR `.tcx` depending on whether recorded by watch or
+manually imported (home-trainer). Module never presumes format from URL/extension: reads
+real name from ZIP central directory.
 
-Volontairement, ce module ne décode **pas** le contenu du fichier interne — seulement
-ses métadonnées ZIP (nom, présence). Le décodage FIT/TCX est le rôle de L3 ; ce lot
-s'arrête à livrer les octets bruts et le nom de fichier réel, comme demandé.
+Intentionally, module does NOT decode internal file content—only ZIP metadata (name,
+presence). FIT/TCX decoding is L3's role; this layer delivers raw bytes and real filename.
 """
 
 from __future__ import annotations
@@ -18,25 +16,25 @@ import zipfile
 
 
 class ArchiveError(RuntimeError):
-    """L'archive téléchargée n'a pas la forme attendue (vide, multiple, ou pas un ZIP)."""
+    """Downloaded archive does not match expected form (empty, multiple files, or not ZIP)."""
 
 
 def extract_original_filename(zip_bytes: bytes) -> str:
-    """Nom du fichier unique contenu dans l'archive ZIP « original » d'une activité.
+    """Name of single file in activity's "original" ZIP archive.
 
     Raises:
-        ArchiveError: si les octets ne forment pas un ZIP valide, si l'archive est vide,
-            ou si elle contient plus d'un fichier (cas non prévu par l'addendum athlète,
-            qui documente une archive à un seul fichier ``.fit`` ou ``.tcx``).
+        ArchiveError: if bytes are not valid ZIP, archive is empty, or contains
+            multiple files (case not covered by athlete addendum, which documents
+            single-file archive `.fit` or `.tcx`).
     """
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
             names = [name for name in archive.namelist() if not name.endswith("/")]
     except zipfile.BadZipFile as exc:
-        raise ArchiveError("Le contenu téléchargé n'est pas une archive ZIP valide.") from exc
+        raise ArchiveError("Downloaded content is not a valid ZIP archive.") from exc
 
     if not names:
-        raise ArchiveError("Archive ZIP vide : aucun fichier à l'intérieur.")
+        raise ArchiveError("Empty ZIP archive: no files inside.")
     if len(names) > 1:
-        raise ArchiveError(f"Archive ZIP contient plusieurs fichiers, cas non prévu : {names!r}")
+        raise ArchiveError(f"ZIP archive contains multiple files, unexpected: {names!r}")
     return names[0]

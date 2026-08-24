@@ -1,11 +1,10 @@
-"""Doublures utilisées par les tests du lot L2 : aucune n'ouvre de connexion réseau ou DB.
+"""Test doubles used in batch L2 tests: none open network or DB connections.
 
-``FakeTransport`` reproduit le comportement de ``garminconnect.Garmin.login`` qui importe
-pour ce lot, tel que lu dans la source installée : les jetons sont cherchés dans le seul
-fichier ``garmin_tokens.json`` et ne sont considérés rechargeables que s'ils portent un
-``di_token``. Faute de quoi, un SSO complet par identifiants a lieu et **réécrit** le
-fichier de jetons (``client.dump``). Le reste (issue de requêtes, téléchargements) est
-piloté explicitement par le test via des files de réponses/erreurs.
+``FakeTransport`` reproduces ``garminconnect.Garmin.login`` behavior relevant to this
+batch, as read from installed source: tokens are sought only in ``garmin_tokens.json``
+and are only considered reloadable if they carry a ``di_token``. Otherwise, full SSO
+via credentials occurs and **rewrites** the token file (``client.dump``). The rest
+(request results, downloads) is driven explicitly by the test via response/error queues.
 """
 
 from __future__ import annotations
@@ -23,17 +22,16 @@ if TYPE_CHECKING:
 
 @dataclass
 class FakeTransport:
-    """Faux transport Garmin : aucune requête HTTP, tout est en mémoire.
+    """Fake Garmin transport: no HTTP requests, all in-memory.
 
-    - ``login_outcomes`` : si fourni, une file d'issues à consommer à chaque appel de
-      ``login`` (exception à lever, ou ``None`` pour un succès). Sinon, ``login`` simule
-      le comportement réel de ``garminconnect`` : pas de ``garmin_tokens.json``
-      exploitable -> SSO complet, qui écrit un jeton neuf ; jetons exploitables ->
-      ne touche à rien (jetons réutilisés, fichier inchangé).
-    - ``responses`` : mappe un nom d'endpoint vers une valeur de retour fixe.
-    - ``queued_outcomes`` : mappe un nom d'endpoint vers une file d'issues (exception à
-      lever ou valeur à retourner), consommée dans l'ordre — sert à simuler une séquence
-      429 -> 429 -> succès.
+    - ``login_outcomes``: if provided, a queue of outcomes to consume each ``login``
+      call (exception to raise, or ``None`` for success). Otherwise, ``login`` simulates
+      real ``garminconnect`` behavior: no usable ``garmin_tokens.json`` -> full SSO,
+      writes a new token; usable tokens -> does nothing (tokens reused, file unchanged).
+    - ``responses``: maps an endpoint name to a fixed return value.
+    - ``queued_outcomes``: maps an endpoint name to a queue of outcomes (exception to
+      raise or value to return), consumed in order — simulates sequences like
+      429 -> 429 -> success.
     """
 
     login_outcomes: list[BaseException | None] = field(default_factory=list)
@@ -58,13 +56,13 @@ class FakeTransport:
 
         path = Path(tokenstore)
         if has_loadable_tokens(path):
-            # garminconnect recharge les jetons et ne réécrit pas le fichier.
+            # garminconnect reloads tokens and does not rewrite the file.
             self.did_full_sso = False
             return (None, None)
 
-        # SSO complet par identifiants : garminconnect appelle ``dump`` et réécrit
-        # ``garmin_tokens.json``. Le compteur rend le contenu (et donc l'empreinte)
-        # différent à chaque SSO, comme un vrai jeton fraîchement émis.
+        # Full SSO via credentials: garminconnect calls ``dump`` and rewrites
+        # ``garmin_tokens.json``. The counter makes content (and thus fingerprint)
+        # different each SSO, like a freshly-issued real token.
         self.sso_count += 1
         path.mkdir(parents=True, exist_ok=True)
         token_file(path).write_text(
@@ -84,8 +82,8 @@ class FakeTransport:
         return self.responses[endpoint]
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
-        # Résout dynamiquement tout nom de méthode d'endpoint (get_sleep_data, etc.)
-        # comme le fait GarminClient.fetch via getattr() sur le vrai transport.
+        # Dynamically resolve any endpoint method name (get_sleep_data, etc.)
+        # like GarminClient.fetch does via getattr() on the real transport.
         def _method(*_args: object, **_kwargs: object) -> Any:
             return self._next(name)
 
@@ -99,12 +97,12 @@ class FakeTransport:
                 raise outcome
             return bytes(outcome)
         raise AssertionError(
-            "FakeTransport.download_activity appelé sans download_outcomes configurés"
+            "FakeTransport.download_activity called without download_outcomes configured"
         )
 
 
 class FakeCursor:
-    """Curseur en mémoire : enregistre chaque requête, simule ``RETURNING``."""
+    """In-memory cursor: records each query, simulates ``RETURNING``."""
 
     def __init__(self, conn: FakeConnection) -> None:
         self._conn = conn
@@ -134,7 +132,7 @@ class FakeCursor:
 
 @dataclass
 class FakeConnection:
-    """Connexion DB en mémoire satisfaisant ``garminator.garmin.raw_store.DBConnection``."""
+    """In-memory DB connection satisfying ``garminator.garmin.raw_store.DBConnection``."""
 
     executed: list[tuple[str, Any]] = field(default_factory=list)
     commit_count: int = 0

@@ -1,8 +1,9 @@
-"""Accès base de données de garminator : migrations SQL versionnées (lot L1).
+"""Garminator database access: versioned SQL migrations (L1 batch).
 
-Le runner (:mod:`garminator.db.runner`) est indépendant de :mod:`garminator.settings` : il
-lit son propre DSN (variable d'environnement ``GARMINATOR_POSTGRES_DSN`` ou argument ``--dsn``
-de la CLI ``python -m garminator.db``) sans jamais exiger d'identifiants Garmin.
+The runner (:mod:`garminator.db.runner`) is independent of :mod:`garminator.settings`:
+it reads its own DSN (``GARMINATOR_POSTGRES_DSN`` environment variable or ``--dsn``
+argument to the ``python -m garminator.db`` CLI) without ever requiring Garmin
+credentials.
 """
 
 from __future__ import annotations

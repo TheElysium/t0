@@ -1,4 +1,4 @@
-"""CTL/ATL/TSB by recurrence (04-formules-charge.md §6).
+"""CTL/ATL/TSB by recurrence (04-load-formulas.md §6).
 
 Exclusively recursive: closed form diverges numerically in double precision beyond
 years (04 §6.7: (1-alpha)^-j reaches 6.61e3 at 1yr, 2.88e11 at 3yr, 1.26e19 at 5yr).
