@@ -1,5 +1,13 @@
 """Transform CLI: ``python -m garminator.transform [--limit N] [--retry-failed]``.
 
+TWO PASSES, ONE COMMAND. The file pass (``raw.fit_file`` -> activities) and the wellness
+pass (``raw.api_response`` -> sleep, HRV, stress, Body Battery) run one after the other
+here rather than under two commands. They share nothing but the connection, but they are
+the same step of the operator's chain -- ``scheduler`` then ``transform`` then ``ops
+refresh`` -- and splitting them would mean a second CronJob whose only distinguishing
+feature is that forgetting it leaves the wellness dashboards empty with no error, which is
+precisely the failure this pass was written to fix.
+
 Same pattern as :mod:`garminator.ops.__main__` and :mod:`garminator.db.__main__`: a
 dependency-free ``argparse``, a DSN resolved from ``--dsn`` OR the
 ``GARMINATOR_POSTGRES_DSN`` environment variable, and ``configure_logging()`` as the
@@ -37,13 +45,20 @@ from garminator.logging_setup import configure_logging
 from garminator.transform.runner import (
     DEFAULT_BATCH_LIMIT,
     format_transform_report,
+    resolve_athlete_id,
     transform_pending_files,
+)
+from garminator.transform.wellness_runner import (
+    DEFAULT_DAY_LIMIT,
+    format_wellness_report,
+    transform_wellness_days,
 )
 
 if TYPE_CHECKING:
     # Imported solely for the `cast` below: `DBConnection` is a protocol with no
     # runtime existence.
     from garminator.transform.runner import DBConnection
+    from garminator.transform.wellness_runner import DBConnection as WellnessDBConnection
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -84,6 +99,29 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--wellness-limit",
+        type=int,
+        default=DEFAULT_DAY_LIMIT,
+        help=(
+            f"Maximum number of local days handled by the wellness pass (default "
+            f"{DEFAULT_DAY_LIMIT}). Unchanged days are skipped by content hash, so this "
+            "bounds a backfill, not a nightly run."
+        ),
+    )
+    parser.add_argument(
+        "--force-wellness",
+        action="store_true",
+        help=(
+            "Reprocess every wellness day even when its payloads are unchanged. Needed "
+            "after changing the extraction code itself, which no content hash can detect."
+        ),
+    )
+    parser.add_argument(
+        "--skip-wellness",
+        action="store_true",
+        help="Run the file pass only, leaving raw.api_response untouched.",
+    )
+    parser.add_argument(
         "--retry-failed",
         action="store_true",
         help=(
@@ -116,6 +154,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         try:
+            athlete_id = (
+                args.athlete_id
+                if args.athlete_id is not None
+                else resolve_athlete_id(cast("DBConnection", conn))
+            )
             report = transform_pending_files(
                 # Deliberately minimal structural protocol, meant to let tests inject a
                 # double. A real `psycopg.Connection` satisfies it at runtime, but mypy
@@ -123,9 +166,19 @@ def main(argv: list[str] | None = None) -> int:
                 # is not; widening the protocol would mean copying psycopg's overloads
                 # into it, defeating its purpose.
                 cast("DBConnection", conn),
-                athlete_id=args.athlete_id,
+                athlete_id=athlete_id,
                 limit=args.limit,
                 retry_failed=args.retry_failed,
+            )
+            wellness = (
+                None
+                if args.skip_wellness
+                else transform_wellness_days(
+                    cast("WellnessDBConnection", conn),
+                    athlete_id=athlete_id,
+                    limit=args.wellness_limit,
+                    force=args.force_wellness,
+                )
             )
         except ValueError as exc:
             # Typically core.athlete empty or ambiguous: nothing was attempted.
@@ -135,7 +188,10 @@ def main(argv: list[str] | None = None) -> int:
         conn.close()
 
     print(format_transform_report(report))
-    return 1 if report.failed else 0
+    if wellness is not None:
+        print(format_wellness_report(wellness))
+    failed = report.failed or (wellness.failed if wellness is not None else 0)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":  # pragma: no cover -- entry point
