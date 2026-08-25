@@ -210,7 +210,11 @@ def _print_dry_run(
         remainder = len(due) - len(treated)
         dates_str = ", ".join(d.isoformat() for d in treated) if treated else "(none)"
         suffix = f" (+{remainder} deferred to next run)" if remainder > 0 else ""
-        print(f"  {endpoint}: {len(due)} window(s) due → {dates_str}{suffix}")
+        # ASCII arrow on purpose: this is the ONLY print in the package carrying a
+        # non-ASCII character, and it made --dry-run die with UnicodeEncodeError on a
+        # Windows console (cp1252). A dry-run is what an operator runs BEFORE touching
+        # Garmin -- it must never be the step that crashes.
+        print(f"  {endpoint}: {len(due)} window(s) due -> {dates_str}{suffix}")
 
 
 def _print_summary(summary: RunSummary) -> None:

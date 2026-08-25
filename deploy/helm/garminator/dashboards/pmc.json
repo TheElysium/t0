@@ -1,7 +1,7 @@
 {
   "uid": "garminator-pmc",
-  "title": "PMC — Performance Management Chart",
-  "description": "CTL / ATL / TSB from mart.pmc. The range where ctl_reliable = false (180 days following the seed, see COMMENT ON COLUMN mart.pmc.ctl_reliable) is greyed out by a region annotation rather than hidden.",
+  "title": "Fitness, fatigue and form (PMC)",
+  "description": "Fitness (CTL), fatigue (ATL) and form (TSB) from mart.pmc. The range where ctl_reliable = false (180 days following the seed, see COMMENT ON COLUMN mart.pmc.ctl_reliable) is greyed out by a region annotation rather than hidden.",
   "tags": ["garminator", "load"],
   "timezone": "browser",
   "editable": true,
@@ -44,7 +44,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "CTL (42 d) / ATL (7 d)",
+      "title": "Fitness and fatigue",
       "description": "Chronic (CTL) and acute (ATL) load, mart.pmc recursion. The greyed band marks the ctl_reliable = false period: there the CTL is still dominated by the seed value (core.pmc_seed) and its progression is an initialisation artefact, not a training gain (COMMENT ON COLUMN mart.pmc.ctl_reliable).",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": {
@@ -56,14 +56,14 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT p.local_date::timestamp AS time, p.ctl AS \"CTL\", p.atl AS \"ATL\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id AND $__timeFilter(p.local_date) ORDER BY p.local_date"
+          "rawSql": "SELECT p.local_date::timestamp AS time, p.ctl AS \"Fitness (CTL, 42 d)\", p.atl AS \"Fatigue (ATL, 7 d)\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id AND $__timeFilter(p.local_date) ORDER BY p.local_date"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "TSB — previous day vs same day",
+      "title": "Form (TSB) — previous day vs same day",
       "description": "mart.pmc.tsb = CTL_previous_day - ATL_previous_day (reference convention). mart.pmc.tsb_same_day = CTL - ATL of the same day, exposed in addition because many tools use that other convention (COMMENT ON MATERIALIZED VIEW mart.pmc, point 3).",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
       "fieldConfig": {
@@ -75,7 +75,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT p.local_date::timestamp AS time, p.tsb AS \"TSB (previous day)\", p.tsb_same_day AS \"TSB (same day)\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id AND $__timeFilter(p.local_date) ORDER BY p.local_date"
+          "rawSql": "SELECT p.local_date::timestamp AS time, p.tsb AS \"Form (TSB, previous day)\", p.tsb_same_day AS \"Form (TSB, same day)\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id AND $__timeFilter(p.local_date) ORDER BY p.local_date"
         }
       ]
     },
@@ -91,7 +91,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT p.local_date AS \"Date\", p.ctl AS \"CTL\", p.atl AS \"ATL\", p.tsb AS \"TSB\", p.tsb_same_day AS \"TSB same day\", p.ctl_reliable AS \"CTL reliable\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id ORDER BY p.local_date DESC LIMIT 1"
+          "rawSql": "SELECT p.local_date AS \"Date\", p.ctl AS \"Fitness (CTL)\", p.atl AS \"Fatigue (ATL)\", p.tsb AS \"Form (TSB)\", p.tsb_same_day AS \"Form (TSB, same day)\", p.ctl_reliable AS \"Fitness reliable\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id ORDER BY p.local_date DESC LIMIT 1"
         }
       ]
     }
