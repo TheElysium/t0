@@ -356,3 +356,37 @@ def test_massive_catchup_is_bounded_and_progresses_per_run() -> None:
     )
     assert len(unbounded.outcomes) == 100
     assert unbounded.truncated_endpoints == []
+
+
+# -- progress logging: proving a long catch-up run is not silent ------------------------
+
+
+def test_progress_is_logged_so_a_long_run_is_not_silent(caplog: pytest.LogCaptureFixture) -> None:
+    """A 300-window catch-up used to emit NOTHING on the success path: an operator could
+    not tell a slow run from a hung one. Assert the three lines that make it observable --
+    the endpoint header, the every-N-windows heartbeat, and the closing count."""
+    db = FakePollDB()
+
+    def _fetch(endpoint: str, window_date: date) -> list[FetchedWindow]:
+        if window_date == date(2026, 5, 3):
+            msg = "boom"
+            raise RuntimeError(msg)
+        return [FetchedWindow(scope_key=None, payload_sha256=bytes(32))]
+
+    with caplog.at_level("INFO", logger="garminator.scheduler.service"):
+        run_scheduled_poll(
+            db,
+            endpoints=["get_sleep_data"],
+            history_start=date(2026, 5, 1),
+            today=date(2026, 5, 25),  # 25 windows: crosses the every-10 heartbeat twice
+            fetch_window=_fetch,
+            now=datetime(2026, 5, 25, 6, 0),
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Endpoint get_sleep_data: 25 window(s) due, 2026-05-01 to 2026-05-25." in messages
+    heartbeats = [m for m in messages if "window(s) processed" in m]
+    assert len(heartbeats) == 2, heartbeats
+    assert "10/25" in heartbeats[0]
+    assert "20/25" in heartbeats[1]
+    assert "Endpoint get_sleep_data: done, 24 succeeded, 1 failed out of 25 window(s)." in messages
