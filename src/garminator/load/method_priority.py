@@ -46,6 +46,10 @@ METRIC_METHOD_PRIORITY: tuple[tuple[str, str, str, int], ...] = (
     ("tss", "resort_skiing", "rpe", 2),
     ("tss", "strength", "hr_hrtss", 1),
     ("tss", "strength", "rpe", 2),
+    ("tss", "multisport", "hr_hrtss", 1),
+    ("tss", "multisport", "rpe", 2),
+    ("tss", "transition", "hr_hrtss", 1),
+    ("tss", "transition", "rpe", 2),
 )
 
 

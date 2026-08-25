@@ -107,6 +107,20 @@ def _fit_duration_s(parsed: ParsedActivitySource) -> int:
     return round(float(total_timer_time))
 
 
+def _fit_session_float(parsed: ParsedActivitySource, field: str) -> float | None:
+    """Read a numeric ``session`` field, or ``None`` when the file does not carry it.
+
+    Unlike :func:`_fit_duration_s`, absence is NOT an error here: these feed the
+    ``distance_m`` / ``ascent_m`` / ``descent_m`` FALLBACKS of ``ActivityContext``, which
+    ``build_core_rows`` only consults when no sample carries the information. A file
+    without them simply leaves the column NULL, exactly as before.
+    """
+    if parsed.session is None:
+        return None
+    value = parsed.session.raw.get(field)
+    return None if value is None else float(value)
+
+
 _MIN_TCX_SAMPLES_FOR_DURATION = 2
 
 
@@ -157,9 +171,21 @@ def build_manual_activity_context(
         sub_sport = parsed.session.raw.get("sub_sport")
         sport_code = _sport_code_for_fit(str(sport), None if sub_sport is None else str(sub_sport))
         duration_s = _fit_duration_s(parsed)
+        # POOL SWIMMING DEPENDS ON THIS. core.sample carries no distance for a pool swim
+        # (migrations/005_core_series.sql, core.swim_length comment), so distance_m can
+        # only come from the session summary -- which is precisely the fallback role
+        # ActivityContext.distance_m documents. Left unset, the activity lands with a NULL
+        # distance, swim_css cannot resolve for lack of a pace, and the swim silently falls
+        # back to hr_hrtss. Observed on the athlete's real swim file before this fix.
+        distance_m = _fit_session_float(parsed, "total_distance")
+        ascent_m = _fit_session_float(parsed, "total_ascent")
+        descent_m = _fit_session_float(parsed, "total_descent")
     elif parsed.source_format == "tcx":
         sport_code = _sport_code_for_tcx(tcx_sport)
         duration_s = _tcx_duration_s(parsed)
+        # A TCX has no session element at all: its totals, when present, live in the
+        # trackpoints, which build_core_rows already reads first.
+        distance_m = ascent_m = descent_m = None
     else:
         msg = (
             f"manual upload (activity_id={activity_id}): unknown source_format "
@@ -195,6 +221,9 @@ def build_manual_activity_context(
         duration_s=duration_s,
         start_time_local=start_time_local,
         tz_offset_s=tz_offset_s,
+        distance_m=distance_m,
+        ascent_m=ascent_m,
+        descent_m=descent_m,
         garmin_type_key=None,
         summary_sha256=None,
         is_parent=False,

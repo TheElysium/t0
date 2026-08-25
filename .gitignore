@@ -35,3 +35,6 @@ build/
 # reasoning as for .FIT files and their GPS traces.
 deploy/seed/*.sql
 !deploy/seed/*.sql.example
+
+# IDE
+.idea/

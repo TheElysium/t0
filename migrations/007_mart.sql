@@ -81,12 +81,31 @@ COMMENT ON MATERIALIZED VIEW mart.daily_load IS
 
 
 CREATE MATERIALIZED VIEW mart.pmc AS
-WITH RECURSIVE cal AS (
+WITH RECURSIVE seed AS (
+    -- ONE seed per athlete, the most recent one. core.pmc_seed is keyed on
+    -- (athlete_id, seed_date), so it deliberately KEEPS the history of seeds: re-seeding
+    -- after a backfill adds a row, it does not replace one. Joining the table directly
+    -- would then emit one calendar per seed row, duplicate every local_date, and make
+    -- REFRESH MATERIALIZED VIEW CONCURRENTLY fail outright on the pmc_pk unique index.
+    -- A newer seed supersedes an older one; with a single row this is a no-op.
+    -- The casts are load-bearing, not cosmetic. core.pmc_seed.ctl/atl are `real`, while
+    -- the recursive term below produces `double precision` (the arithmetic widens). A
+    -- recursive CTE requires both terms to agree column by column, so leaving these as
+    -- `real` makes PostgreSQL reject the view outright with DatatypeMismatch on
+    -- prev_ctl/prev_atl. Widening once here keeps every downstream column consistent.
+    SELECT DISTINCT ON (s.athlete_id)
+           s.athlete_id, s.seed_date,
+           s.ctl::double precision AS ctl,
+           s.atl::double precision AS atl
+      FROM core.pmc_seed s
+     ORDER BY s.athlete_id, s.seed_date DESC
+),
+cal AS (
     SELECT a.athlete_id,
            generate_series(s.seed_date, current_date, interval '1 day')::date AS local_date,
            s.seed_date, s.ctl AS seed_ctl, s.atl AS seed_atl
       FROM core.athlete a
-      JOIN core.pmc_seed s ON s.athlete_id = a.athlete_id
+      JOIN seed s ON s.athlete_id = a.athlete_id
 ),
 d AS (
     SELECT c.athlete_id, c.local_date, c.seed_date, c.seed_ctl, c.seed_atl,
@@ -165,7 +184,11 @@ SELECT a.activity_id, a.local_date, a.start_time_local, a.sport_code,
        max(m.method_code) FILTER (WHERE m.metric = 'tss' AND m.is_canonical) AS tss_method,
        max(m.value) FILTER (WHERE m.metric = 'tss'  AND m.method_code = 'hr_hrtss') AS tss_hr,
        max(m.value) FILTER (WHERE m.metric = 'trimp')                     AS trimp,
-       max(m.value) FILTER (WHERE m.metric = 'intensity_factor')          AS intensity_factor,
+       -- AND m.is_canonical: without it max() returns the largest value across all
+       -- methods rather than the canonical one. Same defect and same fix in 011, which
+       -- replaces this view and adds the matching intensity_factor_method column.
+       max(m.value) FILTER (WHERE m.metric = 'intensity_factor' AND m.is_canonical)
+                                                                          AS intensity_factor,
        max(m.value) FILTER (WHERE m.metric = 'decoupling_pct')            AS decoupling_pct,
        max(m.value) FILTER (WHERE m.metric = 'efficiency_factor')         AS efficiency_factor
   FROM core.activity a

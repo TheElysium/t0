@@ -1,4 +1,4 @@
-"""Ops CLI: ``python -m garminator.ops <refresh|backfill-status|health|reconcile>``.
+"""Ops CLI: ``python -m garminator.ops <refresh|seed-pmc|backfill-status|health|reconcile>``.
 
 Same style as :mod:`garminator.db.__main__`: a simple ``argparse`` (no entry in
 ``[project.scripts]`` -- ``pyproject.toml`` is out of scope for this batch), and DSN is
@@ -27,6 +27,12 @@ from garminator.db.runner import MigrationError, connect, resolve_dsn
 from garminator.logging_setup import configure_logging
 from garminator.ops.backfill import DEFAULT_HISTORY_START_ISO, backfill_progress
 from garminator.ops.health import build_health_report, format_health_report
+from garminator.ops.pmc_seed import (
+    PmcSeedError,
+    compute_pmc_seed,
+    format_pmc_seed,
+    write_pmc_seed,
+)
 from garminator.ops.reconcile import (
     DBConnection as ReconcileConnection,
 )
@@ -60,6 +66,35 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "refresh",
         help="Refresh all materialized views mart.* (in dependency order).",
+    )
+
+    seed_parser = subparsers.add_parser(
+        "seed-pmc",
+        help=(
+            "Compute and store the PMC seed (core.pmc_seed). mart.pmc is EMPTY "
+            "without it: run this once, after an import and a refresh."
+        ),
+    )
+    seed_parser.add_argument(
+        "--athlete-id",
+        required=True,
+        type=int,
+        help="Athlete the seed is computed for (core.athlete.athlete_id).",
+    )
+    seed_parser.add_argument(
+        "--seed-date",
+        default=None,
+        type=date.fromisoformat,
+        help=(
+            "Start of the 42-day window (default: first day carrying a known load, "
+            "read from mart.daily_load). Days with no computable TSS are NOT a "
+            "history start: they would drag the average down."
+        ),
+    )
+    seed_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute and print the seed without writing it.",
     )
 
     backfill_parser = subparsers.add_parser(
@@ -133,6 +168,27 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_seed_pmc(dsn: str, args: argparse.Namespace) -> int:
+    """Kept out of :func:`main` only to keep that function readable, not because the
+    command deserves special treatment."""
+    conn = connect(dsn)
+    try:
+        seed = compute_pmc_seed(conn, args.athlete_id, seed_date=args.seed_date)
+        if not args.dry_run:
+            write_pmc_seed(conn, seed)
+            conn.commit()
+    except PmcSeedError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    prefix = "Would write" if args.dry_run else "Written"
+    print(f"{prefix}: {format_pmc_seed(seed)}")
+    if not args.dry_run:
+        print("Next: refresh mart.pmc with `python -m garminator.ops refresh`.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_logging()
     args = _build_parser().parse_args(argv)
@@ -154,6 +210,9 @@ def main(argv: list[str] | None = None) -> int:
             state = "OK" if outcome.succeeded else f"FAILED: {outcome.error}"
             print(f"  {outcome.step.view} ({outcome.step.mode}) -- {state}")
         return 1 if failed else 0
+
+    if args.command == "seed-pmc":
+        return _run_seed_pmc(dsn, args)
 
     if args.command == "backfill-status":
         conn = connect(dsn)

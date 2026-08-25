@@ -7,6 +7,7 @@ hand-built Python dicts in form produced by garmin_fit_sdk.Decoder.read()
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -188,3 +189,38 @@ def test_map_session_extracts_comparison_fields() -> None:
     assert summary.total_training_effect == 3.2
     assert summary.training_stress_score is None  # absent from real FITs, addendum SS1
     assert summary.raw == msg
+
+
+# -- extra must stay JSON-serializable --------------------------------------------------
+
+
+def test_lap_timestamp_lands_in_extra_as_an_iso_string() -> None:
+    """Regression: a `lap` message carries a `timestamp` field uncovered by
+    LAP_FIELD_SPECS. Left as a datetime it reached psycopg's Jsonb adapter and raised
+    "Object of type datetime is not JSON serializable", failing the WHOLE file --
+    observed on the athlete's real running and swimming uploads.
+    """
+    row = map_lap(
+        {"message_index": 0, "start_time": T0, "total_timer_time": 60.0, "timestamp": T0},
+        activity_id=9,
+    )
+    assert row.extra["timestamp"] == T0.isoformat()
+
+
+def test_extra_values_are_json_serializable_across_types() -> None:
+    """`extra` exists so nothing is silently lost, so an unserializable value must be
+    CONVERTED, never dropped: the key has to survive alongside its value."""
+    row = map_lap(
+        {
+            "message_index": 0,
+            "start_time": T0,
+            "total_timer_time": 60.0,
+            "timestamp": T0,
+            "raw_blob": b"\x01\xff",
+            "stamps": [T0, T0],
+        },
+        activity_id=9,
+    )
+    json.dumps(row.extra)
+    assert row.extra["raw_blob"] == "01ff"
+    assert row.extra["stamps"] == [T0.isoformat(), T0.isoformat()]

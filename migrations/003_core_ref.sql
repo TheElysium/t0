@@ -161,7 +161,17 @@ INSERT INTO core.metric_method_priority (metric, sport_code, method_code, priori
   ('tss','open_water',     'swim_css',  1), ('tss','open_water',     'hr_hrtss',2), ('tss','open_water',     'rpe',3),
   ('tss','hiking',         'hr_hrtss',  1), ('tss','hiking',         'rpe',2),
   ('tss','resort_skiing',  'hr_hrtss',  1), ('tss','resort_skiing',  'rpe',2),
-  ('tss','strength',       'hr_hrtss',  1), ('tss','strength',       'rpe',2)
+  ('tss','strength',       'hr_hrtss',  1), ('tss','strength',       'rpe',2),
+  -- multisport and transition are seeded in core.sport but had NO chain here, and
+  -- resolve_canonical() RAISES on a (metric, sport_code) pair it does not find -- it
+  -- refuses to return None silently for what would be a configuration error. A triathlon
+  -- therefore crashed the load computation outright. Neither sport has a discipline of
+  -- its own (DISCIPLINE_BY_SPORT_CODE maps both to 'other'), so no power- or pace-based
+  -- method applies: heart rate first, manual RPE as the last resort, exactly like hiking
+  -- and resort_skiing. Counting the multisport PARENT does not double-count its legs:
+  -- every mart view filters on is_parent = false (007/008).
+  ('tss','multisport',     'hr_hrtss',  1), ('tss','multisport',     'rpe',2),
+  ('tss','transition',     'hr_hrtss',  1), ('tss','transition',     'rpe',2)
 ON CONFLICT DO NOTHING;
 
 

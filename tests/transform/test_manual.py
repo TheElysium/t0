@@ -23,11 +23,18 @@ ACTIVITY_ID = 9000000000000000001
 
 
 def _fit_parsed(
-    *, sport: str, sub_sport: str | None, total_timer_time: float, start_time: datetime | None
+    *,
+    sport: str,
+    sub_sport: str | None,
+    total_timer_time: float,
+    start_time: datetime | None,
+    totals: dict[str, float] | None = None,
 ) -> ParsedActivitySource:
     raw: dict[str, object] = {"sport": sport, "total_timer_time": total_timer_time}
     if sub_sport is not None:
         raw["sub_sport"] = sub_sport
+    if totals is not None:
+        raw.update(totals)
     return ParsedActivitySource(
         source_format="fit",
         samples=[],
@@ -255,3 +262,76 @@ def test_source_and_discipline_and_static_fields() -> None:
     assert context.summary_sha256 is None
     assert context.is_parent is False
     assert context.activity_id == ACTIVITY_ID
+
+
+# -- Session totals carried into the ActivityContext fallbacks --------------------------
+
+
+def test_pool_swim_takes_its_distance_from_the_session_summary() -> None:
+    """The regression this exists for: core.sample carries no distance for a pool swim,
+    so a distance dropped here leaves the activity with no pace at all -- swim_css then
+    cannot resolve and the swim silently falls back to hr_hrtss, roughly halving its TSS.
+    """
+    context = build_manual_activity_context(
+        _fit_parsed(
+            sport="swimming",
+            sub_sport="lap_swimming",
+            total_timer_time=3212.0,
+            start_time=datetime(2026, 8, 14, 15, 47, tzinfo=UTC),
+            totals={"total_distance": 2050.0},
+        ),
+        activity_id=ACTIVITY_ID,
+        home_timezone="Europe/Paris",
+    )
+    assert context.distance_m == pytest.approx(2050.0)
+
+
+def test_session_ascent_and_descent_are_carried_too() -> None:
+    context = build_manual_activity_context(
+        _fit_parsed(
+            sport="running",
+            sub_sport="trail",
+            total_timer_time=4642.0,
+            start_time=datetime(2026, 8, 16, 13, 47, tzinfo=UTC),
+            totals={"total_distance": 12615.5, "total_ascent": 169.0, "total_descent": 171.0},
+        ),
+        activity_id=ACTIVITY_ID,
+        home_timezone="Europe/Paris",
+    )
+    assert context.distance_m == pytest.approx(12615.5)
+    assert context.ascent_m == pytest.approx(169.0)
+    assert context.descent_m == pytest.approx(171.0)
+
+
+def test_absent_session_totals_stay_none_rather_than_zero() -> None:
+    """Absence is not an error: these are fallbacks, and 0.0 would be a claim the file
+    never made -- a swim of 0 m reads as a real distance to every downstream method."""
+    context = build_manual_activity_context(
+        _fit_parsed(
+            sport="running",
+            sub_sport=None,
+            total_timer_time=1800.0,
+            start_time=datetime(2026, 8, 16, 13, 47, tzinfo=UTC),
+        ),
+        activity_id=ACTIVITY_ID,
+        home_timezone="Europe/Paris",
+    )
+    assert context.distance_m is None
+    assert context.ascent_m is None
+    assert context.descent_m is None
+
+
+def test_tcx_leaves_the_fallbacks_to_the_trackpoints() -> None:
+    """A TCX has no session element; its totals live in the trackpoints, which
+    build_core_rows reads first anyway."""
+    context = build_manual_activity_context(
+        _tcx_parsed(
+            tcx_sport="Biking",
+            sample_count=10,
+            start_time=datetime(2026, 8, 15, 14, 33, tzinfo=UTC),
+        ),
+        activity_id=ACTIVITY_ID,
+        home_timezone="Europe/Paris",
+        tcx_sport="Biking",
+    )
+    assert context.distance_m is None

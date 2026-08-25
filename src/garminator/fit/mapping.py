@@ -11,7 +11,7 @@ per ``core.sample.extra`` comment (migrations/005_core_series.sql).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -133,14 +133,46 @@ def _apply_specs(
     return mapped, consumed
 
 
+def _jsonable(value: Any) -> Any:
+    """Coerce a decoded FIT value into something ``psycopg.types.json.Jsonb`` accepts.
+
+    ``extra`` is written to a ``jsonb`` column, and its contract is that NOTHING is
+    silently lost -- so an unserializable value must be converted, never dropped. Two
+    types come out of the FIT decoder that ``json`` cannot encode:
+
+    * ``datetime`` (and its ``date``/``time`` relatives). A ``lap`` message carries a
+      ``timestamp`` field, uncovered by ``LAP_FIELD_SPECS`` because it duplicates the
+      lap END instant already derivable from ``start_time + elapsed_s``. Left as-is it
+      raised ``TypeError: Object of type datetime is not JSON serializable`` and failed
+      the WHOLE file -- observed on the athlete's real running and swimming files.
+      ISO 8601 keeps the value readable and round-trippable.
+    * ``bytes``, emitted for developer/manufacturer-specific fields absent from the
+      profile. Rendered as hex for the same reason.
+
+    Containers are walked, because a FIT field can be an array of either.
+    """
+    if isinstance(value, datetime | date | time):
+        return value.isoformat()
+    if isinstance(value, bytes | bytearray):
+        return value.hex()
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    return value
+
+
 def _build_extra(msg: dict[str, Any], consumed: set[str], *, exclude: set[str]) -> dict[str, Any]:
     """Remaining message fields uncovered by mapping table.
 
     Keys forced to ``str``: decoder falls back to numeric field identifiers (``int``)
     for fields missing from known profile (see addendum); ``jsonb`` accepts text keys only.
+    Values go through :func:`_jsonable` for the symmetric reason on the value side.
     """
     return {
-        str(key): value for key, value in msg.items() if key not in consumed and key not in exclude
+        str(key): _jsonable(value)
+        for key, value in msg.items()
+        if key not in consumed and key not in exclude
     }
 
 

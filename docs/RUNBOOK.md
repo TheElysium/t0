@@ -20,6 +20,7 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
 9. [Reconciling the PVC and `raw.fit_file`](#9-reconciling-the-pvc-and-rawfit_file)
 10. [Daily transformation (CronJob `transform`)](#10-daily-transformation-cronjob-transform)
 11. [Uploading a file manually](#11-uploading-a-file-manually)
+12. [Seeding the PMC](#12-seeding-the-pmc)
 
 ---
 
@@ -451,3 +452,46 @@ silently skew TSS. Two consequences worth knowing before uploading:
   refused rather than approximated. Adding it means adding the pair there, the row in
   `core.sport` if missing, and the row in `core.sport_fit_map`
   (`migrations/015_core_sport_fit_map.sql`) -- a static test fails if the three drift apart.
+
+---
+
+## 12. Seeding the PMC
+
+`mart.pmc` **stays empty until `core.pmc_seed` holds a row.** The view is a recursive CTE:
+it walks the calendar forward from a seed, and with no seed there is no calendar to walk.
+Every fitness/fatigue panel in Grafana reads that view, so this step is not optional --
+it is simply invisible until someone opens the dashboard.
+
+```bash
+python -m garminator.ops seed-pmc --athlete-id 1 --dry-run
+```
+
+`--dry-run` computes the seed and prints it without writing. Run it first, look at the
+numbers, then re-run without the flag to persist.
+
+| Flag | Meaning |
+|---|---|
+| `--athlete-id` | Required. The `core.athlete.athlete_id` the seed is computed for. |
+| `--seed-date` | Start of the 42-day averaging window. Defaults to the first day carrying a known load, read from `mart.daily_load`. |
+| `--dry-run` | Compute and print, write nothing. |
+
+**Why the default `--seed-date` is not simply the first activity.** Days with no computable
+TSS are not a history start -- an activity whose sport has no threshold in effect (see
+section 10 of `tools/validate_schema.sql`) contributes 0, and averaging those in would drag
+CTL down and make the athlete look detrained on day one. The default therefore reads the
+first day that actually carries load, not the first day that carries an activity.
+
+### Re-seeding
+
+`core.pmc_seed` keeps its history: seeding again inserts a new row, it does not overwrite
+the previous one, and `mart.pmc` takes the most recent. That is the intended way to correct
+a seed computed too early -- nothing needs deleting. Section 7 of `tools/validate_schema.sql`
+checks the consequence: `pmc_rows` must equal the number of days since the seed in effect,
+never a multiple of it.
+
+### Reading the result
+
+CTL is a 42-day exponential average, so it needs 42 days of history before it means
+anything and 180 before it is trustworthy -- `mart.pmc.ctl_reliable` is exactly that flag,
+and it reads `false` for the whole warm-up. A PMC seeded yesterday will show `ctl_reliable
+= false` everywhere; that is correct, not a failure.

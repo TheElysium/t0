@@ -49,9 +49,19 @@ SELECT a.activity_id, a.local_date, a.start_time_local, a.sport_code,
        max(m.method_code) FILTER (WHERE m.metric = 'tss' AND m.is_canonical) AS tss_method,
        max(m.value) FILTER (WHERE m.metric = 'tss'  AND m.method_code = 'hr_hrtss') AS tss_hr,
        max(m.value) FILTER (WHERE m.metric = 'trimp')                     AS trimp,
-       max(m.value) FILTER (WHERE m.metric = 'intensity_factor')          AS intensity_factor,
+       -- AND m.is_canonical is load-bearing on BOTH aggregates below, exactly as on the
+       -- tss pair above. core.activity_metric holds one intensity_factor row PER METHOD,
+       -- most of them with a NULL value (the method did not apply). Without the filter:
+       --   * max(method_code) ignores whether the value is NULL and returns the
+       --     alphabetically last code, so a run whose IF actually came from run_gap was
+       --     labelled 'run_power' -- the very confusion this column exists to prevent.
+       --   * max(value) picks the LARGEST value across methods rather than the canonical
+       --     one, which silently overstates IF as soon as two methods both resolve.
+       max(m.value) FILTER (WHERE m.metric = 'intensity_factor' AND m.is_canonical)
+                                                                          AS intensity_factor,
        -- ADDITION 011: the counterpart of tss_method. Same reason, same necessity.
-       max(m.method_code) FILTER (WHERE m.metric = 'intensity_factor')    AS intensity_factor_method,
+       max(m.method_code) FILTER (WHERE m.metric = 'intensity_factor' AND m.is_canonical)
+                                                                          AS intensity_factor_method,
        max(m.value) FILTER (WHERE m.metric = 'decoupling_pct')            AS decoupling_pct,
        max(m.value) FILTER (WHERE m.metric = 'efficiency_factor')         AS efficiency_factor
   FROM core.activity a

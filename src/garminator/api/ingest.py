@@ -36,12 +36,16 @@ below is a sentinel identifier purely internal to parsing validation (step 4): i
 never persisted, never returned to the caller, and must never be confused with a real
 Garmin activity ID nor with the ``garmin_activity_id=None`` inserted in step 5.
 
-Scope note AB (documented limit in docs/RUNBOOK.md): a manual upload never has an
-associated Garmin summary (no ``activityId``, thus no matching ``raw.api_response`` row)
-— :mod:`garminator.transform.runner` thus leaves these rows in queue with "deferred"
-status (``skipped``), never transformed to ``core.*`` until a summary is manually
-associated. This is not a bug in this module: nothing here can invent a sport, timezone,
-or duration that only Garmin provides.
+Scope note (see docs/RUNBOOK.md section 11): a manual upload never has an associated
+Garmin summary (no ``activityId``, thus no matching ``raw.api_response`` row), but it IS
+transformed all the way to ``core.*`` — migration 014 gave it a path of its own.
+:mod:`garminator.transform.runner` sees ``garmin_activity_id IS NULL``, draws an
+identifier from ``core.manual_activity_id_seq`` (idempotent through the partial unique
+index ``activity_manual_file_uq``) and hands the file to
+:func:`garminator.transform.manual.build_manual_activity_context`, which derives sport,
+timezone and duration from the archived file itself. The "deferred" (``skipped``) status
+concerns a DIFFERENT case: a file that HAS a ``garmin_activity_id`` whose summary has not
+been ingested yet — never a manual upload.
 """
 
 from __future__ import annotations
