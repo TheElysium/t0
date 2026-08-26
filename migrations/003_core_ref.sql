@@ -1,6 +1,6 @@
 -- Migration 003: core reference tables (sport, load_method, threshold, hr_tss_coefficient, metric_method_priority, pmc_seed) -- seeds made idempotent (ON CONFLICT DO NOTHING, explicit addition outside frozen DDL)
 -- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
--- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
+-- Batch L1 (t0) -- do not modify the DDL manually outside migration.
 
 CREATE TABLE core.athlete (
     athlete_id     smallint    GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -31,7 +31,7 @@ CREATE TABLE core.sport (
 );
 
 COMMENT ON TABLE core.sport IS
-  'Correspondence table between the (sport, sub_sport) pair of the official FIT profile and a canonical garminator sport code. This is NOT a simple labels table -- it carries two decision-making pieces of information: discipline (which drives the load fallback matrix, 04 section 0.3) and is_indoor (which forces f(i)=1 in GAP calculation, VERIFIED 04 section 3.3.4: "Treadmill: gradient unreliable"). A simple free text column on core.activity would not allow these rules to be expressed declaratively.';
+  'Correspondence table between the (sport, sub_sport) pair of the official FIT profile and a canonical t0 sport code. This is NOT a simple labels table -- it carries two decision-making pieces of information: discipline (which drives the load fallback matrix, 04 section 0.3) and is_indoor (which forces f(i)=1 in GAP calculation, VERIFIED 04 section 3.3.4: "Treadmill: gradient unreliable"). A simple free text column on core.activity would not allow these rules to be expressed declaratively.';
 COMMENT ON COLUMN core.sport.produces_records IS
   'false for sports that do not emit a FIT record message per second (pool swimming). Used for sizing and non-regression tests on core.sample volume.';
 

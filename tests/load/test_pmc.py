@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from garminator.load.pmc import STATIONARY_SEED_DAYS, dense_daily_tss, run_pmc, stationary_seed
+from t0.load.pmc import STATIONARY_SEED_DAYS, dense_daily_tss, run_pmc, stationary_seed
 
 _DAYS_PER_YEAR = 365
 _FIVE_YEARS = 5 * _DAYS_PER_YEAR

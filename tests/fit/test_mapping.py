@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from garminator.fit.errors import FitParseError
-from garminator.fit.mapping import (
+from t0.fit.errors import FitParseError
+from t0.fit.mapping import (
     derive_lap_index_for_lengths,
     map_lap,
     map_length,

@@ -1,7 +1,7 @@
-"""Tests for :mod:`garminator.scheduler.fetcher`, on simulated transport and DB (batch L11).
+"""Tests for :mod:`t0.scheduler.fetcher`, on simulated transport and DB (batch L11).
 
 Reuses ``tests/garmin/fakes.py`` (``FakeTransport``, ``FakeConnection``) : it's the
-same fake transport that already exercises :mod:`garminator.garmin.client` -- no reason
+same fake transport that already exercises :mod:`t0.garmin.client` -- no reason
 to reinvent a second one for this batch, ``GarminWindowFetcher`` just calls
 ``GarminClient.fetch`` on top.
 """
@@ -14,11 +14,11 @@ from pathlib import Path
 import pytest
 from garminconnect import GarminConnectTooManyRequestsError
 
-from garminator.garmin.client import GarminClient, IngestRunTracker
-from garminator.garmin.rate_limit import RateLimiter
-from garminator.garmin.raw_store import payload_sha256
-from garminator.garmin.retry import RetryExhaustedError, RetryPolicy
-from garminator.scheduler.fetcher import GarminWindowFetcher
+from t0.garmin.client import GarminClient, IngestRunTracker
+from t0.garmin.rate_limit import RateLimiter
+from t0.garmin.raw_store import payload_sha256
+from t0.garmin.retry import RetryExhaustedError, RetryPolicy
+from t0.scheduler.fetcher import GarminWindowFetcher
 from tests.garmin.fakes import FakeConnection, FakeTransport
 
 _UNUSED_TOKENSTORE = Path("/dev/null")  # never read: no test in this module calls login()

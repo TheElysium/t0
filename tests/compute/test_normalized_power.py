@@ -1,11 +1,11 @@
-"""Tests for garminator.compute.normalized_power - cases NP-0 to NP-4 of 04-load-formulas.md.
+"""Tests for t0.compute.normalized_power - cases NP-0 to NP-4 of 04-load-formulas.md.
 
 All expected numeric values are transcribed from the specification.
 """
 
 from __future__ import annotations
 
-from garminator.compute.normalized_power import (
+from t0.compute.normalized_power import (
     RELIABLE_THRESHOLD_S,
     average,
     average_nonzero,

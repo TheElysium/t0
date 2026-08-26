@@ -1,0 +1,20 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "t0.fullname" . }}-grafana
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  # ClusterIP only: access via `kubectl port-forward`, no Ingress.
+{{- include "t0.assertLocalOnlyService" (dict "key" "grafana.service.type" "type" .Values.grafana.service.type) }}
+  type: {{ .Values.grafana.service.type }}
+  selector:
+    {{- include "t0.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+  ports:
+    - name: http
+      port: {{ .Values.grafana.service.port }}
+      targetPort: http
+{{- end }}

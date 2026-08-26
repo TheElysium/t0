@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from garminator.fit.model import SwimLengthRow
-from garminator.transform.activity import build_core_rows
+from t0.fit.model import SwimLengthRow
+from t0.transform.activity import build_core_rows
 
 from .conftest import (
     ALL_THRESHOLD,

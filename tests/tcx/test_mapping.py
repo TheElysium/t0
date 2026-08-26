@@ -1,7 +1,7 @@
 """Tests of declarative mapping TCX → core.sample (on already-extracted dicts).
 
 Like FIT, no XML/binary fixture here: only dicts in form produced by
-garminator.tcx.reader._extract_trackpoint.
+t0.tcx.reader._extract_trackpoint.
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from garminator.fit.errors import TcxParseError
-from garminator.tcx.mapping import map_trackpoint
+from t0.fit.errors import TcxParseError
+from t0.tcx.mapping import map_trackpoint
 
 T0 = datetime(2026, 8, 1, 6, 0, 0, tzinfo=UTC)
 

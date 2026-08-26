@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.logging_setup`.
+"""Tests for :mod:`t0.logging_setup`.
 
 These tests reconfigure the root logger, which is process-global. Each restores the
 original state in a finally block: otherwise a test leaving level at ERROR would silence
@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from garminator.logging_setup import LOG_LEVEL_ENV_VAR, configure_logging, resolve_log_level
+from t0.logging_setup import LOG_LEVEL_ENV_VAR, configure_logging, resolve_log_level
 
 if TYPE_CHECKING:
     import pytest
@@ -36,7 +36,7 @@ def test_default_level_lets_info_through() -> None:
     state = _snapshot()
     try:
         configure_logging(None)
-        assert logging.getLogger("garminator.garmin.retry").isEnabledFor(logging.INFO)
+        assert logging.getLogger("t0.garmin.retry").isEnabledFor(logging.INFO)
     finally:
         _restore(state)
 
@@ -46,13 +46,13 @@ def test_format_includes_timestamp_level_and_module(capsys: pytest.CaptureFixtur
     state = _snapshot()
     try:
         configure_logging("INFO")
-        logging.getLogger("garminator.garmin.retry").info("wait %ss", 30)
+        logging.getLogger("t0.garmin.retry").info("wait %ss", 30)
         output = capsys.readouterr()
         # stdout not stderr: CronJobs already write reports there, Kubernetes doesn't
         # guarantee relative order of two streams.
         assert output.err == ""
         assert "INFO" in output.out
-        assert "garminator.garmin.retry" in output.out
+        assert "t0.garmin.retry" in output.out
         assert "wait 30s" in output.out
         assert output.out.startswith("20")  # ISO timestamp at line start
     finally:
@@ -79,7 +79,7 @@ def test_repeated_calls_do_not_duplicate_lines(capsys: pytest.CaptureFixture[str
     try:
         configure_logging("INFO")
         configure_logging("INFO")
-        logging.getLogger("garminator.test").info("once only")
+        logging.getLogger("t0.test").info("once only")
         assert capsys.readouterr().out.count("once only") == 1
     finally:
         _restore(state)

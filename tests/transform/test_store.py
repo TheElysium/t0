@@ -1,8 +1,8 @@
-"""Tests for :mod:`garminator.transform.store`, against an in-memory DB connection.
+"""Tests for :mod:`t0.transform.store`, against an in-memory DB connection.
 
 ``FakeConnection``/``FakeCursor`` (defined below, local to this module -- not shared
 with ``tests/garmin/fakes.py`` which serves a different purpose) implement
-only the structural interface ``garminator.transform.store.DBConnection``. They don't just
+only the structural interface ``t0.transform.store.DBConnection``. They don't just
 record queries: they also replay ``DELETE``/``INSERT``/``executemany`` on an in-memory
 Python state, table by table, so that idempotence (two passes leave the same state)
 is verifiable on the state itself, not just on the query sequence.
@@ -17,14 +17,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
-from garminator.fit.model import LapRow, SampleRow, SwimLengthRow
-from garminator.transform.rows import (
+from t0.fit.model import LapRow, SampleRow, SwimLengthRow
+from t0.transform.rows import (
     ActivityHrHistogramRow,
     ActivityMetricRow,
     ActivityRow,
     CoreActivityBundle,
 )
-from garminator.transform.store import store_activity_bundle
+from t0.transform.store import store_activity_bundle
 
 START = datetime(2026, 6, 1, 7, 0, 0, tzinfo=UTC)
 ACTIVITY_ID = 42
@@ -77,7 +77,7 @@ class FakeCursor:
 
 @dataclass
 class FakeConnection:
-    """In-memory DB connection satisfying ``garminator.transform.store.DBConnection``."""
+    """In-memory DB connection satisfying ``t0.transform.store.DBConnection``."""
 
     executed: list[tuple[str, Any]] = field(default_factory=list)
     commit_count: int = 0

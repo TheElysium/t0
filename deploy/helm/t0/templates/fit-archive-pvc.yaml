@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "t0.fitArchive.pvcName" . }}
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fit-archive
+spec:
+  accessModes:
+    {{- toYaml .Values.fitArchive.persistence.accessModes | nindent 4 }}
+  {{- if .Values.fitArchive.persistence.storageClassName }}
+  storageClassName: {{ .Values.fitArchive.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.fitArchive.persistence.size | quote }}

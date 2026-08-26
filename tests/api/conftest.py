@@ -3,7 +3,7 @@
 Models ``raw.fit_file`` as close as possible to real schema (``migrations/002_raw.sql``
 + ``012_raw_fit_file_manual_upload.sql``), not as close as convenient to write: the
 ``UNIQUE (sha256)`` constraint (``fit_file_sha_uq``) is applied via the same query pair
-that :func:`garminator.garmin.raw_store.insert_fit_file` actually emits
+that :func:`t0.garmin.raw_store.insert_fit_file` actually emits
 (``INSERT ... ON CONFLICT (sha256) DO NOTHING RETURNING fit_file_id``, then on conflict,
 a read-back by ``sha256``). A stub accepting a second ``INSERT`` for an already-present
 ``sha256`` would let a test pass that PostgreSQL would really refuse — precisely the
@@ -21,7 +21,7 @@ import pytest
 @dataclass
 class FitFileRow:
     """Minimal reflection of a ``raw.fit_file`` row, for only the columns that
-    :func:`garminator.garmin.raw_store.insert_fit_file` reads or writes."""
+    :func:`t0.garmin.raw_store.insert_fit_file` reads or writes."""
 
     fit_file_id: int
     garmin_activity_id: int | None
@@ -76,7 +76,7 @@ class FakeCursor:
 
 @dataclass
 class FakeRawStoreConnection:
-    """Stub for :class:`garminator.garmin.raw_store.DBConnection`."""
+    """Stub for :class:`t0.garmin.raw_store.DBConnection`."""
 
     rows_by_sha: dict[bytes, FitFileRow] = field(default_factory=dict)
     next_id: int = 0
@@ -193,8 +193,8 @@ class FakeCoreCursor:
 
 @dataclass
 class FakeCoreConnection:
-    """Stub for the ``core.*`` side of :class:`garminator.garmin.raw_store.DBConnection`,
-    as exercised by ``garminator.api.rpe``.
+    """Stub for the ``core.*`` side of :class:`t0.garmin.raw_store.DBConnection`,
+    as exercised by ``t0.api.rpe``.
 
     Models the two tables the RPE endpoint touches — ``core.activity``
     (``needs_manual_rpe`` flag only) and ``core.activity_metric`` (keyed by its real

@@ -1,6 +1,6 @@
 -- Migration 005: core: sample, sample_derived, activity_hr_histogram, activity_power_curve, activity_metric
 -- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
--- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
+-- Batch L1 (t0) -- do not modify the DDL manually outside migration.
 
 CREATE TABLE core.sample (
     activity_id           bigint      NOT NULL REFERENCES core.activity(activity_id) ON DELETE CASCADE,

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from garminator.load.method_priority import METRIC_METHOD_PRIORITY, resolve_canonical
+from t0.load.method_priority import METRIC_METHOD_PRIORITY, resolve_canonical
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 

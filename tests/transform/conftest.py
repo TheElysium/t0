@@ -1,4 +1,4 @@
-"""100% synthetic fixtures for tests of the ``garminator.transform`` layer.
+"""100% synthetic fixtures for tests of the ``t0.transform`` layer.
 
 NO actual activity byte (``running.fit``/``swim.fit``/``bike.tcx``/
 ``Activities.csv``/``metrics&wellness_1year/``) appears here: these files contain GPS
@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from garminator.fit.model import (
+from t0.fit.model import (
     LapRow,
     ParsedActivitySource,
     SampleRow,
     SessionSummary,
     SwimLengthRow,
 )
-from garminator.load.thresholds import Threshold
-from garminator.transform.activity import ActivityContext
+from t0.load.thresholds import Threshold
+from t0.transform.activity import ActivityContext
 
 ACTIVITY_ID = 1
 ATHLETE_ID = 7

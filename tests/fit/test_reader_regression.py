@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from garminator.fit.reader import decode_fit_file
+from t0.fit.reader import decode_fit_file
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RUNNING_FIT = _REPO_ROOT / "running.fit"

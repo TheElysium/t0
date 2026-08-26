@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.transform.runner`, against an in-memory database.
+"""Tests for :mod:`t0.transform.runner`, against an in-memory database.
 
 What these tests protect is not the nominal path (which is visible) but the three
 orchestration decisions that, if they broke, would produce NO visible error:
@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from garminator.transform import runner as runner_module
-from garminator.transform.runner import (
+from t0.transform import runner as runner_module
+from t0.transform.runner import (
     PendingFile,
     format_transform_report,
     load_activity_summary,
@@ -42,7 +42,7 @@ from tests.transform.conftest import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from garminator.fit.model import ParsedActivitySource
+    from t0.fit.model import ParsedActivitySource
 
 ACTIVITY_ID = 9001
 
@@ -466,7 +466,7 @@ def _decode_manual_fit(
 ) -> ParsedActivitySource:
     """Double for a manual FIT upload: no Garmin summary, so the ``session`` message
     (sport/sub_sport/total_timer_time) is what ``build_manual_activity_context`` needs."""
-    from garminator.fit.model import SessionSummary
+    from t0.fit.model import SessionSummary
 
     samples = [
         replace(s, activity_id=activity_id)

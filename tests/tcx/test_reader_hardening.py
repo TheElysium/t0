@@ -1,4 +1,4 @@
-"""Regression tests for custom XML hardening in :mod:`garminator.tcx.reader`.
+"""Regression tests for custom XML hardening in :mod:`t0.tcx.reader`.
 
 Context (L3 batch end review): hardening initially relied on ``ET.XMLParser().parser``,
 attribute that NO LONGER EXISTS in installed CPython 3.12 (C accelerator doesn't expose
@@ -25,8 +25,8 @@ from xml.parsers import expat
 
 import pytest
 
-from garminator.fit.errors import TcxParseError
-from garminator.tcx.reader import _parse_xml_secure, decode_tcx
+from t0.fit.errors import TcxParseError
+from t0.tcx.reader import _parse_xml_secure, decode_tcx
 
 if TYPE_CHECKING:
     from pathlib import Path

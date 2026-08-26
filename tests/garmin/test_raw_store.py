@@ -1,8 +1,8 @@
-"""Tests for :mod:`garminator.garmin.raw_store` against an in-memory DB connection.
+"""Tests for :mod:`t0.garmin.raw_store` against an in-memory DB connection.
 
 These tests touch no real PostgreSQL: ``FakeConnection``/``FakeCursor``
 (``tests/garmin/fakes.py``) implement only the structural view
-``garminator.garmin.raw_store.DBConnection`` this module needs.
+``t0.garmin.raw_store.DBConnection`` this module needs.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import hashlib
 import json
 from datetime import date
 
-from garminator.garmin.raw_store import (
+from t0.garmin.raw_store import (
     canonical_json_dumps,
     finish_ingest_run,
     insert_api_response,

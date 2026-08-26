@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "garminator"
+name = "t0"
 version = "0.1.0"
 description = "Self-hosted Garmin Connect data ingestion and visualization pipeline."
 readme = "README.md"
@@ -21,7 +21,7 @@ dependencies = [
     "apscheduler==3.10.4",
     "fastapi==0.115.5",
     # Required AT RUNTIME by File()/UploadFile parameters of the upload endpoint
-    # (garminator.api.upload): FastAPI does not pull it itself, and its absence only
+    # (t0.api.upload): FastAPI does not pull it itself, and its absence only
     # shows up on first actual send, not on import.
     "python-multipart==0.0.20",
     "uvicorn[standard]==0.32.1",
@@ -41,11 +41,11 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/garminator"]
+packages = ["src/t0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=garminator --cov-report=term-missing"
+addopts = "--cov=t0 --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 100
@@ -77,7 +77,7 @@ ignore = [
 "tests/**" = ["S101", "S105", "S106", "PLR2004"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["garminator"]
+known-first-party = ["t0"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 
-from garminator.fit.model import ParsedActivitySource
-from garminator.transform.activity import ActivityContext, build_core_rows
+from t0.fit.model import ParsedActivitySource
+from t0.transform.activity import ActivityContext, build_core_rows
 
 from .conftest import ALL_THRESHOLD, ATHLETE_ID, RUN_THRESHOLD, make_sample
 

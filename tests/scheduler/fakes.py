@@ -1,8 +1,8 @@
 """In-memory DB stub for batch L6 tests -- no PostgreSQL required.
 
 Unlike ``tests/garmin/fakes.py::FakeConnection`` (which merely records received queries),
-``FakePollDB`` actually simulates the effect of :mod:`garminator.scheduler.store`
-queries on two in-memory tables : necessary to end-to-end test :func:`garminator.
+``FakePollDB`` actually simulates the effect of :mod:`t0.scheduler.store`
+queries on two in-memory tables : necessary to end-to-end test :func:`t0.
 scheduler.service.run_scheduled_poll` (crash recovery, sliding window, deduplication)
 without ever opening a real connection.
 
@@ -116,7 +116,7 @@ class FakeCursor:
 
 @dataclass
 class FakePollDB:
-    """Satisfies ``garminator.scheduler.store.DBConnection``, entirely in memory."""
+    """Satisfies ``t0.scheduler.store.DBConnection``, entirely in memory."""
 
     poll_window: dict[tuple[str, date], _PollWindowRow] = field(default_factory=dict)
     payload_seen: dict[tuple[str, date, str, bytes], int] = field(default_factory=dict)

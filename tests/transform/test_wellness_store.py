@@ -1,7 +1,7 @@
-"""Tests for :mod:`garminator.transform.wellness_store`, against an in-memory connection.
+"""Tests for :mod:`t0.transform.wellness_store`, against an in-memory connection.
 
 ``FakeConnection``/``FakeCursor`` implement only the structural interface
-``garminator.transform.wellness_store.DBConnection``, and REPLAY the statements on Python
+``t0.transform.wellness_store.DBConnection``, and REPLAY the statements on Python
 dicts and lists table by table. That is the point: the property under test is idempotence
 -- running the same day twice must leave the same state, and running a SHRUNK day must not
 leave the removed rows behind -- and that can only be observed on the state, never on the
@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
-from garminator.transform.wellness import (
+from t0.transform.wellness import (
     METRIC_ID_BODY_BATTERY,
     METRIC_ID_HRV,
     METRIC_ID_STRESS,
@@ -25,7 +25,7 @@ from garminator.transform.wellness import (
     SleepStageRow,
     WellnessSampleRow,
 )
-from garminator.transform.wellness_store import combine_source_hashes, store_wellness_day
+from t0.transform.wellness_store import combine_source_hashes, store_wellness_day
 
 ATHLETE_ID = 7
 LOCAL_DATE = date(2026, 6, 1)

@@ -2,14 +2,14 @@
 --
 -- WHAT THIS IS FOR
 -- Migrations are frozen by checksum the first time they are applied on a real
--- deployment (see src/garminator/db/runner.py). Until then, and only until then, a
+-- deployment (see src/t0/db/runner.py). Until then, and only until then, a
 -- schema defect can still be fixed in the migration file itself rather than by a
 -- corrective migration stacked on top. This file is the checklist that turns the
 -- athlete's own history into evidence that the schema holds.
 --
 -- HOW TO RUN
---   psql "$GARMINATOR_POSTGRES_DSN" -f tools/validate_schema.sql
--- Run it AFTER the import and AFTER `python -m garminator.ops refresh`: every mart.*
+--   psql "$T0_POSTGRES_DSN" -f tools/validate_schema.sql
+-- Run it AFTER the import and AFTER `python -m t0.ops refresh`: every mart.*
 -- object below is a materialized view and reads as empty until it is refreshed.
 --
 -- HOW TO READ IT
@@ -149,7 +149,7 @@ SELECT count(*) AS days_with_load,
 \echo '== 7. mart.pmc: requires a row in core.pmc_seed =='
 -- EMPTY IS EXPECTED when core.pmc_seed has no row: the recursion starts from the seed,
 -- so without one there is no calendar to walk. Seed it with
---     python -m garminator.ops seed-pmc
+--     python -m t0.ops seed-pmc
 -- before reading anything into an empty PMC. The calendar must be DENSE, rest days
 -- included, or CTL never decays -- which is what rest_days_present checks.
 -- seed_rows > 1 for a single athlete is legitimate (the table keeps the history of

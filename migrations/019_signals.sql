@@ -11,7 +11,7 @@
 --   mart.ramp_risk          reads mart.pmc and mart.daily_load;
 --   mart.coach_flags        reads mart.wellness_baseline (018), mart.pmc,
 --                           mart.ramp_risk and core.sleep_session.
--- src/garminator/ops/refresh.py registers them AFTER the six historical views, in the
+-- src/t0/ops/refresh.py registers them AFTER the six historical views, in the
 -- order wellness_baseline -> ramp_risk -> coach_flags; a manual refresh that ignores this
 -- order makes coach_flags read stale baselines/ramp inputs for one day -- silently wrong
 -- flags are worse than missing flags.

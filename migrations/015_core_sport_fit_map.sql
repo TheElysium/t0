@@ -4,7 +4,7 @@
 -- declares two columns on core.sport, fit_sport smallint NULL and fit_sub_sport smallint
 -- NULL, with a table comment claiming they hold "the (sport, sub_sport) pair of the
 -- official FIT profile". Neither claim survives contact with the batch that actually
--- implements the mapping (SPORT_CODE_BY_FIT_SPORT, src/garminator/transform/manual.py):
+-- implements the mapping (SPORT_CODE_BY_FIT_SPORT, src/t0/transform/manual.py):
 --
 --   1. The seed in 003 never populates them. Every row of core.sport has fit_sport IS
 --      NULL and fit_sub_sport IS NULL. The columns are dead on arrival.
@@ -15,7 +15,7 @@
 --      is not a seeding gap, it is a type that could not have worked even if seeded.
 --
 -- WHERE THE MAPPING ACTUALLY LIVES. SPORT_CODE_BY_FIT_SPORT in
--- src/garminator/transform/manual.py already carries this mapping correctly, keyed on
+-- src/t0/transform/manual.py already carries this mapping correctly, keyed on
 -- (sport, sub_sport) string pairs, with sub_sport = None meaning "fallback for this
 -- sport when no more specific sub_sport matches". This migration mirrors that dict into
 -- SQL so the correspondence is queryable and FK-checked in the database, not only
@@ -48,7 +48,7 @@ CREATE TABLE core.sport_fit_map (
 );
 
 COMMENT ON TABLE core.sport_fit_map IS
-  'Correspondence table between the (sport, sub_sport) string pair produced by the FIT decoder (garmin_fit_sdk resolves both fields to strings, verified empirically, not the smallint originally declared on core.sport in migration 003) and a canonical garminator sport_code. Many-to-one: several (fit_sport, fit_sub_sport) pairs can map to the same sport_code (e.g. cycling/indoor_cycling, cycling/virtual_activity and cycling/spin all map to virtual_cycling), which is exactly why this is a separate table rather than two columns on core.sport. The authoritative copy of this mapping is SPORT_CODE_BY_FIT_SPORT in src/garminator/transform/manual.py; this table is a mirror kept in sync by hand and checked against it in tests/db/test_sport_fit_map.py -- Python remains the source of truth actually executed at ingestion, this table exists so the same correspondence is queryable and FK-constrained in SQL.';
+  'Correspondence table between the (sport, sub_sport) string pair produced by the FIT decoder (garmin_fit_sdk resolves both fields to strings, verified empirically, not the smallint originally declared on core.sport in migration 003) and a canonical t0 sport_code. Many-to-one: several (fit_sport, fit_sub_sport) pairs can map to the same sport_code (e.g. cycling/indoor_cycling, cycling/virtual_activity and cycling/spin all map to virtual_cycling), which is exactly why this is a separate table rather than two columns on core.sport. The authoritative copy of this mapping is SPORT_CODE_BY_FIT_SPORT in src/t0/transform/manual.py; this table is a mirror kept in sync by hand and checked against it in tests/db/test_sport_fit_map.py -- Python remains the source of truth actually executed at ingestion, this table exists so the same correspondence is queryable and FK-constrained in SQL.';
 COMMENT ON COLUMN core.sport_fit_map.fit_sub_sport IS
   'NULL means "fallback for this fit_sport when no more specific (fit_sport, fit_sub_sport) row matches" -- mirrors the sub_sport = None fallback entries of SPORT_CODE_BY_FIT_SPORT. UNIQUE NULLS NOT DISTINCT on (fit_sport, fit_sub_sport) guarantees at most one fallback row per fit_sport.';
 
@@ -76,4 +76,4 @@ ALTER TABLE core.sport DROP COLUMN fit_sport;
 ALTER TABLE core.sport DROP COLUMN fit_sub_sport;
 
 COMMENT ON TABLE core.sport IS
-  'Canonical garminator sport, one row per sport_code. This is NOT a simple labels table -- it carries two decision-making pieces of information: discipline (which drives the load fallback matrix, 04 section 0.3) and is_indoor (which forces f(i)=1 in GAP calculation, VERIFIED 04 section 3.3.4: "Treadmill: gradient unreliable"). A simple free text column on core.activity would not allow these rules to be expressed declaratively. The correspondence between the (sport, sub_sport) pair of the official FIT profile and sport_code no longer lives on this table (migration 003 declared fit_sport/fit_sub_sport smallint columns here, both dead -- never seeded, and mistyped: the FIT decoder resolves these fields to strings, not integers): it is many-to-one and cannot be expressed by two columns on this table, see core.sport_fit_map (migration 015).';
+  'Canonical t0 sport, one row per sport_code. This is NOT a simple labels table -- it carries two decision-making pieces of information: discipline (which drives the load fallback matrix, 04 section 0.3) and is_indoor (which forces f(i)=1 in GAP calculation, VERIFIED 04 section 3.3.4: "Treadmill: gradient unreliable"). A simple free text column on core.activity would not allow these rules to be expressed declaratively. The correspondence between the (sport, sub_sport) pair of the official FIT profile and sport_code no longer lives on this table (migration 003 declared fit_sport/fit_sub_sport smallint columns here, both dead -- never seeded, and mistyped: the FIT decoder resolves these fields to strings, not integers): it is many-to-one and cannot be expressed by two columns on this table, see core.sport_fit_map (migration 015).';

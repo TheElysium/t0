@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from garminator.transform.activity import build_core_rows
+from t0.transform.activity import build_core_rows
 
 from .conftest import (
     ALL_THRESHOLD,

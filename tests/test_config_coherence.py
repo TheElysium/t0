@@ -16,27 +16,25 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from garminator.logging_setup import LOG_LEVEL_ENV_VAR
-from garminator.ops.backfill import DEFAULT_HISTORY_START_ISO
-from garminator.scheduler.catalog import DEFAULT_ENDPOINTS
-from garminator.settings import Settings
-from garminator.transform.runner import DEFAULT_BATCH_LIMIT
+from t0.logging_setup import LOG_LEVEL_ENV_VAR
+from t0.ops.backfill import DEFAULT_HISTORY_START_ISO
+from t0.scheduler.catalog import DEFAULT_ENDPOINTS
+from t0.settings import Settings
+from t0.transform.runner import DEFAULT_BATCH_LIMIT
 from tests.scheduler.fakes import INGEST_RUN_MODES
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_VALUES_YAML = _REPO_ROOT / "deploy" / "helm" / "garminator" / "values.yaml"
+_VALUES_YAML = _REPO_ROOT / "deploy" / "helm" / "t0" / "values.yaml"
 _MIGRATION_RAW = _REPO_ROOT / "migrations" / "002_raw.sql"
-_INGEST_CONFIGMAP = (
-    _REPO_ROOT / "deploy" / "helm" / "garminator" / "templates" / "ingest-configmap.yaml"
-)
-_TEMPLATES = _REPO_ROOT / "deploy" / "helm" / "garminator" / "templates"
+_INGEST_CONFIGMAP = _REPO_ROOT / "deploy" / "helm" / "t0" / "templates" / "ingest-configmap.yaml"
+_TEMPLATES = _REPO_ROOT / "deploy" / "helm" / "t0" / "templates"
 
-#: Variables ``GARMINATOR_*`` from ConfigMap that deliberately do not correspond to
+#: Variables ``T0_*`` from ConfigMap that deliberately do not correspond to
 #: any :class:`Settings` field, with the reason. Any other prefixed key not matching
 #: anything is a dead setting, and the test below rejects it.
 _OUTSIDE_SETTINGS: dict[str, str] = {
     LOG_LEVEL_ENV_VAR: (
-        "read by garminator.logging_setup, deliberately outside Settings: adjusting "
+        "read by t0.logging_setup, deliberately outside Settings: adjusting "
         "verbosity must not require Garmin credentials or DSN"
     ),
 }
@@ -122,7 +120,7 @@ def test_helm_endpoint_lists_match_the_code_catalog() -> None:
 
 
 def test_every_prefixed_configmap_key_is_actually_read_by_the_code() -> None:
-    """A ``GARMINATOR_*`` chart key must map to a ``Settings`` field.
+    """A ``T0_*`` chart key must map to a ``Settings`` field.
 
     REAL DEFECT. The ConfigMap exposed ``LOG_LEVEL`` unprefixed, right below a comment
     explaining that an unprefixed key is ignored by ``Settings``. No code ever read it:
@@ -135,11 +133,11 @@ def test_every_prefixed_configmap_key_is_actually_read_by_the_code() -> None:
         m.group(1)
         for line in text.splitlines()
         if not line.lstrip().startswith("#")
-        if (m := re.match(r"^\s{2}(GARMINATOR_[A-Z0-9_]+):", line))
+        if (m := re.match(r"^\s{2}(T0_[A-Z0-9_]+):", line))
     }
-    assert keys, "no GARMINATOR_* key found in the ingest ConfigMap"
+    assert keys, "no T0_* key found in the ingest ConfigMap"
 
-    known = {f"GARMINATOR_{name.upper()}" for name in Settings.model_fields}
+    known = {f"T0_{name.upper()}" for name in Settings.model_fields}
     for key in sorted(keys):
         assert key in known or key in _OUTSIDE_SETTINGS, (
             f"{key} is read by nobody: neither a Settings field nor an exception "

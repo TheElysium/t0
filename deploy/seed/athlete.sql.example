@@ -6,11 +6,11 @@
 -- out of the repository before filling it in. Same reasoning as for original .FIT
 -- files, which carry GPS traces: the repository contains the PROCEDURE, never the data.
 --
---   cp deploy/seed/athlete.sql.example ~/garminator-seed.sql   # OUT of repo
---   $EDITOR ~/garminator-seed.sql
---   psql "$GARMINATOR_POSTGRES_DSN" -f ~/garminator-seed.sql
+--   cp deploy/seed/athlete.sql.example ~/t0-seed.sql   # OUT of repo
+--   $EDITOR ~/t0-seed.sql
+--   psql "$T0_POSTGRES_DSN" -f ~/t0-seed.sql
 --
--- WHY THIS IS MANDATORY. `python -m garminator.transform` refuses to guess
+-- WHY THIS IS MANDATORY. `python -m t0.transform` refuses to guess
 -- the athlete: on an empty `core.athlete` it exits with code 2 without writing anything.
 -- And without a `core.threshold` row, no TSS is ever calculated -- activities would be
 -- recorded, but all training load would remain NULL.

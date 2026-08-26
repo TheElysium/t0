@@ -31,9 +31,9 @@ jobs:
           ruff format --check .
           mypy src tests
           pytest
-          for values in deploy/helm/garminator/ci/*.yaml; do
-            helm lint deploy/helm/garminator --values "$values"
-            helm template garminator deploy/helm/garminator --values "$values" > /dev/null
+          for values in deploy/helm/t0/ci/*.yaml; do
+            helm lint deploy/helm/t0 --values "$values"
+            helm template t0 deploy/helm/t0 --values "$values" > /dev/null
           done
 
       - name: Extract image metadata

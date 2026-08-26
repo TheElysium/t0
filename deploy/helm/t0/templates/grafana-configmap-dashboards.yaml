@@ -1,0 +1,24 @@
+{{- if .Values.grafana.enabled }}
+{{- if not .Values.grafana.dashboards.configMapName }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "t0.grafana.dashboardsConfigMapName" . }}
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+  annotations:
+    # Batch L9: JSON files are read from dashboards/*.json, INSIDE this chart
+    # (deploy/helm/t0/dashboards/), not duplicated inline in YAML here.
+    # .Files only sees what is under the chart root: a dashboards/ directory at
+    # deploy/grafana/ level would not be accessible from this template, hence its
+    # location under the chart. .helmignore does not exclude them (only .DS_Store,
+    # .git/, *.tmp, *.orig, *.swp do).
+    t0.io/note: "content of batch L9: dashboards/*.json of this chart"
+data:
+  {{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

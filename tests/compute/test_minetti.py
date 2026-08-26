@@ -1,4 +1,4 @@
-"""Tests for garminator.compute.minetti - Minetti table and cases GAP-1/GAP-2.
+"""Tests for t0.compute.minetti - Minetti table and cases GAP-1/GAP-2.
 
 The numeric values in the table below are computed directly from the specification
 polynomial (04-load-formulas.md §3.3) with pytest.approx to tolerate float rounding;
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from garminator.compute.minetti import (
+from t0.compute.minetti import (
     grade_adjusted_pace_s_per_km,
     grade_adjusted_speed_mps,
     grade_adjustment_factor,

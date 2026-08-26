@@ -1,6 +1,6 @@
 -- Migration 001: extensions and raw / core / mart schemas
 -- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
--- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
+-- Batch L1 (t0) -- do not modify the DDL manually outside migration.
 
 -- btree_gist: required for the exclusion constraint on overlapping
 -- validity periods of thresholds (core.threshold).

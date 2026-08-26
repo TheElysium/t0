@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.garmin.retry`.
+"""Tests for :mod:`t0.garmin.retry`.
 
 Covers two acceptance requirements for this batch:
 - sequence 429 -> backoff -> success;
@@ -17,7 +17,7 @@ from garminconnect import (
     GarminConnectTooManyRequestsError,
 )
 
-from garminator.garmin.retry import (
+from t0.garmin.retry import (
     RetryExhaustedError,
     RetryPolicy,
     call_with_retry,

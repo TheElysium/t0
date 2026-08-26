@@ -1,8 +1,8 @@
-"""Tests for garminator.api.ingest: pure business logic of L7 batch.
+"""Tests for t0.api.ingest: pure business logic of L7 batch.
 
 Depend on neither FastAPI, python-multipart, nor httpx (neither of the last two is
 installed in this repository's venv — see batch end report): precisely why business
-logic lives in a module separate from the HTTP layer (garminator.api.upload). All
+logic lives in a module separate from the HTTP layer (t0.api.upload). All
 fixtures are synthetic bytes constructed here, never derived from athlete's real files.
 """
 
@@ -15,15 +15,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from garminator.api.errors import HostileArchiveError, PayloadTooLargeError
-from garminator.api.ingest import (
+from t0.api.errors import HostileArchiveError, PayloadTooLargeError
+from t0.api.ingest import (
     DEFAULT_MAX_COMPRESSION_RATIO,
     UploadOutcome,
     check_zip_safety,
     ingest_upload,
 )
-from garminator.fit.errors import ArchiveError
-from garminator.garmin.raw_store import FitFileShaConflictError, insert_fit_file
+from t0.fit.errors import ArchiveError
+from t0.garmin.raw_store import FitFileShaConflictError, insert_fit_file
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -298,7 +298,7 @@ def test_ingest_upload_inserts_row_even_when_local_parse_validation_fails(
     tmp_path: Path, raw_store_conn: FakeRawStoreConnection
 ) -> None:
     """An archived-but-locally-unparseable upload must still enter the queue — it is
-    garminator.transform that attempts real parsing, not this entry point."""
+    t0.transform that attempts real parsing, not this entry point."""
     outcome = ingest_upload(_FAKE_FIT, tmp_path, conn=raw_store_conn)
 
     assert outcome.parse_error is not None
@@ -314,7 +314,7 @@ def test_ingest_upload_writes_file_on_volume_before_inserting_raw_fit_file_row(
     only check final state) — only inspection AT insertion time can distinguish the two
     orders, hence the spy below.
     """
-    import garminator.api.ingest as ingest_module
+    import t0.api.ingest as ingest_module
 
     original_insert = insert_fit_file
     volume_contents_at_insert: list[list[Path]] = []

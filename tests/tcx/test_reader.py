@@ -1,4 +1,4 @@
-"""Tests of garminator.tcx.reader: hardened XML decoding, robustness.
+"""Tests of t0.tcx.reader: hardened XML decoding, robustness.
 
 Fixtures used here are either built inline (minimal, entirely fictional XML strings)
 or read from tests/fixtures/tcx/synthetic_bike.tcx—synthetic file built for this
@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from garminator.fit.errors import TcxParseError
-from garminator.tcx.mapping import TCD_NAMESPACE, TPX_NAMESPACE
-from garminator.tcx.reader import decode_tcx, decode_tcx_file
+from t0.fit.errors import TcxParseError
+from t0.tcx.mapping import TCD_NAMESPACE, TPX_NAMESPACE
+from t0.tcx.reader import decode_tcx, decode_tcx_file
 
 
 def test_tcd_namespace_matches_the_official_uri() -> None:

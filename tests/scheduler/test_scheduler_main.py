@@ -1,4 +1,4 @@
-"""Tests for entry point ``python -m garminator.scheduler`` (batch L11).
+"""Tests for entry point ``python -m t0.scheduler`` (batch L11).
 
 Never builds real ``garminconnect`` transport or real PostgreSQL connection:
 ``main()`` accepts three injection points (``settings``, ``connect_db``,
@@ -19,21 +19,21 @@ from typing import TYPE_CHECKING, Any
 import garminconnect
 from pydantic import SecretStr
 
-from garminator.garmin.client import GarminClient
-from garminator.scheduler import __main__ as scheduler_main
-from garminator.scheduler.activity_files import DayArchiveSummary
-from garminator.scheduler.fetcher import GarminWindowFetcher
-from garminator.scheduler.service import FetchedWindow
-from garminator.settings import Settings
+from t0.garmin.client import GarminClient
+from t0.scheduler import __main__ as scheduler_main
+from t0.scheduler.activity_files import DayArchiveSummary
+from t0.scheduler.fetcher import GarminWindowFetcher
+from t0.scheduler.service import FetchedWindow
+from t0.settings import Settings
 from tests.scheduler.fakes import INGEST_RUN_MODES, FakePollDB
 from tests.scheduler.fakes import FakeCursor as _PollFakeCursor
 
 if TYPE_CHECKING:
     import pytest
 
-    from garminator.garmin.client import IngestRunTracker
-    from garminator.scheduler.service import WindowFetcher
-    from garminator.scheduler.store import DBConnection
+    from t0.garmin.client import IngestRunTracker
+    from t0.scheduler.service import WindowFetcher
+    from t0.scheduler.store import DBConnection
 
 
 class _MainFakeCursor(_PollFakeCursor):
@@ -90,15 +90,15 @@ class _MainFakeDB(FakePollDB):
 
 
 #: DSN explicitly passed via ``--dsn`` in tests. Since batch recovery, ``main()`` resolves
-#: DSN like ``garminator.ops.__main__`` (argument or ``GARMINATOR_POSTGRES_DSN``), not
+#: DSN like ``t0.ops.__main__`` (argument or ``T0_POSTGRES_DSN``), not
 #: from ``Settings`` : ``--dry-run`` must run without any Garmin secrets. Tests provide
 #: it on the command line, independent of the machine's environment.
-_DSN = "postgresql://user:pass@localhost:5432/garminator"
+_DSN = "postgresql://user:pass@localhost:5432/t0"
 
 
 def _settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
-        "postgres_dsn": SecretStr("postgresql://user:pass@localhost:5432/garminator"),
+        "postgres_dsn": SecretStr("postgresql://user:pass@localhost:5432/t0"),
         # ``garmin_tokens_path`` has ``validation_alias="GARMINTOKENS"`` (settings.py):
         # without ``populate_by_name``, only the alias is accepted in direct construction.
         "GARMINTOKENS": Path("/dev/null"),
@@ -271,11 +271,11 @@ def test_full_run_with_a_failing_window_returns_exit_code_1(
 
 def test_invalid_settings_returns_exit_code_2(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "GARMINATOR_POSTGRES_DSN",
+        "T0_POSTGRES_DSN",
         "GARMINTOKENS",
-        "GARMINATOR_FIT_ARCHIVE_PATH",
-        "GARMINATOR_GARMIN_USERNAME",
-        "GARMINATOR_GARMIN_PASSWORD",
+        "T0_FIT_ARCHIVE_PATH",
+        "T0_GARMIN_USERNAME",
+        "T0_GARMIN_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(Path(__file__).resolve().parent)  # avoid a stray repository .env

@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.garmin.client`, entirely on simulated transport and DB.
+"""Tests for :mod:`t0.garmin.client`, entirely on simulated transport and DB.
 
 Covers three acceptance requirements for this module:
 - existing tokens are reused without SSO (and restoration is logged);
@@ -20,10 +20,10 @@ from garminconnect import (
     GarminConnectTooManyRequestsError,
 )
 
-from garminator.garmin.client import GarminClient, ingest_run
-from garminator.garmin.rate_limit import RateLimiter
-from garminator.garmin.retry import RetryExhaustedError, RetryPolicy
-from garminator.garmin.tokenstore import TOKEN_FILENAME
+from t0.garmin.client import GarminClient, ingest_run
+from t0.garmin.rate_limit import RateLimiter
+from t0.garmin.retry import RetryExhaustedError, RetryPolicy
+from t0.garmin.tokenstore import TOKEN_FILENAME
 from tests.garmin.fakes import FakeConnection, FakeTransport
 
 if TYPE_CHECKING:
@@ -57,7 +57,7 @@ def test_login_reuses_existing_tokens_without_full_sso(
     transport = FakeTransport()
     client = _client(transport, tokenstore)
 
-    with caplog.at_level(logging.INFO, logger="garminator.garmin.client"):
+    with caplog.at_level(logging.INFO, logger="t0.garmin.client"):
         client.login()
 
     assert transport.did_full_sso is False
@@ -77,7 +77,7 @@ def test_login_with_empty_tokenstore_performs_and_logs_full_sso(
     transport = FakeTransport()
     client = _client(transport, tokenstore)
 
-    with caplog.at_level(logging.INFO, logger="garminator.garmin.client"):
+    with caplog.at_level(logging.INFO, logger="t0.garmin.client"):
         client.login()
 
     assert transport.did_full_sso is True
@@ -332,7 +332,7 @@ def test_login_warns_when_garminconnect_rewrites_the_tokens(
 
     client = _client(RewritingTransport(), tokenstore)
 
-    with caplog.at_level(logging.INFO, logger="garminator.garmin.client"):
+    with caplog.at_level(logging.INFO, logger="t0.garmin.client"):
         client.login()
 
     assert any(
@@ -350,7 +350,7 @@ def test_login_does_not_warn_when_tokens_are_untouched(
 
     client = _client(FakeTransport(), tokenstore)
 
-    with caplog.at_level(logging.INFO, logger="garminator.garmin.client"):
+    with caplog.at_level(logging.INFO, logger="t0.garmin.client"):
         client.login()
 
     assert not any("REWRITTEN" in record.message for record in caplog.records)

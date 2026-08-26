@@ -1,6 +1,6 @@
 """Transversal regression test: on an activity entirely devoid of usable data (no
 samples), NO "non-calculable" field of ``ActivityRow`` must be 0 -- only ``None``
-represents an incalculable quantity in this schema (see ``garminator.transform.rows``
+represents an incalculable quantity in this schema (see ``t0.transform.rows``
 docstring and comment on ``core.activity_metric.value`` in migrations/005_core_series.sql).
 
 This test explicitly sweeps nullable DDL fields -- it intentionally excludes counters
@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from garminator.transform.activity import build_core_rows
+from t0.transform.activity import build_core_rows
 
 if TYPE_CHECKING:
-    from garminator.transform.rows import CoreActivityBundle
+    from t0.transform.rows import CoreActivityBundle
 
 from .conftest import ALL_THRESHOLD, ATHLETE_ID, BIKE_THRESHOLD, bike_context, parsed_source
 

@@ -1,4 +1,4 @@
-"""Tests for :func:`garminator.garmin.raw_store.insert_fit_file` (batch L12).
+"""Tests for :func:`t0.garmin.raw_store.insert_fit_file` (batch L12).
 
 ``tests/garmin/fakes.py`` (existing, unmodified — another batch may depend on it) only
 simulates query patterns from earlier batches (``RETURNING id`` for ``raw.api_response``,
@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from garminator.garmin.raw_store import FitFileShaConflictError, insert_fit_file
+from t0.garmin.raw_store import FitFileShaConflictError, insert_fit_file
 
 
 @dataclass
@@ -79,7 +79,7 @@ class _FakeCursor:
 
 @dataclass
 class _FakeFitFileConnection:
-    """Satisfies ``garminator.garmin.raw_store.DBConnection``, in-memory."""
+    """Satisfies ``t0.garmin.raw_store.DBConnection``, in-memory."""
 
     rows: list[_Row] = field(default_factory=list)
     executed: list[tuple[str, Any]] = field(default_factory=list)

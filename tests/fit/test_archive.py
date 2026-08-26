@@ -1,4 +1,4 @@
-"""Tests of garminator.fit.archive: atomic write, verify, no side effects.
+"""Tests of t0.fit.archive: atomic write, verify, no side effects.
 
 Batch acceptance requirement: test demonstrates corrupt file leaves no side effects
 (no orphan files on volume).
@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from garminator.fit.archive import (
+from t0.fit.archive import (
     ArchivedFile,
     archive_bytes,
     archive_download,
     sniff_format,
 )
-from garminator.fit.errors import ArchiveError
+from t0.fit.errors import ArchiveError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -156,7 +156,7 @@ def test_decompression_bounded_by_actual_content_not_claimed_size() -> None:
     import os
     import zipfile
 
-    from garminator.fit.archive import _extract_single_member
+    from t0.fit.archive import _extract_single_member
 
     charge = os.urandom(100_000)  # incompressible: undetectable on metadata
     tampon = io.BytesIO()

@@ -1,6 +1,6 @@
 -- Migration 007: materialized views mart.*
 -- Source: research/05-postgres-schema.md section 3.6.
--- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
+-- Batch L1 (t0) -- do not modify the DDL manually outside migration.
 
 -- CORRECTION APPLIED IN REVIEW (only deviation assumed from section 3.6 literal text):
 -- the reference view in the document projects b.distance_m_swim in the swim branch of

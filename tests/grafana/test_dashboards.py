@@ -1,4 +1,4 @@
-"""Static tests for L9 batch: Grafana dashboards (deploy/helm/garminator/dashboards/*.json).
+"""Static tests for L9 batch: Grafana dashboards (deploy/helm/t0/dashboards/*.json).
 
 No network, no Grafana, no real PostgreSQL. Three families of checks (L9 batch requirements):
 
@@ -31,7 +31,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
-DASHBOARDS_DIR = REPO_ROOT / "deploy" / "helm" / "garminator" / "dashboards"
+DASHBOARDS_DIR = REPO_ROOT / "deploy" / "helm" / "t0" / "dashboards"
 
 DASHBOARD_FILES = sorted(DASHBOARDS_DIR.glob("*.json")) if DASHBOARDS_DIR.exists() else []
 

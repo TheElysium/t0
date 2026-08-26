@@ -43,9 +43,9 @@ jobs:
 
       - name: Validate Helm renders
         run: |
-          for values in deploy/helm/garminator/ci/*.yaml; do
-            helm lint deploy/helm/garminator --values "$values"
-            helm template garminator deploy/helm/garminator --values "$values" > /dev/null
+          for values in deploy/helm/t0/ci/*.yaml; do
+            helm lint deploy/helm/t0 --values "$values"
+            helm template t0 deploy/helm/t0 --values "$values" > /dev/null
           done
 
   docker-build:
@@ -56,16 +56,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Build image (no publication)
-        run: docker build --tag garminator-ingest:ci .
+        run: docker build --tag t0-ingest:ci .
 
       - name: Verify container does not run as root
         run: |
-          uid="$(docker run --rm --entrypoint sh garminator-ingest:ci -c 'id -u')"
+          uid="$(docker run --rm --entrypoint sh t0-ingest:ci -c 'id -u')"
           test "$uid" -ne 0 || { echo "Image runs as root"; exit 1; }
 
       - name: Verify no compiler in final image
         run: |
-          if docker run --rm --entrypoint sh garminator-ingest:ci \
+          if docker run --rm --entrypoint sh t0-ingest:ci \
                -c 'command -v gcc || command -v cc || command -v g++'; then
             echo "Compiler present in final image"
             exit 1
@@ -73,6 +73,6 @@ jobs:
 
       - name: Verify image serves API by default
         run: |
-          docker run --detach --rm --name garminator-api -p 8080:8080 garminator-ingest:ci
-          trap 'docker stop garminator-api' EXIT
+          docker run --detach --rm --name t0-api -p 8080:8080 t0-ingest:ci
+          trap 'docker stop t0-api' EXIT
           curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/openapi.json

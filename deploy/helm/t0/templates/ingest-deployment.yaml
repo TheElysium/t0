@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "t0.fullname" . }}-ingest
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+spec:
+  # Single replica: Garmin session (SSO, GARMINTOKENS) and polling must not be
+  # duplicated -- two concurrent pollers on the same account without 2FA increase
+  # lockout risk.
+  replicas: {{ .Values.ingest.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "t0.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ingest
+  template:
+    metadata:
+      labels:
+        {{- include "t0.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ingest
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/ingest-configmap.yaml") . | sha256sum }}
+        {{- if not .Values.postgresql.auth.existingSecret }}
+        # PostgreSQL credentials are injected via `env.valueFrom`, which is only
+        # read at container startup: without this checksum, a password rotation
+        # would leave the pod with the old value.
+        checksum/postgresql-secret: {{ include (print $.Template.BasePath "/postgresql-secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      # This pod never calls the Kubernetes API. It holds Garmin credentials
+      # (account without 2FA): no service account token is mounted.
+      automountServiceAccountToken: false
+      {{- if .Values.ingest.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.ingest.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.ingest.securityContext | nindent 8 }}
+      containers:
+        - name: ingest
+          image: "{{ .Values.ingest.image.repository }}:{{ include "t0.ingest.imageTag" . }}"
+          imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.ingest.containerSecurityContext | nindent 12 }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- if .Values.ingest.service.enabled }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ingest.service.port }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "t0.fullname" . }}-ingest
+          env:
+            # Garmin credentials -- SECRET REFERENCE ONLY, never created
+            # by this chart. See README.md for the creation command.
+            - name: T0_GARMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.garminSecret.name }}
+                  key: {{ .Values.garminSecret.usernameKey }}
+            - name: T0_GARMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.garminSecret.name }}
+                  key: {{ .Values.garminSecret.passwordKey }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "t0.postgresql.secretName" . }}
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "t0.postgresql.secretName" . }}
+                  key: password
+            # Composed as in CronJobs: `Settings.postgres_dsn` is required and has
+            # no default; PGHOST/PGDATABASE alone are not enough.
+            - name: T0_POSTGRES_DSN
+              value: >-
+                postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+            # --- Writeable paths compatible with readOnlyRootFilesystem ---
+            # Container root is read-only. Everything Python runtime writes by
+            # default under $HOME or in caches must be redirected to /tmp (emptyDir),
+            # otherwise failures only manifest in production execution.
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/cache
+            - name: XDG_CONFIG_HOME
+              value: /tmp/config
+            # No .pyc written next to sources (site-packages is read-only);
+            # if cache is produced anyway, it goes to /tmp.
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONPYCACHEPREFIX
+              value: /tmp/pycache
+            {{- with .Values.ingest.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.ingest.service.enabled }}
+          livenessProbe:
+            {{- toYaml .Values.ingest.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.ingest.readinessProbe | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.ingest.resources | nindent 12 }}
+          volumeMounts:
+            # FIT file archive (write before insert to database --
+            # see ELT principle in batch L3).
+            - name: fit-archive
+              mountPath: {{ .Values.ingest.config.fitArchivePath }}
+              subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
+            # Garmin token store -- persistent, otherwise full SSO on each
+            # restart (account lockout risk, cf. GARMINTOKENS).
+            - name: fit-archive
+              mountPath: {{ .Values.ingest.config.garminTokensPath }}
+              subPath: {{ .Values.fitArchive.subPaths.garminTokens }}
+            # Root filesystem read-only: /tmp writable via dedicated emptyDir.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: fit-archive
+          persistentVolumeClaim:
+            claimName: {{ include "t0.fitArchive.pvcName" . }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}

@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.scheduler.service` -- end-to-end orchestration against
+"""Tests for :mod:`t0.scheduler.service` -- end-to-end orchestration against
 :class:`tests.scheduler.fakes.FakePollDB`, no PostgreSQL or network. ``fetch_window``
 is a fake function driven by the test (no calls to ``GarminClient``)."""
 
@@ -8,8 +8,8 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from garminator.scheduler.service import FetchedWindow, WindowFetcher, run_scheduled_poll
-from garminator.scheduler.store import load_window_states
+from t0.scheduler.service import FetchedWindow, WindowFetcher, run_scheduled_poll
+from t0.scheduler.store import load_window_states
 from tests.scheduler.fakes import FakePollDB
 
 
@@ -169,8 +169,8 @@ def test_fatal_crash_during_fetch_leaves_window_replayable() -> None:
     on which the entire recovery guarantee rests: after ``begin_window`` alone
     (no complete/fail -- exactly the state of a killed process), the window stays
     'in_progress' and becomes due again once stale."""
-    from garminator.scheduler.planning import due_windows
-    from garminator.scheduler.store import begin_window
+    from t0.scheduler.planning import due_windows
+    from t0.scheduler.store import begin_window
 
     db = FakePollDB(clock=datetime(2026, 8, 19, 6, 0))
     begin_window(db, endpoint="get_activities", window_date=date(2026, 8, 19), ingest_run_id=1)
@@ -373,7 +373,7 @@ def test_progress_is_logged_so_a_long_run_is_not_silent(caplog: pytest.LogCaptur
             raise RuntimeError(msg)
         return [FetchedWindow(scope_key=None, payload_sha256=bytes(32))]
 
-    with caplog.at_level("INFO", logger="garminator.scheduler.service"):
+    with caplog.at_level("INFO", logger="t0.scheduler.service"):
         run_scheduled_poll(
             db,
             endpoints=["get_sleep_data"],

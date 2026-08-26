@@ -1,8 +1,8 @@
-"""Tests for :mod:`garminator.scheduler.activity_files` (batch L12).
+"""Tests for :mod:`t0.scheduler.activity_files` (batch L12).
 
 No network, no real PostgreSQL: ``_FakeDownloader`` (below) satisfies
 ``activity_files.OriginalFileDownloader`` and ``_FakeFitFileDB`` satisfies
-``garminator.garmin.raw_store.DBConnection``, both dedicated to this file—
+``t0.garmin.raw_store.DBConnection``, both dedicated to this file—
 ``tests/scheduler/fakes.py`` (existing, unmodified) simulates ``raw.poll_window`` /
 ``raw.payload_seen``, not ``raw.fit_file``, so is not reusable here. FIT/TCX/ZIP
 bytes are synthetic, hand-constructed like in ``tests/fit/test_archive.py``—never
@@ -22,15 +22,15 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from garminconnect import GarminConnectAuthenticationError
 
-from garminator.garmin.client import IngestRunTracker, OriginalActivityFile
-from garminator.scheduler.activity_files import (
+from t0.garmin.client import IngestRunTracker, OriginalActivityFile
+from t0.scheduler.activity_files import (
     ActivityFileOutcome,
     archive_activities_for_day,
     archive_activity_file,
 )
 
 if TYPE_CHECKING:
-    from garminator.garmin.raw_store import DBConnection as _RawStoreDBConnection
+    from t0.garmin.raw_store import DBConnection as _RawStoreDBConnection
 
 # Minimal valid FIT signature, same spirit as tests/fit/test_archive.py: after an
 # 8-byte header, the string ".FIT" at bytes 8-11.
@@ -162,7 +162,7 @@ class _FakeCursor:
 
 @dataclass
 class _FakeFitFileDB:
-    """Satisfies ``garminator.garmin.raw_store.DBConnection``, in-memory."""
+    """Satisfies ``t0.garmin.raw_store.DBConnection``, in-memory."""
 
     rows: list[_FitFileRow] = field(default_factory=list)
     executed: list[str] = field(default_factory=list)

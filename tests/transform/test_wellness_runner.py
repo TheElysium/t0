@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.transform.wellness_runner`.
+"""Tests for :mod:`t0.transform.wellness_runner`.
 
 Two levels, deliberately separated.
 
@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from garminator.transform.wellness_runner import (
+from t0.transform.wellness_runner import (
     DayPayloads,
     WellnessReport,
     format_wellness_report,
@@ -154,8 +154,11 @@ def test_samples_of_all_three_owned_metrics_are_collected() -> None:
 
 
 def test_the_day_digest_folds_every_payload_hash() -> None:
-    hashes = {"get_sleep_data": b"\x01" * 32, "get_hrv_data": b"\x02" * 32}
-    same_content_other_order = {"get_hrv_data": b"\x02" * 32, "get_sleep_data": b"\x01" * 32}
+    hashes: dict[str, bytes | None] = {"get_sleep_data": b"\x01" * 32, "get_hrv_data": b"\x02" * 32}
+    same_content_other_order: dict[str, bytes | None] = {
+        "get_hrv_data": b"\x02" * 32,
+        "get_sleep_data": b"\x01" * 32,
+    }
 
     first = merge_day(_day({}, hashes), athlete_id=ATHLETE_ID)
     second = merge_day(_day({}, same_content_other_order), athlete_id=ATHLETE_ID)

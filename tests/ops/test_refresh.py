@@ -1,15 +1,15 @@
-"""Pure tests of :mod:`garminator.ops.refresh` -- no PostgreSQL required.
+"""Pure tests of :mod:`t0.ops.refresh` -- no PostgreSQL required.
 
-Only :func:`~garminator.ops.refresh.refresh_plan` is pure (takes only a
+Only :func:`~t0.ops.refresh.refresh_plan` is pure (takes only a
 ``Mapping[str, bool]`` supplied by caller); ``mart_views_populated`` and
 ``refresh_all_mart_views`` require a real psycopg connection and are not tested here --
-see ``tests/ops/test_refresh_integration.py`` (gated by ``GARMINATOR_TEST_POSTGRES_DSN``)."""
+see ``tests/ops/test_refresh_integration.py`` (gated by ``T0_TEST_POSTGRES_DSN``)."""
 
 from __future__ import annotations
 
 import pytest
 
-from garminator.ops.refresh import MART_VIEWS, refresh_plan
+from t0.ops.refresh import MART_VIEWS, refresh_plan
 
 
 def test_all_populated_views_give_entirely_concurrent_plan() -> None:

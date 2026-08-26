@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from garminator.load.trimp import trimp_from_histogram
+from t0.load.trimp import trimp_from_histogram
 
 
 def _histogram_constant(hr_bpm: int, seconds: int) -> dict[int, int]:

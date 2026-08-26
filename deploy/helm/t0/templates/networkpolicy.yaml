@@ -1,0 +1,99 @@
+{{- if .Values.networkPolicy.enabled }}
+---
+# PostgreSQL: accepts only inbound traffic from ingest, Grafana,
+# and the backup CronJob (same release labels).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "t0.fullname" . }}-postgresql
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "t0.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgresql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "t0.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# Ingest: outbound allowed to PostgreSQL, DNS, and HTTPS (Garmin API).
+# No inbound required unless the FIT upload port is used from another pod
+# in the same Release (port-forward is not subject to NetworkPolicy:
+# it talks directly to kubelet/pod).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "t0.fullname" . }}-ingest
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "t0.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ingest
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "t0.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Grafana: outbound allowed only to PostgreSQL, plus HTTPS while Grafana plugins
+# are installed (GF_INSTALL_PLUGINS downloads them from grafana.com at startup).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "t0.fullname" . }}-grafana
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "t0.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: grafana
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "t0.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- if gt (len (include "t0.grafana.plugins" . | fromJsonArray)) 0 }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+{{- end }}

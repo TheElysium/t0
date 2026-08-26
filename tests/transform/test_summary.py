@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.transform.summary` -- 100% synthetic fixtures, no real
+"""Tests for :mod:`t0.transform.summary` -- 100% synthetic fixtures, no real
 PostgreSQL connection (:class:`_FakeThresholdDB` in-memory for ``load_thresholds``, cf.
 layer mandate)."""
 
@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from garminator.garmin.raw_store import payload_sha256
-from garminator.transform.summary import (
+from t0.garmin.raw_store import payload_sha256
+from t0.transform.summary import (
     DISCIPLINE_BY_SPORT_CODE,
     SPORT_CODE_BY_TYPE_KEY,
     SportInconnuError,
@@ -383,7 +383,7 @@ class TestSelectThresholds:
         thresholds = load_thresholds(_FakeThresholdDB(rows), athlete_id=1)
 
         # Activity before any known validity period: None, no exception
-        # (explicit business rule of garminator.load.thresholds.threshold_for_date).
+        # (explicit business rule of t0.load.thresholds.threshold_for_date).
         threshold, all_threshold = select_thresholds(thresholds, "bike", date(2025, 1, 1))
 
         assert threshold is None

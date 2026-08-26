@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.transform.manual` -- building an ``ActivityContext`` for a
+"""Tests for :mod:`t0.transform.manual` -- building an ``ActivityContext`` for a
 manual upload (migration 014), with no Garmin JSON summary to read from.
 
 All fixtures are synthetic (see ``tests/transform/conftest.py`` module docstring): no
@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from garminator.fit.model import ParsedActivitySource, SessionSummary
-from garminator.transform.manual import (
+from t0.fit.model import ParsedActivitySource, SessionSummary
+from t0.transform.manual import (
     UnknownManualSportError,
     build_manual_activity_context,
 )

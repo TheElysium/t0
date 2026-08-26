@@ -1,4 +1,4 @@
-"""Tests of :mod:`garminator.ops.backfill` against
+"""Tests of :mod:`t0.ops.backfill` against
 :class:`tests.scheduler.fakes.FakePollDB`, no PostgreSQL or network -- same test double
 as ``tests/scheduler/test_service.py``, reused as-is (repo convention: see its import
 in ``tests/scheduler/test_store.py``)."""
@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from garminator.ops.backfill import backfill_progress
-from garminator.scheduler.store import begin_window, complete_window, fail_window
+from t0.ops.backfill import backfill_progress
+from t0.scheduler.store import begin_window, complete_window, fail_window
 from tests.scheduler.fakes import FakePollDB
 
 

@@ -1,0 +1,28 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "t0.fullname" . }}-grafana-dashboards-provider
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  # Grafana provisioning "provider": tells where to read dashboard JSON files.
+  # Dashboard content (batch L9) arrives via the ConfigMap
+  # `{{ include "t0.grafana.dashboardsConfigMapName" . }}`, mounted
+  # at /var/lib/grafana/dashboards by the Grafana Deployment. This file
+  # does not need to be modified when L9 adds dashboards.
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: t0
+        orgId: 1
+        folder: "t0"
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: false
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false
+{{- end }}

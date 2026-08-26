@@ -3,8 +3,8 @@
 WHY THIS EXISTS, AND WHY IT IS NOT PART OF THE SERVICE
 ------------------------------------------------------
 The service ingests activities through two paths only: the daily poll
-(:mod:`garminator.scheduler`) and the manual upload endpoint
-(:mod:`garminator.api.upload`). Neither can reach the historical archive that Garmin
+(:mod:`t0.scheduler`) and the manual upload endpoint
+(:mod:`t0.api.upload`). Neither can reach the historical archive that Garmin
 Connect hands out as a ZIP: ``Activities.csv`` is a *summary* export with no activity
 identifier, no samples, and localized column headers. This script exists to load that
 archive ONCE into a throwaway database, so the schema and the ``mart.*`` views can be
@@ -65,23 +65,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 from zoneinfo import ZoneInfo
 
-from garminator.load.activity_load import (
+from t0.load.activity_load import (
     ActivityLoadInput,
     ActivityMetricRow,
     build_activity_metric_rows,
 )
-from garminator.load.thresholds import threshold_for_date
-from garminator.logging_setup import configure_logging
-from garminator.transform.rows import ActivityRow, CoreActivityBundle
-from garminator.transform.store import store_activity_bundle
-from garminator.transform.summary import DISCIPLINE_BY_SPORT_CODE, load_thresholds
+from t0.load.thresholds import threshold_for_date
+from t0.logging_setup import configure_logging
+from t0.transform.rows import ActivityRow, CoreActivityBundle
+from t0.transform.store import store_activity_bundle
+from t0.transform.summary import DISCIPLINE_BY_SPORT_CODE, load_thresholds
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from garminator.load.thresholds import Threshold
-    from garminator.transform.store import DBConnection
-    from garminator.transform.summary import DBConnection as SummaryDBConnection
+    from t0.load.thresholds import Threshold
+    from t0.transform.store import DBConnection
+    from t0.transform.summary import DBConnection as SummaryDBConnection
 
 #: Base identifier for rows imported from the bulk export. Inside the manual range
 #: (>= 9e18, CHECK ``activity_manual_id_range``) and offset by 1e17 from the start of
@@ -91,7 +91,7 @@ _MANUAL_CSV_BASE = 9_100_000_000_000_000_000
 
 #: ``Type d'activite`` (localized export value) -> ``core.sport.sport_code``.
 #: An unlisted value is never guessed: it raises, naming the observed value. Same
-#: non-negotiable rule as :mod:`garminator.transform.manual`.
+#: non-negotiable rule as :mod:`t0.transform.manual`.
 SPORT_CODE_BY_CSV_TYPE: dict[str, str] = {
     "Course à pied": "running",
     "Trail": "trail_running",
@@ -438,7 +438,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dsn",
         default=None,
-        help="PostgreSQL DSN. If omitted, read from GARMINATOR_POSTGRES_DSN.",
+        help="PostgreSQL DSN. If omitted, read from T0_POSTGRES_DSN.",
     )
     parser.add_argument("--athlete-id", type=int, default=1, help="core.athlete.athlete_id.")
     parser.add_argument(
@@ -464,16 +464,16 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging()
     args = _build_parser().parse_args(argv)
 
-    dsn = args.dsn or os.environ.get("GARMINATOR_POSTGRES_DSN")
+    dsn = args.dsn or os.environ.get("T0_POSTGRES_DSN")
     if not dsn:
-        print("No DSN: pass --dsn or set GARMINATOR_POSTGRES_DSN.", file=sys.stderr)
+        print("No DSN: pass --dsn or set T0_POSTGRES_DSN.", file=sys.stderr)
         return 2
 
     import psycopg
 
     try:
         with psycopg.connect(dsn) as conn:
-            # Same idiom as garminator.transform.__main__: a real psycopg connection
+            # Same idiom as t0.transform.__main__: a real psycopg connection
             # satisfies the protocol at runtime, but its overloaded `cursor` signature
             # does not match the protocol's single one for mypy.
             activities, metrics = import_csv(
@@ -491,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
     verb = "would be written" if args.dry_run else "written"
     print(f"{activities} activity row(s) and {metrics} metric row(s) {verb}.")
     if not args.dry_run:
-        print("Next: refresh the mart views with `python -m garminator.ops refresh`.")
+        print("Next: refresh the mart views with `python -m t0.ops refresh`.")
     return 0
 
 

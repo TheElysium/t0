@@ -2,7 +2,7 @@
 
 Two families of checks:
 
-1. Pure runner properties (:mod:`garminator.db.runner`): migration discovery, checksum,
+1. Pure runner properties (:mod:`t0.db.runner`): migration discovery, checksum,
    drift detection, planning — tested on disposable ``.sql`` files in ``tmp_path``.
 2. Regressions on actual ``migrations/`` content in the repository: naming, no version
    duplicates, presence of ``ON CONFLICT DO NOTHING`` on reference-data seeds (explicit
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from garminator.db.runner import (
+from t0.db.runner import (
     ADVISORY_LOCK_KEY,
     AppliedMigration,
     MigrationError,
@@ -33,7 +33,7 @@ from garminator.db.runner import (
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from garminator.db.runner import Migration
+    from t0.db.runner import Migration
 
 REPO_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"

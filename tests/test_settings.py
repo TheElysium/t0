@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-import garminator
-from garminator.settings import Settings, SettingsError, get_settings
+import t0
+from t0.settings import Settings, SettingsError, get_settings
 
-FAKE_TOKENS_DIR = "/opt/garminator-test/garmin-tokens"
-FAKE_FIT_ARCHIVE_DIR = "/opt/garminator-test/fit-archive"
+FAKE_TOKENS_DIR = "/opt/t0-test/garmin-tokens"
+FAKE_FIT_ARCHIVE_DIR = "/opt/t0-test/fit-archive"
 FAKE_USERNAME = "athlete@example.invalid"
 FAKE_PASSWORD = "canari-mot-de-passe-factice"
 FAKE_DSN_PASSWORD = "canari-mot-de-passe-base"
@@ -27,15 +27,15 @@ CANARIES = (FAKE_PASSWORD, FAKE_DSN_PASSWORD, FAKE_USERNAME)
 
 
 def _set_full_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GARMINATOR_POSTGRES_DSN", FAKE_DSN)
+    monkeypatch.setenv("T0_POSTGRES_DSN", FAKE_DSN)
     monkeypatch.setenv("GARMINTOKENS", FAKE_TOKENS_DIR)
-    monkeypatch.setenv("GARMINATOR_FIT_ARCHIVE_PATH", FAKE_FIT_ARCHIVE_DIR)
-    monkeypatch.setenv("GARMINATOR_GARMIN_USERNAME", FAKE_USERNAME)
-    monkeypatch.setenv("GARMINATOR_GARMIN_PASSWORD", FAKE_PASSWORD)
+    monkeypatch.setenv("T0_FIT_ARCHIVE_PATH", FAKE_FIT_ARCHIVE_DIR)
+    monkeypatch.setenv("T0_GARMIN_USERNAME", FAKE_USERNAME)
+    monkeypatch.setenv("T0_GARMIN_PASSWORD", FAKE_PASSWORD)
 
 
 def test_package_exposes_a_version() -> None:
-    assert garminator.__version__
+    assert t0.__version__
 
 
 def test_settings_load_from_fake_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,7 +54,7 @@ def test_garmintokens_is_read_without_prefix(monkeypatch: pytest.MonkeyPatch) ->
     """``garminconnect`` reads ``GARMINTOKENS`` as is: the prefix must not apply."""
     _set_full_environment(monkeypatch)
     monkeypatch.delenv("GARMINTOKENS")
-    monkeypatch.setenv("GARMINATOR_GARMIN_TOKENS_PATH", FAKE_TOKENS_DIR)
+    monkeypatch.setenv("T0_GARMIN_TOKENS_PATH", FAKE_TOKENS_DIR)
 
     with pytest.raises(SettingsError):
         get_settings()
@@ -63,11 +63,11 @@ def test_garmintokens_is_read_without_prefix(monkeypatch: pytest.MonkeyPatch) ->
 @pytest.mark.parametrize(
     "missing",
     [
-        "GARMINATOR_POSTGRES_DSN",
+        "T0_POSTGRES_DSN",
         "GARMINTOKENS",
-        "GARMINATOR_FIT_ARCHIVE_PATH",
-        "GARMINATOR_GARMIN_USERNAME",
-        "GARMINATOR_GARMIN_PASSWORD",
+        "T0_FIT_ARCHIVE_PATH",
+        "T0_GARMIN_USERNAME",
+        "T0_GARMIN_PASSWORD",
     ],
 )
 def test_missing_variable_is_fatal(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
@@ -84,9 +84,9 @@ def test_missing_variable_is_fatal(monkeypatch: pytest.MonkeyPatch, missing: str
 @pytest.mark.parametrize(
     "missing",
     [
-        "GARMINATOR_POSTGRES_DSN",
-        "GARMINATOR_FIT_ARCHIVE_PATH",
-        "GARMINATOR_GARMIN_USERNAME",
+        "T0_POSTGRES_DSN",
+        "T0_FIT_ARCHIVE_PATH",
+        "T0_GARMIN_USERNAME",
     ],
 )
 def test_validation_error_never_reveals_a_secret(
@@ -136,7 +136,7 @@ def test_settings_can_be_built_without_reading_a_local_dotenv(
 ) -> None:
     """A ``.env`` present in the current directory must not pollute the tests."""
     dotenv = tmp_path / ".env"
-    dotenv.write_text("GARMINATOR_GARMIN_PASSWORD=value-from-file\n", encoding="utf-8")
+    dotenv.write_text("T0_GARMIN_PASSWORD=value-from-file\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     _set_full_environment(monkeypatch)
 

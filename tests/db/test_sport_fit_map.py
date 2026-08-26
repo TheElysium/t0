@@ -2,7 +2,7 @@
 
 Parses the seed INSERT of migrations/015_core_sport_fit_map.sql and checks it is
 EXACTLY equal (no extra, no missing) to SPORT_CODE_BY_FIT_SPORT, the mapping actually
-executed at ingestion (src/garminator/transform/manual.py). Also checks every seeded
+executed at ingestion (src/t0/transform/manual.py). Also checks every seeded
 sport_code exists among the sport codes seeded by migrations/003_core_ref.sql -- the
 foreign key, checked statically since there is no live PostgreSQL here.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from garminator.transform.manual import SPORT_CODE_BY_FIT_SPORT
+from t0.transform.manual import SPORT_CODE_BY_FIT_SPORT
 
 REPO_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 SPORT_FIT_MAP_SQL = REPO_MIGRATIONS_DIR / "015_core_sport_fit_map.sql"

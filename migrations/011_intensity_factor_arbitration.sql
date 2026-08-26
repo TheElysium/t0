@@ -4,7 +4,7 @@
 --
 --   (A) mart.activity_load RECALCULATES it in SQL, with its own method resolution and
 --       intensity_factor_method column;
---   (B) core.activity_metric STORES it, written by garminator.transform.activity, and
+--   (B) core.activity_metric STORES it, written by t0.transform.activity, and
 --       mart.activity_wide reads from it (the "IF" column on the load.json dashboard).
 --
 -- Two numbers, two calculation paths, no constraint keeping them in sync. Nothing prevented

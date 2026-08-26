@@ -4,7 +4,7 @@
 -- manual upload finally enters the transformation queue. It does enter it -- and stops
 -- there: core.activity.activity_id IS the Garmin identifier (bigint PRIMARY KEY, no
 -- sequence, no DEFAULT since 004), so a file that never came from Garmin has no key
--- to be inserted under. src/garminator/transform/runner.py therefore leaves it in the
+-- to be inserted under. src/t0/transform/runner.py therefore leaves it in the
 -- queue with the outcome "manual upload without summary", indefinitely.
 --
 -- THE KEY -- a reserved high range rather than a surrogate key.
@@ -60,7 +60,7 @@ CREATE UNIQUE INDEX activity_manual_file_uq
     WHERE source = 'manual';
 
 COMMENT ON COLUMN core.activity.source IS
-  'Provenance of the activity: ''garmin'' (downloaded from the API, activity_id IS the Garmin identifier) or ''manual'' (uploaded through garminator.api.upload, activity_id drawn from core.manual_activity_id_seq). Contrary to raw.fit_file where NULL alone marks a manual upload (migration 012), an explicit column is needed here because the Garmin identifier is the primary key and can never be NULL. The constraint activity_manual_id_range forbids this column from diverging from the identifier range, so the two pieces of information cannot contradict each other.';
+  'Provenance of the activity: ''garmin'' (downloaded from the API, activity_id IS the Garmin identifier) or ''manual'' (uploaded through t0.api.upload, activity_id drawn from core.manual_activity_id_seq). Contrary to raw.fit_file where NULL alone marks a manual upload (migration 012), an explicit column is needed here because the Garmin identifier is the primary key and can never be NULL. The constraint activity_manual_id_range forbids this column from diverging from the identifier range, so the two pieces of information cannot contradict each other.';
 
 COMMENT ON SEQUENCE core.manual_activity_id_seq IS
   'Identifier source for activities with no Garmin identifier (manual upload). Starts at 9e18, eight orders of magnitude above real Garmin identifiers (~2e10) and below the bigint ceiling (9.223e18). Never used for a Garmin activity: for those, activity_id IS the identifier received from the API, and the CHECK activity_manual_id_range refuses it in this range.';

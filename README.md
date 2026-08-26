@@ -1,11 +1,11 @@
-# garminator
+# t0
 
 Self-hosted Garmin Connect data ingestion and visualization pipeline for triathlon training
 tracking.
 
 ## Components
 
-- **`garminator-ingest`** (this repository) : Garmin Connect API polling, `.FIT` file parsing,
+- **`t0-ingest`** (this repository) : Garmin Connect API polling, `.FIT` file parsing,
   immutable calculations at ingestion, scheduler, manual `.FIT` upload endpoint.
 - **PostgreSQL** : three-schema storage -- `raw` (API responses and raw files, never modified),
   `core` (normalized data), `mart` (materialized training load views).
@@ -18,7 +18,7 @@ or CI deploys to the cluster** : the athlete deploys.
 ## Package structure
 
 ```
-src/garminator/
+src/t0/
 |-- db/          # migrations and PostgreSQL access
 |-- garmin/      # Garmin Connect client (persistent session, backoff, rate limiting)
 |-- fit/         # .FIT file parsing (garmin-fit-sdk)
@@ -63,7 +63,7 @@ pytest
 
 ## Configuration
 
-Settings are read from environment via `garminator.settings.Settings` (pydantic-settings).
+Settings are read from environment via `t0.settings.Settings` (pydantic-settings).
 See `.env.example` for the list of expected variables -- this file does not and must never
 contain real values.
 
@@ -80,7 +80,7 @@ into container logs on first failed startup. Two tests lock down this property (
 ### `GARMINTOKENS` : must be set, risk of account lockout otherwise
 
 `garminconnect` 0.3.2 reads the **`GARMINTOKENS`** variable as-is (`os.getenv("GARMINTOKENS")`,
-without the `GARMINATOR_` prefix) and **has no default path**. If it is not set, or if it points
+without the `T0_` prefix) and **has no default path**. If it is not set, or if it points
 to anything other than a **persistent volume**, the session is never reused : each container
 restart performs a full SSO authentication against Garmin. Repeated, this sequence is the known
 path to account lockout.
@@ -110,7 +110,7 @@ personal data can end up in an image published to GHCR, even if an overly broad 
 introduced later.
 
 ```bash
-docker build -t garminator-ingest .
+docker build -t t0-ingest .
 ```
 
 The image is published to GHCR by the `.github/workflows/publish-image.yml` workflow, triggered on

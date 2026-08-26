@@ -1,0 +1,21 @@
+{{- if .Values.ingest.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "t0.fullname" . }}-ingest
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+spec:
+  # ClusterIP only: no external exposure. The athlete reaches
+  # the FIT upload endpoint (batch L7) via `kubectl port-forward`.
+{{- include "t0.assertLocalOnlyService" (dict "key" "ingest.service.type" "type" .Values.ingest.service.type) }}
+  type: {{ .Values.ingest.service.type }}
+  selector:
+    {{- include "t0.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+  ports:
+    - name: http
+      port: {{ .Values.ingest.service.port }}
+      targetPort: http
+{{- end }}

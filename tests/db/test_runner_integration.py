@@ -1,6 +1,6 @@
 """Integration tests for migration runner against real PostgreSQL.
 
-These tests run only if PostgreSQL is reachable via GARMINATOR_TEST_POSTGRES_DSN
+These tests run only if PostgreSQL is reachable via T0_TEST_POSTGRES_DSN
 (a test-dedicated database, never production—each test cleans it via
 DROP SCHEMA ... CASCADE before repopulating). Without this variable, tests skip rather
 than fail: at L1 batch time, no local PostgreSQL or Docker container was available in
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from garminator.db.runner import (
+from t0.db.runner import (
     ADVISORY_LOCK_KEY,
     MigrationDriftError,
     MigrationLockError,
@@ -25,7 +25,7 @@ from garminator.db.runner import (
 )
 
 REPO_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
-TEST_DSN_ENV_VAR = "GARMINATOR_TEST_POSTGRES_DSN"
+TEST_DSN_ENV_VAR = "T0_TEST_POSTGRES_DSN"
 
 
 def _require_test_dsn() -> str:

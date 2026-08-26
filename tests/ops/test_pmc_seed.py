@@ -1,4 +1,4 @@
-"""Tests for the PMC seed computation (:mod:`garminator.ops.pmc_seed`).
+"""Tests for the PMC seed computation (:mod:`t0.ops.pmc_seed`).
 
 The database is faked rather than mocked loosely: the stub records the statements it was
 given and replies with fixed rows, so a test that changes the SQL shape fails on the
@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from garminator.ops.pmc_seed import (
+from t0.ops.pmc_seed import (
     PmcSeed,
     PmcSeedError,
     compute_pmc_seed,

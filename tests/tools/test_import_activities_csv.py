@@ -1,7 +1,7 @@
 """Unit tests for the one-off bulk-export importer (tools/import_activities_csv.py).
 
 Every record below is SYNTHETIC. The real export carries GPS traces and is never used
-as a fixture. The module lives outside the ``garminator`` package, so it is loaded by
+as a fixture. The module lives outside the ``t0`` package, so it is loaded by
 path rather than imported: ``tools`` is deliberately not an installable package."""
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import importlib.util
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -79,15 +80,15 @@ def record(**overrides: str) -> list[str]:
 
 
 @pytest.fixture
-def cols() -> object:
+def cols() -> Any:
     return importer._resolve_columns(HEADER)
 
 
-def build(cols: object, **overrides: str) -> object:
+def build(cols: Any, **overrides: str) -> Any:
     return importer.build_activity_row(record(**overrides), cols, athlete_id=1, tz=PARIS, line_no=2)
 
 
-def test_resolve_columns_picks_the_first_duplicate_header(cols: object) -> None:
+def test_resolve_columns_picks_the_first_duplicate_header(cols: Any) -> None:
     assert cols.avg_run_cadence == HEADER.index("Cadence de course moyenne")
     assert cols.avg_run_cadence != len(HEADER) - 1
 
@@ -122,19 +123,19 @@ def test_num_strips_the_thousands_separator() -> None:
     assert importer._num("'1,234.5") == 1234.5
 
 
-def test_running_row_prefers_the_grade_adjusted_pace(cols: object) -> None:
+def test_running_row_prefers_the_grade_adjusted_pace(cols: Any) -> None:
     activity = build(cols)
     assert activity.gap_applied is True
     assert activity.ngp_speed_mps == pytest.approx(1000.0 / 230.0)
 
 
-def test_running_row_falls_back_to_the_raw_pace(cols: object) -> None:
+def test_running_row_falls_back_to_the_raw_pace(cols: Any) -> None:
     activity = build(cols, **{"GAP moyenne": "--"})
     assert activity.gap_applied is False
     assert activity.ngp_speed_mps == pytest.approx(1000.0 / 240.0)
 
 
-def test_swim_distance_is_already_in_metres(cols: object) -> None:
+def test_swim_distance_is_already_in_metres(cols: Any) -> None:
     activity = build(
         cols,
         **{"Type d'activité": "Nat. piscine", "Distance": "1,500", "GAP moyenne": "--"},
@@ -148,7 +149,7 @@ def test_swim_distance_is_already_in_metres(cols: object) -> None:
     assert activity.ngp_speed_mps is None
 
 
-def test_cycling_distance_is_converted_from_kilometres(cols: object) -> None:
+def test_cycling_distance_is_converted_from_kilometres(cols: Any) -> None:
     activity = build(cols, **{"Type d'activité": "Cyclisme", "Distance": "40.00"})
     assert activity.sport_code == "cycling"
     assert activity.distance_m == 40000.0
@@ -156,12 +157,12 @@ def test_cycling_distance_is_converted_from_kilometres(cols: object) -> None:
     assert activity.swim_time_s is None
 
 
-def test_summary_normalized_power_is_flagged_reliable(cols: object) -> None:
+def test_summary_normalized_power_is_flagged_reliable(cols: Any) -> None:
     assert build(cols).np_reliable is True
     assert build(cols, **{"Normalized Power® (NP®)": "--"}).np_reliable is None
 
 
-def test_no_sample_means_the_quality_was_not_evaluated(cols: object) -> None:
+def test_no_sample_means_the_quality_was_not_evaluated(cols: Any) -> None:
     assert build(cols).data_quality == "unknown"
     assert build(cols).source == "manual"
 
@@ -170,14 +171,14 @@ def test_no_sample_means_the_quality_was_not_evaluated(cols: object) -> None:
     ("local_date", "offset_s"),
     [("2025-07-14 08:30:00", 7200), ("2025-01-14 08:30:00", 3600)],
 )
-def test_daylight_saving_offsets_are_resolved(cols: object, local_date: str, offset_s: int) -> None:
+def test_daylight_saving_offsets_are_resolved(cols: Any, local_date: str, offset_s: int) -> None:
     activity = build(cols, Date=local_date)
     assert activity.tz_offset_s == offset_s
     assert activity.start_time_local == datetime.strptime(local_date, "%Y-%m-%d %H:%M:%S")
     assert activity.start_time == activity.start_time_local.replace(tzinfo=PARIS).astimezone(UTC)
 
 
-def test_identifier_is_deterministic_and_inside_the_manual_range(cols: object) -> None:
+def test_identifier_is_deterministic_and_inside_the_manual_range(cols: Any) -> None:
     """Re-importing the same export must not duplicate rows, and the identifiers must
     satisfy CHECK activity_manual_id_range without colliding with the upload sequence."""
     first, second = build(cols), build(cols)
@@ -186,12 +187,12 @@ def test_identifier_is_deterministic_and_inside_the_manual_range(cols: object) -
     assert first.activity_id != build(cols, Date="2025-07-14 08:31:00").activity_id
 
 
-def test_unusable_duration_is_rejected(cols: object) -> None:
+def test_unusable_duration_is_rejected(cols: Any) -> None:
     """The real export does contain such a row; it must never be silently coerced."""
     with pytest.raises(importer.CsvImportError, match="unusable duration"):
         build(cols, **{"Durée": "00:00:00"})
 
 
-def test_unknown_activity_type_is_rejected_rather_than_guessed(cols: object) -> None:
+def test_unknown_activity_type_is_rejected_rather_than_guessed(cols: Any) -> None:
     with pytest.raises(importer.CsvImportError, match="SPORT_CODE_BY_CSV_TYPE"):
         build(cols, **{"Type d'activité": "Padel"})

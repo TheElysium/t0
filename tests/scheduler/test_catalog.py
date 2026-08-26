@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.scheduler.catalog` (batch L11).
+"""Tests for :mod:`t0.scheduler.catalog` (batch L11).
 
 The most valuable test in this batch: ``test_endpoint_exists_and_matches_declared_call_shape``
 reverifies, by introspection of ``garminconnect.Garmin`` really installed (without
@@ -18,7 +18,7 @@ from datetime import date
 
 import pytest
 
-from garminator.scheduler.catalog import (
+from t0.scheduler.catalog import (
     CATALOG,
     DEFAULT_ENDPOINTS,
     CallShape,

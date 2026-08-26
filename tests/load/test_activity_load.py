@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from garminator.load.activity_load import (
+from t0.load.activity_load import (
     ActivityLoadInput,
     build_activity_metric_rows,
     needs_manual_rpe,
 )
-from garminator.load.thresholds import Threshold
+from t0.load.thresholds import Threshold
 
 _ALL_THRESHOLD = Threshold(
     discipline="all",

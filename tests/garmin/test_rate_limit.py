@@ -1,8 +1,8 @@
-"""Tests de :mod:`garminator.garmin.rate_limit`."""
+"""Tests de :mod:`t0.garmin.rate_limit`."""
 
 from __future__ import annotations
 
-from garminator.garmin.rate_limit import RateLimiter
+from t0.garmin.rate_limit import RateLimiter
 
 
 def test_first_call_never_sleeps() -> None:

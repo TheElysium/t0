@@ -1,10 +1,10 @@
-# RUNBOOK — Running garminator
+# RUNBOOK — Running t0
 
 This document covers the operational procedures actually available today. It describes
 only what exists: no command, endpoint, or table mentioned here is hypothetical. Where
 a piece is still missing, it is stated explicitly, with the reason.
 
-All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environment
+All commands below assume `T0_POSTGRES_DSN` is defined in the environment
 (never `--dsn` on the command line in a shared context: see "Why not `--dsn`" below).
 
 ## Contents
@@ -29,10 +29,10 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
 1. Apply migrations:
 
    ```
-   python -m garminator.db migrate
+   python -m t0.db migrate
    ```
 
-   Verify the absence of drift: `python -m garminator.db status` should display
+   Verify the absence of drift: `python -m t0.db status` should display
    "Drifts detected: " with no `!` lines below.
 
 2. The six `mart.*` views are automatically populated on creation by migrations 007/008
@@ -45,9 +45,9 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
    fill it in, then execute it:
 
    ```
-   cp deploy/seed/athlete.sql.example ~/garminator-seed.sql
-   $EDITOR ~/garminator-seed.sql
-   psql "$GARMINATOR_POSTGRES_DSN" -f ~/garminator-seed.sql
+   cp deploy/seed/athlete.sql.example ~/t0-seed.sql
+   $EDITOR ~/t0-seed.sql
+   psql "$T0_POSTGRES_DSN" -f ~/t0-seed.sql
    ```
 
    This is not a migration because these values are personal data (weight, heart rates,
@@ -55,7 +55,7 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
    for the GPS traces in .FIT files. The price to pay is that **this step must be
    repeated for each new database**.
 
-   Without it, `python -m garminator.transform` exits with code 2 ("core.athlete
+   Without it, `python -m t0.transform` exits with code 2 ("core.athlete
    contains 0 row(s)"): it refuses to guess the athlete, because a wrong athlete would
    give wrong thresholds, so false TSS -- without violating any constraint or producing
    any visible symptom for months.
@@ -63,7 +63,7 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
 4. Observe the starting state:
 
    ```
-   python -m garminator.ops health
+   python -m t0.ops health
    ```
 
    On a new database, expect: no endpoint in "Last success per endpoint" (raw.poll_window
@@ -72,7 +72,7 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
 
 5. Trigger the first poll. There is nothing special to do: the CronJob `<release>-scheduler`
    (`scheduler-cronjob.yaml`) runs daily and catches up itself all missing history since
-   `GARMINATOR_HISTORY_START`, at a rate of `scheduler.maxWindowsPerEndpoint` windows per
+   `T0_HISTORY_START`, at a rate of `scheduler.maxWindowsPerEndpoint` windows per
    endpoint per run -- see section 8. To avoid waiting for the next scheduled run:
 
    ```
@@ -87,7 +87,7 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
 6. Follow the backfill progress:
 
    ```
-   python -m garminator.ops backfill-status
+   python -m t0.ops backfill-status
    ```
 
    This command is a read-only REPORT on `raw.poll_window`: it triggers no polling. It is
@@ -95,7 +95,7 @@ All commands below assume `GARMINATOR_POSTGRES_DSN` is defined in the environmen
 
 ## 2. Recovering from a failure
 
-The polling (`garminator.scheduler.service.run_scheduled_poll`, used by the ingestion
+The polling (`t0.scheduler.service.run_scheduled_poll`, used by the ingestion
 service) is designed to be safely replayable: a window already `done` is only
 re-downloaded if it falls back into the recent refresh sliding window (`refresh_lookback_days`,
 3 days by default). Recovering from a failure (pod crash, network outage, cluster restart)
@@ -105,7 +105,7 @@ will resume exactly where it left off.
 To check what remains to be done before restarting:
 
 ```
-python -m garminator.ops backfill-status --endpoint <endpoint> [--endpoint <endpoint> ...]
+python -m t0.ops backfill-status --endpoint <endpoint> [--endpoint <endpoint> ...]
 ```
 
 Replace `<endpoint>` with the names of endpoints actually polled by the ingestion service
@@ -119,7 +119,7 @@ between the moment it was marked `in_progress` and when it should have been mark
 or `failed`.
 
 **No manual database intervention is necessary or recommended.** The calculation of due
-windows (`garminator.scheduler.planning.due_windows`) automatically considers any
+windows (`t0.scheduler.planning.due_windows`) automatically considers any
 `in_progress` window whose `last_attempted_at` exceeds `DEFAULT_STALE_IN_PROGRESS_AFTER`
 (2 hours) as due: on the next poll cycle, it will be retried normally, without duplication
 (the window is simply reprocessed as if it were `pending`).
@@ -127,7 +127,7 @@ windows (`garminator.scheduler.planning.due_windows`) automatically considers an
 To observe this:
 
 ```
-python -m garminator.ops health
+python -m t0.ops health
 ```
 
 section "Stuck in_progress windows". If a window remains listed there across MULTIPLE
@@ -143,16 +143,16 @@ truly stopped (the visible symptom would disappear without the cause being addre
 ## 4. Restoring from a backup
 
 Backups are produced by the existing CronJob
-(`deploy/helm/garminator/templates/backup-cronjob.yaml`), in `pg_dump --format=custom`
+(`deploy/helm/t0/templates/backup-cronjob.yaml`), in `pg_dump --format=custom`
 format, in `fitArchive.subPaths.postgresBackups` of the shared PVC, named
-`garminator-<UTC-timestamp>.dump`.
+`t0-<UTC-timestamp>.dump`.
 
 1. Identify the dump to restore (the most recent, unless explicitly needing a point in
    the past): list the contents of the backup subdirectory on the PVC.
 2. Restore with `pg_restore` against a reachable PostgreSQL database:
 
    ```
-   pg_restore --clean --if-exists --no-owner --dbname="$GARMINATOR_POSTGRES_DSN" garminator-<timestamp>.dump
+   pg_restore --clean --if-exists --no-owner --dbname="$T0_POSTGRES_DSN" t0-<timestamp>.dump
    ```
 
    `--clean --if-exists` deletes existing objects before recreating them: the restore
@@ -163,19 +163,19 @@ format, in `fitArchive.subPaths.postgresBackups` of the shared PVC, named
 3. After restore, verify the absence of schema drift and the state of the views:
 
    ```
-   python -m garminator.db status
-   python -m garminator.ops health
+   python -m t0.db status
+   python -m t0.ops health
    ```
 
    If the `mart` views appear "NEVER POPULATED" after restore (possible if the dump was
    produced by a tool that excludes materialized view data), see the next section:
-   `python -m garminator.ops refresh` automatically switches to non-concurrent refresh
+   `python -m t0.ops refresh` automatically switches to non-concurrent refresh
    for this specific case.
 
 ## 5. Refreshing `mart` views manually
 
 ```
-python -m garminator.ops refresh
+python -m t0.ops refresh
 ```
 
 Refreshes the six `mart.*` views in the order imposed by their actual dependencies
@@ -196,11 +196,11 @@ changed, session expired on Garmin's side, or account locked after too many atte
 1. **Do not restart the service in a loop**: each failed reconnection attempt with bad
    credentials brings the account (without 2FA -- see athlete profile) closer to a total
    lockout.
-2. Verify that `GARMINATOR_GARMIN_USERNAME`/`GARMINATOR_GARMIN_PASSWORD` (container
+2. Verify that `T0_GARMIN_USERNAME`/`T0_GARMIN_PASSWORD` (container
    environment variables, fed from the `username`/`password` keys of the Kubernetes Secret
    referenced by `ingest-deployment.yaml` and the scheduler CronJob) are still correct.
-   The `GARMINATOR_` prefix is mandatory: `Settings` is a `BaseSettings` with
-   `env_prefix="GARMINATOR_"` and `extra="ignore"`, so an unprefixed variable is silently
+   The `T0_` prefix is mandatory: `Settings` is a `BaseSettings` with
+   `env_prefix="T0_"` and `extra="ignore"`, so an unprefixed variable is silently
    ignored and the pod fails on startup with a missing required field -- a symptom that
    does NOT look like a credentials problem.
 3. If the credentials are correct but the session has simply expired, purge the contents
@@ -212,15 +212,15 @@ changed, session expired on Garmin's side, or account locked after too many atte
    (browser), it is no longer a problem this repository can solve with code: it is a
    Garmin account incident, to be handled directly on their interface.
 
-This batch adds no automatic 401 detection: `python -m garminator.ops health` will see
+This batch adds no automatic 401 detection: `python -m t0.ops health` will see
 such an incident only indirectly, through the accumulation of `failed` windows (the error
 message persisted in `raw.poll_window.last_error` by polling, if the 401 propagates there,
 will give the exact detail -- the `health` CLI already displays it per window).
 
 ## 7. Why not `--dsn`
 
-`python -m garminator.ops` accepts `--dsn` for occasional interactive use, but the
-environment variable `GARMINATOR_POSTGRES_DSN` remains the recommended default choice
+`python -m t0.ops` accepts `--dsn` for occasional interactive use, but the
+environment variable `T0_POSTGRES_DSN` remains the recommended default choice
 and the one used by all Helm manifests in this batch: a DSN passed as a command-line
 argument carries the PostgreSQL password in the clear and remains visible in the
 container's process list (`ps`, `/proc/<pid>/cmdline`, and `spec.containers[].command`
@@ -234,7 +234,7 @@ risk.
 ## 8. Daily polling (CronJob `scheduler`)
 
 This is the piece that actually queries Garmin. Manifest:
-`deploy/helm/garminator/templates/scheduler-cronjob.yaml`, values under `scheduler.*`.
+`deploy/helm/t0/templates/scheduler-cronjob.yaml`, values under `scheduler.*`.
 
 | Key | Default | Effect |
 | --- | --- | --- |
@@ -245,7 +245,7 @@ This is the piece that actually queries Garmin. Manifest:
 | `scheduler.endpoints` | the 10 of `DEFAULT_ENDPOINTS` | Must stay aligned with the code catalog; `tests/test_config_coherence.py` verifies it. |
 
 What a run does, in order: it calculates due windows (every day not yet `done` since
-`GARMINATOR_HISTORY_START`, plus the `GARMINATOR_REFRESH_LOOKBACK_DAYS` last days
+`T0_HISTORY_START`, plus the `T0_REFRESH_LOOKBACK_DAYS` last days
 systematically replayed, plus always the current day), polls each endpoint, then archives
 on the PVC the original files of activities the poll just listed -- without an additional
 request to re-ask for this list.
@@ -258,7 +258,7 @@ the next run, whereas immediately retrying an authentication failure only accele
 lockout. Do not restart the Job in a loop after a failure -- see section 6.
 
 Historical catch-up has no dedicated command: it is this same CronJob that, run after run,
-consumes the remaining windows. `python -m garminator.ops backfill-status` gives its
+consumes the remaining windows. `python -m t0.ops backfill-status` gives its
 progress.
 
 ---
@@ -284,13 +284,13 @@ all, and it is the "orphan row" alert that cannot be afforded to ignore.
 ### Run a scan on demand
 
 ```bash
-kubectl create job -n garminator --from=cronjob/garminator-ops-reconcile manual-scan
+kubectl create job -n t0 --from=cronjob/t0-ops-reconcile manual-scan
 ```
 
 Then read the report:
 
 ```bash
-kubectl logs -n garminator job/manual-scan
+kubectl logs -n t0 job/manual-scan
 ```
 
 ### Deep scan
@@ -302,7 +302,7 @@ cases. On suspicion of silent corruption (same size, different content), pass
 the PVC:
 
 ```bash
-python -m garminator.ops reconcile --archive-root /data/fit-archive --deep
+python -m t0.ops reconcile --archive-root /data/fit-archive --deep
 ```
 
 ### What to do with anomalies
@@ -321,14 +321,14 @@ python -m garminator.ops reconcile --archive-root /data/fit-archive --deep
   `ingest.config.fitArchivePath` and the `subPath` of the mount. The scan is deliberately
   loud in this case rather than silent.
 
-Useful historical context: until the ZIP download hash fix in `garminator.scheduler.activity_files`,
+Useful historical context: until the ZIP download hash fix in `t0.scheduler.activity_files`,
 each run on the current day's window re-archived that day's activities. A deployment before
 this fix has therefore very likely accumulated orphan files -- benign, but numerous.
 
 ## 10. Daily transformation (CronJob `transform`)
 
 ```
-python -m garminator.transform [--limit N] [--athlete-id N] [--retry-failed]
+python -m t0.transform [--limit N] [--athlete-id N] [--retry-failed]
 ```
 
 This is the link between the archive and the dashboards: it consumes files from
@@ -367,7 +367,7 @@ this, an indigestible file would fail the run every night. Once the cause is fix
 (missing sport mapping, decoder to repair):
 
 ```
-python -m garminator.transform --retry-failed
+python -m t0.transform --retry-failed
 ```
 
 Success clears the previous `parse_error`. Replaying **before** fixing the cause only
@@ -399,7 +399,7 @@ silently made the activity disappear from the queue without being written anywhe
 curl -F "file=@/path/to/activity.fit" http://localhost:8000/uploads
 ```
 
-The `POST /uploads` endpoint (`garminator.api.upload`) is **local only** for now -- no
+The `POST /uploads` endpoint (`t0.api.upload`) is **local only** for now -- no
 Ingress, no TLS, no authentication (decision taken, see the batch report that introduced
 it). It serves for an activity that Garmin polling has not or cannot retrieve: import from
 another tool, activity deleted on Garmin's side before the `scheduler` CronJob run, etc.
@@ -423,10 +423,10 @@ Possible responses:
 ### What a manual upload becomes in `core.*`
 
 A manual upload goes all the way to `core.*`, through a path of its own
-(`garminator.transform.manual`, migrations 012 and 014). Two things a Garmin download gets
+(`t0.transform.manual`, migrations 012 and 014). Two things a Garmin download gets
 for free had to be produced elsewhere:
 
-1. **The context** -- sport, timezone, duration. `garminator.transform.summary` reads them
+1. **The context** -- sport, timezone, duration. `t0.transform.summary` reads them
    from the Garmin JSON summary, which a manual upload has never had.
    `build_manual_activity_context` derives them from the archived file itself: the FIT
    `session` message, or the `Sport` attribute of the TCX `Activity` element. Timezone is
@@ -448,7 +448,7 @@ silently skew TSS. Two consequences worth knowing before uploading:
 - TCX only expresses `Running` | `Biking` | `Other`. It cannot say indoor vs. outdoor, so a
   home-trainer ride uploaded as TCX lands as `cycling`, not `virtual_cycling`. That is the
   intended, honest outcome. `Other` is deliberately unmapped -- too coarse to trust.
-- A FIT sport absent from `SPORT_CODE_BY_FIT_SPORT` (`garminator.transform.manual`) is
+- A FIT sport absent from `SPORT_CODE_BY_FIT_SPORT` (`t0.transform.manual`) is
   refused rather than approximated. Adding it means adding the pair there, the row in
   `core.sport` if missing, and the row in `core.sport_fit_map`
   (`migrations/015_core_sport_fit_map.sql`) -- a static test fails if the three drift apart.
@@ -463,7 +463,7 @@ Every fitness/fatigue panel in Grafana reads that view, so this step is not opti
 it is simply invisible until someone opens the dashboard.
 
 ```bash
-python -m garminator.ops seed-pmc --athlete-id 1 --dry-run
+python -m t0.ops seed-pmc --athlete-id 1 --dry-run
 ```
 
 `--dry-run` computes the seed and prints it without writing. Run it first, look at the

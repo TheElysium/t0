@@ -7,7 +7,7 @@ import math
 import re
 from pathlib import Path
 
-from garminator.load.hrtss import DEFAULT_HR_ZONE_COEFFICIENTS, hrtss_from_histogram
+from t0.load.hrtss import DEFAULT_HR_ZONE_COEFFICIENTS, hrtss_from_histogram
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 

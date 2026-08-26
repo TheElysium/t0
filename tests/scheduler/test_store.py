@@ -1,12 +1,12 @@
-"""Tests for :mod:`garminator.scheduler.store`, against an in-memory DB connection
+"""Tests for :mod:`t0.scheduler.store`, against an in-memory DB connection
 (:class:`tests.scheduler.fakes.FakePollDB`) -- no real PostgreSQL."""
 
 from __future__ import annotations
 
 from datetime import date
 
-from garminator.scheduler.planning import WindowState
-from garminator.scheduler.store import (
+from t0.scheduler.planning import WindowState
+from t0.scheduler.store import (
     begin_window,
     complete_window,
     fail_window,

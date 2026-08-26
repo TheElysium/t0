@@ -1,4 +1,4 @@
-"""Tests for garminator.compute.decoupling: cases DECOUP-1 to DECOUP-3.
+"""Tests for t0.compute.decoupling: cases DECOUP-1 to DECOUP-3.
 
 Spec: 04-load-formulas.md section 7.5.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from garminator.compute.decoupling import decoupling_pct, efficiency_factor
+from t0.compute.decoupling import decoupling_pct, efficiency_factor
 
 
 def test_decoup1_bounded_values_from_the_spec() -> None:

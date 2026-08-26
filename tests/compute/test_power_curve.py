@@ -1,4 +1,4 @@
-"""Tests for garminator.compute.power_curve - cases PC-1 and PC-2 of 04-load-formulas.md §8."""
+"""Tests for t0.compute.power_curve - cases PC-1 and PC-2 of 04-load-formulas.md §8."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from itertools import pairwise
 
 import pytest
 
-from garminator.compute.power_curve import (
+from t0.compute.power_curve import (
     best_effort,
     best_effort_spans_pause,
     log_spaced_durations,

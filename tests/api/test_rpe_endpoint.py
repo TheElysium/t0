@@ -1,4 +1,4 @@
-"""HTTP tests for garminator.api.rpe: the manual RPE entry route, via FastAPI's test
+"""HTTP tests for t0.api.rpe: the manual RPE entry route, via FastAPI's test
 client (no real server starts, no PostgreSQL — same pattern as
 ``tests/api/test_upload_endpoint.py``, with ``FakeCoreConnection`` standing in for the
 ``core.*`` side).
@@ -15,9 +15,9 @@ httpx = pytest.importorskip("httpx", reason="httpx missing from venv (see batch 
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from garminator.api.app import create_app  # noqa: E402
-from garminator.api.rpe import RPE_METHOD_CODE  # noqa: E402
-from garminator.api.upload import get_upload_db_conn  # noqa: E402
+from t0.api.app import create_app  # noqa: E402
+from t0.api.rpe import RPE_METHOD_CODE  # noqa: E402
+from t0.api.upload import get_upload_db_conn  # noqa: E402
 from tests.api.conftest import FakeCoreConnection  # noqa: E402
 
 if TYPE_CHECKING:
@@ -238,7 +238,7 @@ def test_route_annotations_resolve_at_runtime() -> None:
     """
     import typing
 
-    from garminator.api import rpe as rpe_module
+    from t0.api import rpe as rpe_module
 
     for func in (
         rpe_module.enter_manual_rpe,

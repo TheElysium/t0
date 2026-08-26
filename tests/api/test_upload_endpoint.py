@@ -1,8 +1,8 @@
-"""HTTP tests for garminator.api.upload: the manual upload route, via FastAPI's test
+"""HTTP tests for t0.api.upload: the manual upload route, via FastAPI's test
 client (no real server starts).
 
 Requires ``python-multipart`` (so FastAPI can even DEFINE the route — see
-garminator/api/upload.py) and ``httpx`` (starlette's TestClient dependency). Neither is
+t0/api/upload.py) and ``httpx`` (starlette's TestClient dependency). Neither is
 installed in this repository's venv at batch write time: this entire module is skipped
 cleanly (``pytest.importorskip``) rather than failing — see batch end report for
 dependencies to add.
@@ -22,8 +22,8 @@ httpx = pytest.importorskip("httpx", reason="httpx missing from venv (see batch 
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from garminator.api.app import create_app  # noqa: E402
-from garminator.api.upload import get_upload_db_conn, get_upload_dest_dir  # noqa: E402
+from t0.api.app import create_app  # noqa: E402
+from t0.api.upload import get_upload_db_conn, get_upload_dest_dir  # noqa: E402
 from tests.api.conftest import FakeRawStoreConnection  # noqa: E402
 
 if TYPE_CHECKING:
@@ -175,7 +175,7 @@ def test_upload_oversized_payload_returns_413(
     # Actually sending 200 MiB (default bound) would be expensive for just this test:
     # instead tighten the bound read by the route (global name looked up at call, not
     # captured at definition) rather than enlarging the sent body.
-    import garminator.api.upload as upload_module
+    import t0.api.upload as upload_module
 
     monkeypatch.setattr(upload_module, "DEFAULT_MAX_UPLOAD_BYTES", 8)
     client = _client(tmp_path)
@@ -215,7 +215,7 @@ def test_route_annotations_resolve_at_runtime() -> None:
     """
     import typing
 
-    from garminator.api import upload as upload_module
+    from t0.api import upload as upload_module
 
     for func in (
         upload_module.upload_activity_file,

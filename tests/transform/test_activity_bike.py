@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from garminator.transform.activity import build_core_rows
+from t0.transform.activity import build_core_rows
 
 if TYPE_CHECKING:
-    from garminator.transform.rows import CoreActivityBundle
+    from t0.transform.rows import CoreActivityBundle
 
 from .conftest import (
     ALL_THRESHOLD,
@@ -89,7 +89,7 @@ class TestIndoorBikeWithoutHeartRate:
         assert trimp_row.is_canonical is False
 
     def test_np_reliable_true_beyond_reliability_threshold(self) -> None:
-        # 600 s >= RELIABLE_THRESHOLD_S (300 s, see garminator.compute.normalized_power).
+        # 600 s >= RELIABLE_THRESHOLD_S (300 s, see t0.compute.normalized_power).
         bundle = _bike_bundle()
         assert bundle.activity.np_reliable is True
 

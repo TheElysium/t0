@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.scheduler.planning` -- pure, no DB or network."""
+"""Tests for :mod:`t0.scheduler.planning` -- pure, no DB or network."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from garminator.scheduler.planning import WindowState, daily_range, due_windows
+from t0.scheduler.planning import WindowState, daily_range, due_windows
 
 
 def test_daily_range_is_inclusive_on_both_bounds() -> None:

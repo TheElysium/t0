@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from garminator.transform.activity import build_core_rows
+from t0.transform.activity import build_core_rows
 
 if TYPE_CHECKING:
-    from garminator.transform.rows import CoreActivityBundle
+    from t0.transform.rows import CoreActivityBundle
 
 from .conftest import (
     ALL_THRESHOLD,

@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.garmin.tokenstore`.
+"""Tests for :mod:`t0.garmin.tokenstore`.
 
 The criterion tested here is not "directory is non-empty" but what
 ``garminconnect/client.py::loads`` actually applies: a ``garmin_tokens.json`` file
@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from garminator.garmin.tokenstore import (
+from t0.garmin.tokenstore import (
     TOKEN_FILENAME,
     ensure_tokenstore,
     has_loadable_tokens,

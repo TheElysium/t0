@@ -1,4 +1,4 @@
-"""Tests for garminator.compute.regularization: gaps, interpolation, pause excision.
+"""Tests for t0.compute.regularization: gaps, interpolation, pause excision.
 
 No self-contained numeric cases in 04-load-formulas.md for this module (it is a
 mechanical prerequisite to §1.3 algorithms, not a formula on its own); tests below
@@ -12,7 +12,7 @@ import math
 
 import pytest
 
-from garminator.compute.regularization import Gap, detect_gaps, regularize_series
+from t0.compute.regularization import Gap, detect_gaps, regularize_series
 
 
 def test_detect_gaps_no_gap_on_continuous_series() -> None:

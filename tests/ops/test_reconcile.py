@@ -1,4 +1,4 @@
-"""Tests of :mod:`garminator.ops.reconcile` -- PVC <-> ``raw.fit_file`` scan.
+"""Tests of :mod:`t0.ops.reconcile` -- PVC <-> ``raw.fit_file`` scan.
 
 Minimal connection test double instead of ``FakePollDB``: this module runs only one
 query, a SELECT on ``raw.fit_file``, and needs neither window machinery nor a clock.
@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Any
 
-from garminator.ops.reconcile import format_reconcile_report, reconcile_archive
+from t0.ops.reconcile import format_reconcile_report, reconcile_archive
 
 if TYPE_CHECKING:
     from pathlib import Path

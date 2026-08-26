@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.transform.wellness`, the pure extraction layer.
+"""Tests for :mod:`t0.transform.wellness`, the pure extraction layer.
 
 Every payload below is HAND-WRITTEN and synthetic: no byte of the athlete's real exports
 appears here (they carry GPS traces identifying a home address, cf. the layer mandate).
@@ -15,10 +15,11 @@ tested here rather than left to the runtime.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from typing import Any
 
 import pytest
 
-from garminator.transform.wellness import (
+from t0.transform.wellness import (
     METRIC_ID_BODY_BATTERY,
     METRIC_ID_HRV,
     METRIC_ID_STRESS,
@@ -99,8 +100,8 @@ def test_local_start_is_naive_and_not_shifted_twice() -> None:
 
 
 def test_missing_duration_falls_back_to_the_measured_span() -> None:
-    payload = _sleep_payload()
-    del payload["dailySleepDTO"]["sleepTimeSeconds"]  # type: ignore[index]
+    payload: dict[str, Any] = _sleep_payload()
+    del payload["dailySleepDTO"]["sleepTimeSeconds"]
 
     session, _ = extract_sleep(payload, athlete_id=ATHLETE_ID)
 
@@ -250,7 +251,7 @@ def test_resting_hr_selects_the_requested_day_not_the_first_entry() -> None:
 
 
 def test_resting_hr_absent_day_stays_none() -> None:
-    payload = {"allMetrics": {"metricsMap": {"WELLNESS_RESTING_HEART_RATE": []}}}
+    payload: dict[str, Any] = {"allMetrics": {"metricsMap": {"WELLNESS_RESTING_HEART_RATE": []}}}
 
     assert extract_resting_hr(payload, local_date=LOCAL_DATE) is None
     assert extract_resting_hr({}, local_date=LOCAL_DATE) is None

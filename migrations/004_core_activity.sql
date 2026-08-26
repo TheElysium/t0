@@ -1,6 +1,6 @@
 -- Migration 004: core: device, activity, activity_lap, swim_length
 -- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
--- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
+-- Batch L1 (t0) -- do not modify the DDL manually outside migration.
 
 CREATE TABLE core.device (
     device_id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -90,7 +90,7 @@ COMMENT ON COLUMN core.activity.tz_offset_s IS
 COMMENT ON COLUMN core.activity.duration_s IS
   'Elapsed time (timer time), in WHOLE SECONDS. Deliberate typing choice: never the time type (antipattern noted VERIFIED 02 section 3 in GarminDB, where time overflows at 24 h and is not summable). It is this column -- not elapsed_s -- that gives the real volume: 1,076,042 s over 300 activities (VERIFIED, Activities.csv), i.e., 298.9 h, versus 1,159,651 s of elapsed time.';
 COMMENT ON COLUMN core.activity.np_watts IS
-  'Normalized power recalculated by garminator at FIT parsing (30s moving average, then mean of fourth-power, VERIFIED 04 section 1.1). NEVER read from FIT field session.normalized_power: that is populated only if Garmin calculated it upstream and its smoothing convention is undocumented.';
+  'Normalized power recalculated by t0 at FIT parsing (30s moving average, then mean of fourth-power, VERIFIED 04 section 1.1). NEVER read from FIT field session.normalized_power: that is populated only if Garmin calculated it upstream and its smoothing convention is undocumented.';
 COMMENT ON COLUMN core.activity.np_reliable IS
   'false when the usable series spans 30 to 300 s (NP mathematically defined but barely significant); NULL/absent when N < 30 s, in which case np_watts is NULL. VERIFIED 04 section 1.5.';
 COMMENT ON COLUMN core.activity.avg_power_nonzero IS

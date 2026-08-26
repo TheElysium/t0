@@ -1,0 +1,133 @@
+{{- /*
+CronJob for PVC <-> raw.fit_file reconciliation.
+
+Materializes the "scan" that the migration table comment in migrations/002_raw.sql
+promises from the start ("An orphan file is harmless and recoverable by a scan")
+and that did not exist. Read-only on both sides: this Job deletes no files and
+modifies no rows. The report names anomalies, the operator decides -- deleting an
+"orphan" on the word of a scan is irreversible.
+
+The PVC is mounted readOnly: true, which is not decorative: it is the mechanical
+guarantee at the kubelet level that even a bug in this module cannot touch the
+archive. Same subPath as the polling CronJob (scheduler-cronjob.yaml), otherwise
+the scan would read an empty directory and report ALL rows as "file missing".
+
+Reuses the ingest image (`.Values.ingest.image`): `t0.ops` is part of
+the same Python package, delivered in the same image -- no separate image.
+
+Exit code: 1 only on GRAVE anomaly (row without file). An orphan file leaves
+the Job in success, deliberately -- a CronJob that fails over an unused file
+eventually stops being read altogether.
+*/ -}}
+{{- if .Values.opsReconcile.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "t0.fullname" . }}-ops-reconcile
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ops-reconcile
+spec:
+  schedule: {{ .Values.opsReconcile.schedule | quote }}
+  # All chart CronJobs share this timezone: without this field the controller
+  # applies UTC, and the daily order announced in values.yaml would no longer
+  # be what is actually executed -- with a shift that changes twice a year.
+  timeZone: {{ .Values.ingest.config.timezone | quote }}
+  # A scan that runs into the next one adds nothing: the second would read the
+  # same state. Forbid prevents piling up, and especially prevents two concurrent
+  # PVC scans (--deep mode re-reads the entire volume).
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.opsReconcile.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.opsReconcile.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.opsReconcile.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # No retry: a read-only diagnostic that reports an anomaly will report
+      # exactly the same on retry. Retrying only adds noise to the logs.
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            {{- include "t0.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: ops-reconcile
+        spec:
+          restartPolicy: Never
+          # This Job only talks to PostgreSQL and the PVC: no Garmin credentials,
+          # no service account token.
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.ingest.securityContext | nindent 12 }}
+          containers:
+            - name: ops-reconcile
+              image: "{{ .Values.ingest.image.repository }}:{{ include "t0.ingest.imageTag" . }}"
+              imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.ingest.containerSecurityContext | nindent 16 }}
+                seccompProfile:
+                  type: RuntimeDefault
+              command:
+                - python
+                - -m
+                - t0.ops
+                - reconcile
+                # Must be the MOUNT path below, which is also the one used for
+                # writing (ingest.config.fitArchivePath): raw.fit_file rows carry
+                # absolute paths.
+                - --archive-root
+                - {{ .Values.ingest.config.fitArchivePath | quote }}
+                {{- if .Values.opsReconcile.deep }}
+                - --deep
+                {{- end }}
+              env:
+                # PGUSER/PGPASSWORD MUST be defined before T0_POSTGRES_DSN:
+                # Kubernetes only resolves $(VAR) among variables ALREADY declared
+                # earlier in the same `env` list.
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "t0.postgresql.secretName" . }}
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "t0.postgresql.secretName" . }}
+                      key: password
+                # DSN via environment variable, NEVER via --dsn: a command-line
+                # argument is visible in plain text in the process list, including
+                # via `kubectl describe pod`.
+                - name: T0_POSTGRES_DSN
+                  value: >-
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                # This Job does not mount the ingest ConfigMap (it needs no Garmin
+                # settings): verbosity is picked up here alone, from the same value,
+                # so a single setting applies everywhere.
+                - name: T0_LOG_LEVEL
+                  value: {{ .Values.ingest.config.logLevel | quote }}
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: PYTHONPYCACHEPREFIX
+                  value: /tmp/pycache
+              resources:
+                {{- toYaml .Values.opsReconcile.resources | nindent 16 }}
+              volumeMounts:
+                - name: fit-archive
+                  mountPath: {{ .Values.ingest.config.fitArchivePath }}
+                  subPath: {{ .Values.fitArchive.subPaths.fitFiles }}
+                  # Mechanical guarantee, not a convention: this Job cannot write
+                  # to the archive, regardless of what the code does.
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: fit-archive
+              persistentVolumeClaim:
+                claimName: {{ include "t0.fitArchive.pvcName" . }}
+                readOnly: true
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
+{{- end }}

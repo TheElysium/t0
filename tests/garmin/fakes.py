@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from garminator.garmin.tokenstore import has_loadable_tokens, token_file
+from t0.garmin.tokenstore import has_loadable_tokens, token_file
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -132,7 +132,7 @@ class FakeCursor:
 
 @dataclass
 class FakeConnection:
-    """In-memory DB connection satisfying ``garminator.garmin.raw_store.DBConnection``."""
+    """In-memory DB connection satisfying ``t0.garmin.raw_store.DBConnection``."""
 
     executed: list[tuple[str, Any]] = field(default_factory=list)
     commit_count: int = 0

@@ -17,8 +17,8 @@ FROM python:3.12-slim AS runtime
 
 # No compiler or build tools in the final image: binary wheels
 # (psycopg[binary], etc.) are installed as-is.
-RUN groupadd --system garminator \
-    && useradd --system --gid garminator --home-dir /app --shell /usr/sbin/nologin garminator
+RUN groupadd --system t0 \
+    && useradd --system --gid t0 --home-dir /app --shell /usr/sbin/nologin t0
 
 WORKDIR /app
 
@@ -29,22 +29,22 @@ RUN pip install --no-cache-dir /wheels/*.whl \
 
 # Expected volumes at runtime: Garmin session (GARMINTOKENS) and FIT archive.
 RUN mkdir -p /data/garmin-tokens /data/fit-archive \
-    && chown -R garminator:garminator /data /app
+    && chown -R t0:t0 /data /app
 
-USER garminator
+USER t0
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     GARMINTOKENS=/data/garmin-tokens \
-    GARMINATOR_FIT_ARCHIVE_PATH=/data/fit-archive
+    T0_FIT_ARCHIVE_PATH=/data/fit-archive
 
 EXPOSE 8000
 
 # The healthcheck intentionally stays independent of runtime configuration: the
 # FastAPI factory loads settings only when a request needs them.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import garminator" || exit 1
+    CMD python -c "import t0" || exit 1
 
 # Serve the local manual-upload API by default. Scheduler and operations jobs
 # explicitly override this command in their Helm manifests.
-CMD ["uvicorn", "garminator.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "t0.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]

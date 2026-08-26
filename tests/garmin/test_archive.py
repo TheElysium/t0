@@ -1,4 +1,4 @@
-"""Tests for :mod:`garminator.garmin.archive`.
+"""Tests for :mod:`t0.garmin.archive`.
 
 Verifies no format presumed from URL: internal file can be `.fit` or `.tcx`
 (athlete addendum §2), only real name in ZIP matters.
@@ -11,7 +11,7 @@ import zipfile
 
 import pytest
 
-from garminator.garmin.archive import ArchiveError, extract_original_filename
+from t0.garmin.archive import ArchiveError, extract_original_filename
 
 
 def _zip_bytes(entries: dict[str, bytes]) -> bytes:

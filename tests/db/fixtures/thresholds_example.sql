@@ -3,7 +3,7 @@
 -- ============================================================================================
 --
 -- This file IS NOT a migration: it is neither named "NNN_....sql" nor placed in
--- migrations/, and garminator.db.runner never discovers nor applies it
+-- migrations/, and t0.db.runner never discovers nor applies it
 -- automatically (discover_migrations() ignores all files outside this name pattern).
 --
 -- Why this file exists outside migrations anyway: core.threshold is structurally
@@ -17,8 +17,8 @@
 -- .gitignore excludes. Keep it that way when updating this file -- the numbers here exist
 -- to exercise the schema, never to describe anyone.
 --
--- To execute manually, never via `python -m garminator.db migrate`:
---   psql "$GARMINATOR_TEST_POSTGRES_DSN" -f tests/db/fixtures/thresholds_example.sql
+-- To execute manually, never via `python -m t0.db migrate`:
+--   psql "$T0_TEST_POSTGRES_DSN" -f tests/db/fixtures/thresholds_example.sql
 --
 -- Idempotent: replaying this file creates no duplicates. Warning, idempotence is NOT
 -- achieved the same way everywhere, and that is deliberate:

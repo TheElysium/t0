@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from garminator.load.tss import bike_tss, run_gap_tss, run_power_tss, swim_tss
+from t0.load.tss import bike_tss, run_gap_tss, run_power_tss, swim_tss
 
 
 def _approx(a: float | None, b: float, tol: float = 1e-9) -> bool:

@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from garminator.load.thresholds import Threshold, pace_s_per_km_to_speed_mps, threshold_for_date
+from t0.load.thresholds import Threshold, pace_s_per_km_to_speed_mps, threshold_for_date
 
 
 def _run_threshold(valid_from: date, valid_to: date | None, threshold_id: int) -> Threshold:

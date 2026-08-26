@@ -1,8 +1,8 @@
-"""Tests for garminator.compute.hr_histogram - 1 bpm resolution, no pre-binning into zones."""
+"""Tests for t0.compute.hr_histogram - 1 bpm resolution, no pre-binning into zones."""
 
 from __future__ import annotations
 
-from garminator.compute.hr_histogram import hr_histogram
+from t0.compute.hr_histogram import hr_histogram
 
 
 def test_hr_histogram_counts_seconds_per_bpm() -> None:

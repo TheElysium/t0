@@ -1,6 +1,6 @@
 -- Migration 002: raw schema (append-only, source of truth)
 -- Source: research/05-postgres-schema.md section 3, transcribed as-is (frozen DDL).
--- Batch L1 (garminator) -- do not modify the DDL manually outside migration.
+-- Batch L1 (t0) -- do not modify the DDL manually outside migration.
 
 CREATE TABLE raw.api_response (
     id              bigint       GENERATED ALWAYS AS IDENTITY,
@@ -70,7 +70,7 @@ COMMENT ON TABLE raw.fit_file IS
 COMMENT ON COLUMN raw.fit_file.sha256 IS
   'sha256 of the .FIT binary. UNIQUE: the same content is archived only once. It is the pivot for detecting actual re-download (section 6.2). Distinct from the JSON summary hash (section 6.3).';
 COMMENT ON COLUMN raw.fit_file.parser_version IS
-  'Version of the parser (garmin-fit-sdk 21.213.0 + garminator code version) that produced the core rows. Allows selectively replaying files parsed by a buggy version.';
+  'Version of the parser (garmin-fit-sdk 21.213.0 + t0 code version) that produced the core rows. Allows selectively replaying files parsed by a buggy version.';
 
 CREATE INDEX fit_file_activity_idx ON raw.fit_file (garmin_activity_id, downloaded_at DESC);
 CREATE INDEX fit_file_unparsed_idx ON raw.fit_file (downloaded_at) WHERE parsed_at IS NULL;
