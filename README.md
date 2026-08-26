@@ -94,10 +94,8 @@ to share the name expected by the library.
 
 > **The Kubernetes Secret containing Garmin Connect credentials is never committed to this
 > repository.** It is created directly on the cluster, by the athlete, outside any versioned
-> manifest (the Helm chart only *references* it by name).
->
-> The Garmin account used has no 2FA active. This Secret is therefore full account access --
-> treat it with the same care as a root password.
+> manifest (the Helm chart only *references* it by name). Treat it with the same care as a
+> root password.
 
 ## Docker image
 

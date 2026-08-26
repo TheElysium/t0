@@ -9,8 +9,7 @@ on their homelab cluster.
 
 ## Before installing: create the Garmin Secret
 
-**This chart never creates the Secret containing Garmin credentials.** The
-athlete's Garmin account has no two-factor authentication (2FA): this Secret is
+**This chart never creates the Secret containing Garmin credentials.** This Secret is
 equivalent to full account access. It must exist in the target namespace before
 `helm install`, under the name given by `garminSecret.name` (default
 `t0-garmin-credentials`), with keys `username` and `password`.
@@ -244,8 +243,8 @@ that would write elsewhere must be added to this list.
 
 The Garmin token store (`GARMINTOKENS`, environment variable read by
 `t0-ingest`) is **persistent**: without it, each ingest pod restart
-would trigger a complete SSO authentication with Garmin, exposing an account
-without 2FA to lockout (see principle #1 of the macro plan and issue #233).
+would trigger a complete SSO authentication with Garmin, exposing the account to lockout
+(see principle #1 of the macro plan and issue #233).
 
 ## Restoration from a backup
 

@@ -41,8 +41,8 @@ SECURITY REMINDERS
 
        kubectl get secret -n {{ .Release.Namespace }} {{ .Values.garminSecret.name }}
 
-  2. A Kubernetes Secret is base64-encoded, NOT encrypted. The Garmin account
-     having no 2FA, this Secret is equivalent to full account access.
+  2. A Kubernetes Secret is base64-encoded, NOT encrypted. The Garmin Secret
+     is equivalent to full account access.
 
   3. The PostgreSQL password is the one YOU provided
      ({{ if .Values.postgresql.auth.existingSecret }}pre-existing Secret `{{ .Values.postgresql.auth.existingSecret }}`{{ else }}`postgresql.auth.password`{{ end }}).

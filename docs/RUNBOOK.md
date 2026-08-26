@@ -194,8 +194,7 @@ A 401 means that the session persisted in `GARMINTOKENS` is no longer valid (pas
 changed, session expired on Garmin's side, or account locked after too many attempts).
 
 1. **Do not restart the service in a loop**: each failed reconnection attempt with bad
-   credentials brings the account (without 2FA -- see athlete profile) closer to a total
-   lockout.
+   credentials brings the account closer to a total lockout.
 2. Verify that `T0_GARMIN_USERNAME`/`T0_GARMIN_PASSWORD` (container
    environment variables, fed from the `username`/`password` keys of the Kubernetes Secret
    referenced by `ingest-deployment.yaml` and the scheduler CronJob) are still correct.

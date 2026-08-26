@@ -7,8 +7,7 @@ metadata:
     app.kubernetes.io/component: ingest
 spec:
   # Single replica: Garmin session (SSO, GARMINTOKENS) and polling must not be
-  # duplicated -- two concurrent pollers on the same account without 2FA increase
-  # lockout risk.
+  # duplicated -- two concurrent pollers on the same account increase lockout risk.
   replicas: {{ .Values.ingest.replicaCount }}
   strategy:
     type: Recreate
@@ -30,8 +29,8 @@ spec:
         checksum/postgresql-secret: {{ include (print $.Template.BasePath "/postgresql-secret.yaml") . | sha256sum }}
         {{- end }}
     spec:
-      # This pod never calls the Kubernetes API. It holds Garmin credentials
-      # (account without 2FA): no service account token is mounted.
+      # This pod never calls the Kubernetes API. It holds Garmin credentials:
+      # no service account token is mounted.
       automountServiceAccountToken: false
       {{- if .Values.ingest.imagePullSecrets }}
       imagePullSecrets:

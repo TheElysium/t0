@@ -259,7 +259,7 @@ def archive_activity_file(
     On a denied authentication (``GarminConnectAuthenticationError``), this function never
     swallows it behind a ``"failed"`` status: it propagates to the caller. An
     authentication failure retried activity by activity, looping over dozens of daily
-    activities, is exactly the pattern that locks a 2FA-free Garmin account (same
+    activities, is exactly the pattern that locks a Garmin account (same
     reasoning as ``client.py``/``retry.py``)—it must interrupt all day processing, not be
     counted as one failure among others.
 

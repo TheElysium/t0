@@ -643,8 +643,7 @@ def test_duplicate_content_across_activities_does_not_misattribute(tmp_path: Pat
 def test_authentication_error_propagates_uncaught_single_activity(tmp_path: Path) -> None:
     # IMPORTANT 1 (review): a denied auth must never be swallowed
     # behind a "failed" status—propagating it prevents a caller looping over dozens of
-    # activities from retrying that many times, a pattern that locks a Garmin account
-    # without 2FA.
+    # activities from retrying that many times, a pattern that locks the Garmin account.
     downloader = _FakeDownloader(outcomes={"111": GarminConnectAuthenticationError("denied")})
     conn = _FakeFitFileDB()
 

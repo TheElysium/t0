@@ -16,9 +16,9 @@ commonLabels: {}
 # -----------------------------------------------------------------------
 # Garmin Secret -- REFERENCE, NEVER CREATED BY THIS CHART.
 #
-# The athlete's Garmin account has no 2FA: this Secret is equivalent to
-# full account access. It must be created manually by the athlete BEFORE
-# `helm install`, with at least the keys `username` and `password`.
+# This Secret is equivalent to full account access. It must be created manually
+# by the athlete BEFORE `helm install`, with at least the keys `username` and
+# `password`.
 # See README.md for the exact `kubectl create secret generic` command.
 # A Kubernetes Secret is base64-encoded, NOT encrypted: anyone with
 # access to the API server or unencrypted etcd can read it in plain text.
@@ -127,7 +127,7 @@ ingest:
     logLevel: INFO
     # Path to Garmin token store (persistent session). WITHOUT this variable,
     # each pod restart would trigger a complete SSO authentication, exposing
-    # the account (without 2FA) to lockout.
+    # the account to lockout.
     garminTokensPath: /data/garmin-tokens
     fitArchivePath: /data/fit-archive
     # NOTE: no cadence setting here. Polling is a CronJob (`scheduler.schedule`),

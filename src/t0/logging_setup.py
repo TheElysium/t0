@@ -6,7 +6,7 @@ nothing exploitable without basicConfig:
 - logger.warning fell to logging.lastResort: no timestamp, level, or module name.
 
 Impact: t0.garmin.retry and client log Garmin auth/backoff—critical
-for detecting rate-limit sequences on accounts without 2FA (silent auth
+for detecting rate-limit sequences on the Garmin account (silent auth
 failures lead to account lock). Timestamps/levels are essential to reconstruct
 these sequences.
 
