@@ -81,7 +81,7 @@ def combine_source_hashes(hashes: Iterable[bytes | None]) -> bytes | None:
     """Fold the ``payload_sha256`` of every payload feeding a day into a single digest.
 
     ``core.daily_wellness.source_sha256`` is documented as "hash of the daily payload that
-    produced this row", but a day here is a MERGE of up to eight endpoints. Hashing the
+ produced this row", but a day here is a MERGE of multiple endpoints. Hashing the
     sorted concatenation of their individual digests preserves the property the column
     actually exists for -- detecting that Garmin republished a day with different content,
     without comparing field by field -- while staying deterministic regardless of the order

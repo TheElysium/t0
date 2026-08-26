@@ -38,3 +38,12 @@ deploy/seed/*.sql
 
 # IDE
 .idea/
+
+# Coach review correspondence -- working documents, not project docs
+/docs/COACH_REVIEW.md
+/docs/COACH_FEEDBACK.md
+/docs/COACH_FEEDBACK_2.md
+/docs/COACH_FEEDBACK_3.md
+
+# Disposable local Grafana preview provisioning
+/.local-preview/

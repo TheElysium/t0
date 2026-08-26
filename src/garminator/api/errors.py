@@ -1,9 +1,10 @@
-"""HTTP API layer L7 errors (upload endpoint).
+"""HTTP API layer L7 errors (upload endpoint, manual RPE entry endpoint).
 
 Separate from :mod:`garminator.fit.errors`: these cover rejections that are neither
-decoding nor archiving issues (request size, hostile archive), but HTTP boundary
-concerns. The :mod:`garminator.api.upload` module maps them to explicit status codes —
-see its docstring for the mapping table.
+decoding nor archiving issues (request size, hostile archive, unknown activity,
+canonical-value conflict), but HTTP boundary concerns. The :mod:`garminator.api.upload`
+and :mod:`garminator.api.rpe` modules map them to explicit status codes — see their
+docstrings for the mapping tables.
 """
 
 from __future__ import annotations
@@ -26,3 +27,15 @@ class HostileArchiveError(UploadError):
     Raised in pre-inspection, before any actual member decompression: only ``ZipInfo``
     metadata (name, declared size, compressed size) is read.
     """
+
+
+class ActivityNotFoundError(UploadError):
+    """No ``core.activity`` row for the requested identifier: nothing to attach a manual
+    RPE to. Raised before any write, so an unknown id can never leave partial state."""
+
+
+class CanonicalTssConflictError(UploadError):
+    """The activity already carries a canonical TSS from a measured method (power, GAP,
+    HR): entering RPE without ``force`` would silently override measured data, so the
+    request is refused. With ``force``, the caller takes responsibility — the measured
+    row is demoted (``is_canonical = false``), never deleted."""

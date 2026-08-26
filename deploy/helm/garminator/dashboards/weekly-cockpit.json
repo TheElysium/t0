@@ -1,0 +1,831 @@
+{
+  "uid": "garminator-cockpit",
+  "title": "Weekly Cockpit",
+  "description": "Morning entry point: this week's training volume by discipline, last night's sleep, flag state, and HRV vs baseline. Read top row first.",
+  "tags": [
+    "garminator",
+    "cockpit"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "refresh": "",
+  "templating": {
+    "list": [
+      {
+        "name": "athlete_id",
+        "type": "query",
+        "datasource": "PostgreSQL",
+        "query": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "definition": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "refresh": 1,
+        "sort": 1,
+        "current": {},
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Notes",
+        "enable": true,
+        "iconColor": "rgba(255, 96, 96, 1)",
+        "datasource": "PostgreSQL",
+        "rawQuery": true,
+        "rawSql": "SELECT n.local_date::timestamp AS time, n.note AS text, n.kind AS tags FROM core.note n WHERE n.athlete_id = $athlete_id",
+        "target": {
+          "refId": "Annotations",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT n.local_date::timestamp AS time, n.note AS text, n.kind AS tags FROM core.note n WHERE n.athlete_id = $athlete_id"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Flag state",
+      "description": "Worst flag level on the last night for which HRV was actually measured, not on today. mart.coach_flags only stores rules that FIRED, so a day with no row is a green day -- but a day whose inputs are missing has no row either. Anchoring on the last measured night keeps those two cases apart: Green means the rules ran and stayed quiet, Unknown means nothing could be evaluated at all. Watch the data-age panel next to it: a green light on a five-day-old night is not a green light today.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 5,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Normal",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Amber",
+                  "color": "orange"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "2": {
+                  "text": "Red",
+                  "color": "red"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Unknown",
+                  "color": "grey"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "grey",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 56
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "WITH d AS (SELECT max(wb.local_date) AS ld FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND wb.hrv_value IS NOT NULL) SELECT CASE WHEN d.ld IS NULL THEN NULL ELSE coalesce((SELECT max(CASE WHEN cf.level = 'red' THEN 2 WHEN cf.level = 'amber' THEN 1 END) FROM mart.coach_flags cf WHERE cf.athlete_id = $athlete_id AND cf.local_date = d.ld), 0) END AS \"Flag state\" FROM d"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Training this week",
+      "description": "Total timer time of every non-parent session since Monday 00:00, all disciplines together. Timer time, not elapsed: stops at traffic lights are not training. The per-discipline split sits directly below.",
+      "gridPos": {
+        "x": 5,
+        "y": 0,
+        "w": 5,
+        "h": 6
+      },
+      "datasource": "PostgreSQL",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 64
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT coalesce(sum(a.duration_s), 0) / 3600.0 AS \"Training this week\" FROM core.activity a WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND a.local_date >= date_trunc('week', now())::date"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Last night's sleep",
+      "description": "Total sleep duration of the most recent recorded night, independent of the time picker. Red below 6 h, amber below 7 h. The stage split and the sleep score are on the row below.",
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 5,
+        "h": 6
+      },
+      "datasource": "PostgreSQL",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 64
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 6
+              },
+              {
+                "color": "green",
+                "value": 7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.duration_s / 3600.0 AS \"Last night's sleep\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "HRV vs baseline",
+      "description": "Deviation of the last measured night's HRV from the rolling baseline, in percent. -15 % is the threshold the hrv_crash rule fires on, which is why it is also the red boundary here. The full series is charted below.",
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 5,
+        "h": 6
+      },
+      "datasource": "PostgreSQL",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 64
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": -15
+              },
+              {
+                "color": "green",
+                "value": -8
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT wb.hrv_dev_ratio * 100 AS \"HRV vs baseline\" FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND wb.hrv_value IS NOT NULL ORDER BY wb.local_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Data age (days)",
+      "description": "Days between today and the last night with a measured HRV value. This is the honesty gauge for every wellness panel above: the flag state, the sleep figure and the HRV deviation all describe that night, not today. Amber from two days, red from four -- at that point the poller has not run, or Garmin has not synced.",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 6
+      },
+      "datasource": "PostgreSQL",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 48
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 4
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT (current_date - max(wb.local_date))::int AS \"Data age\" FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND wb.hrv_value IS NOT NULL"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "This week's training time by discipline",
+      "description": "core.activity joined to core.sport, is_parent = false, sum(duration_s)/3600 per discipline for the CURRENT ISO week (Monday-based, local_date >= date_trunc('week', now())). Not time-range-filtered -- always shows the current week regardless of the dashboard time picker.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 6,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 30
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT coalesce(sum(a.duration_s) FILTER (WHERE s.discipline = 'run'), 0) / 3600.0 AS \"Run\", coalesce(sum(a.duration_s) FILTER (WHERE s.discipline = 'bike'), 0) / 3600.0 AS \"Bike\", coalesce(sum(a.duration_s) FILTER (WHERE s.discipline = 'swim'), 0) / 3600.0 AS \"Swim\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND a.local_date >= date_trunc('week', now())::date"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "This week's distance by discipline",
+      "description": "core.activity joined to core.sport, is_parent = false, sum(distance_m)/1000 per discipline for the CURRENT ISO week. Not time-range-filtered -- always the current week. Swim distance is small in km so this panel uses 2 decimals; run and bike read fine at the same precision.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 6,
+        "y": 6,
+        "w": 6,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "km",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 30
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT coalesce(sum(a.distance_m) FILTER (WHERE s.discipline = 'run'), 0) / 1000.0 AS \"Run\", coalesce(sum(a.distance_m) FILTER (WHERE s.discipline = 'bike'), 0) / 1000.0 AS \"Bike\", coalesce(sum(a.distance_m) FILTER (WHERE s.discipline = 'swim'), 0) / 1000.0 AS \"Swim\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND a.local_date >= date_trunc('week', now())::date"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "piechart",
+      "title": "Last night's sleep -- stage split",
+      "description": "Same most-recent core.sleep_session row (ORDER BY wake_date DESC LIMIT 1) as the panel to its left, broken into deep/light/rem/awake seconds so the split is visual. Empty donut when there is no sleep row yet.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 8,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "fields": "/^Seconds$/",
+          "calcs": []
+        },
+        "pieType": "donut",
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "WITH last_night AS (SELECT s.deep_s, s.light_s, s.rem_s, s.awake_s FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1) SELECT 'Deep' AS \"Stage\", deep_s AS \"Seconds\" FROM last_night UNION ALL SELECT 'Light', light_s FROM last_night UNION ALL SELECT 'REM', rem_s FROM last_night UNION ALL SELECT 'Awake', awake_s FROM last_night"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Sleep score",
+      "description": "Garmin's sleep score for the most recent recorded night. Red below 60, amber below 75. The stage breakdown that feeds it is the donut to the left.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 20,
+        "y": 6,
+        "w": 4,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "green",
+                "value": 75
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 48
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.sleep_score AS \"Sleep score\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "HRV vs baseline",
+      "description": "mart.wellness_baseline: hrv_value (last-night HRV) and hrv_baseline (rolling baseline) plotted together, time-range filtered on local_date. Reading the two lines together shows whether last night is drifting away from the athlete's usual level.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT wb.local_date::timestamp AS time, wb.hrv_value AS \"HRV\", wb.hrv_baseline AS \"Baseline\" FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND $__timeFilter(wb.local_date) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "HRV deviation from baseline",
+      "description": "mart.wellness_baseline.hrv_dev_ratio * 100, i.e. (value / baseline - 1) in percent, time-range filtered. This is the actionable number: negative means last night's HRV was below the athlete's rolling baseline, positive means above. Zero line marks 'right on baseline'.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 8,
+        "y": 12,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT wb.local_date::timestamp AS time, wb.hrv_dev_ratio * 100 AS \"HRV deviation\" FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND $__timeFilter(wb.local_date) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Fired flags",
+      "description": "The rules that actually fired on the last night with a measured HRV value -- the same day the flag state above describes. An empty table means every rule stayed quiet on that night, which is the green case; it never means the rules were skipped.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 16,
+        "y": 12,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "WITH d AS (SELECT max(wb.local_date) AS ld FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND wb.hrv_value IS NOT NULL) SELECT to_char(cf.local_date, 'YYYY-MM-DD') AS \"Date\", cf.rule_code AS \"Rule\", cf.level AS \"Level\", cf.detail AS \"Detail\" FROM mart.coach_flags cf JOIN d ON cf.local_date = d.ld WHERE cf.athlete_id = $athlete_id ORDER BY cf.level DESC"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Daily steps -- last weeks",
+      "description": "core.daily_wellness.steps per day, time-range filtered. Empty until the daily step endpoint is added to the poller -- steps currently has zero non-null rows in this dataset, so this panel will show No data until that collection gap is closed.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 8,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT w.local_date::timestamp AS time, w.steps AS \"Steps\" FROM core.daily_wellness w WHERE w.athlete_id = $athlete_id AND $__timeFilter(w.local_date) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Recent sessions",
+      "description": "The 15 most recent sessions, independent of the time picker so the panel is never empty.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 8,
+        "y": 19,
+        "w": 16,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "km"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", aw.name AS \"Name\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.avg_hr AS \"Avg HR\", aw.tss AS \"TSS\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false ORDER BY aw.local_date DESC LIMIT 15"
+        }
+      ]
+    }
+  ]
+}

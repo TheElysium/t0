@@ -148,3 +148,20 @@ types that would open external access.
 {{- fail (printf "\n\nERROR: %s = %q.\n\nThis chart is designed for strictly local access (no Ingress, no TLS).\nOnly ClusterIP type is allowed; access is via `kubectl port-forward`.\nExposing these services as NodePort or LoadBalancer would publish Grafana and the\nFIT upload endpoint without TLS on the network.\n" .key $type) -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Grafana.com plugin ids to install, with empty entries dropped. Why not
+`.Values.grafana.plugins` directly: `helm --set grafana.plugins={}` (the documented
+--set syntax for an empty list) actually yields the one-element slice [""], and a
+blank GF_INSTALL_PLUGINS entry would make Grafana attempt to install a plugin named ""
+at startup. Returns a JSON array string; use `| fromJsonArray`.
+*/}}
+{{- define "garminator.grafana.plugins" -}}
+{{- $plugins := list -}}
+{{- range .Values.grafana.plugins -}}
+{{- if . -}}
+{{- $plugins = append $plugins . -}}
+{{- end -}}
+{{- end -}}
+{{- $plugins | toJson -}}
+{{- end -}}

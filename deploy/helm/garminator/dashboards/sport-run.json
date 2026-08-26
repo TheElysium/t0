@@ -1,0 +1,570 @@
+{
+  "uid": "garminator-run",
+  "title": "Running",
+  "description": "Running-only board: volume, pace, load, zone time, economy, power records, cadence, ascent and a recent-sessions table. Scoped to core.sport.discipline = 'run' (sport_codes running / trail_running / treadmill).",
+  "tags": [
+    "garminator",
+    "sport"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
+  "refresh": "",
+  "templating": {
+    "list": [
+      {
+        "name": "athlete_id",
+        "type": "query",
+        "datasource": "PostgreSQL",
+        "query": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "definition": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "refresh": 1,
+        "sort": 1,
+        "current": {},
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Notes",
+        "datasource": "PostgreSQL",
+        "enable": true,
+        "iconColor": "rgba(255, 96, 96, 1)",
+        "type": "tags",
+        "rawSql": "SELECT n.local_date::timestamp AS time, n.kind AS text, n.note AS tooltip FROM core.note n WHERE n.athlete_id = $athlete_id ORDER BY 1"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Weekly volume -- hours",
+      "description": "core.activity, run discipline only (is_parent = false, joined to core.sport on discipline = 'run'). sum(duration_s)/3600 per ISO week -- duration_s is timer time, the correct volume column (elapsed_s includes stops). Shown as a separate panel from weekly distance rather than a dual-axis overlay, since hours and kilometres move independently when pace varies week to week and a shared axis would compress one series.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(a.duration_s)/3600.0 AS \"Hours\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Weekly volume -- distance",
+      "description": "core.activity, run discipline only. sum(distance_m)/1000 per ISO week, in kilometres. Companion panel to the hours chart on the left -- kept separate rather than a right-hand axis override so both series stay readable at their native scale.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "km",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(a.distance_m)/1000.0 AS \"Kilometres\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Pace per session",
+      "description": "Average pace of every run in the period, against the current threshold pace read from core.threshold. Values are seconds per kilometre so the series stays a number the chart can scale, formatted as hh:mm:ss for reading -- 00:03:58 is 3:58 /km. Careful with the direction: a lower point is a FASTER run, so a dip is a good session and the curve moves opposite to the effort. Sessions without distance are excluded.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dthms",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 5
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Threshold pace (min/km)"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, a.duration_s / NULLIF(a.distance_m, 0) * 1000 AS \"Pace (min/km)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) AND a.distance_m > 0 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, t.ftp_pace_s_per_km AS \"Threshold pace (min/km)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code CROSS JOIN core.threshold t WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) AND a.distance_m > 0 AND t.athlete_id = $athlete_id AND t.discipline = 'run' AND upper_inf(t.validity) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Weekly TSS",
+      "description": "mart.activity_wide has no athlete_id, joined to core.activity (is_parent = false) and core.sport (discipline = 'run') for scope. Bars: sum(tss) per ISO week. Overlaid line: count of run sessions in that week with needs_manual_rpe = true. A low TSS bar caused by a missing RPE entry (rather than a genuinely easy week) will show a nonzero count on the same week -- read the two series together, not the TSS bar alone.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Sessions needing manual RPE"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', aw.local_date)::timestamp AS time, sum(aw.tss) AS \"TSS\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(aw.local_date) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', aw.local_date)::timestamp AS time, count(*) FILTER (WHERE aw.needs_manual_rpe) AS \"Sessions needing manual RPE\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(aw.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Time in pace zones -- weekly",
+      "description": "mart.power_pace_zone_time (zone_system = 'pace_pct_vth'), no athlete_id: joined to core.activity (is_parent = false, athlete_id filter) and core.sport (discipline = 'run'). Stacked bars Z1..Z5, hours per ISO week, from sum(seconds) FILTER per zone_code. This view currently covers few sessions (pace-zone time depends on the same threshold-pace-driven classification, not every run has it computed yet), so most weeks may show little or nothing here.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', z.local_date)::timestamp AS time, sum(z.seconds) FILTER (WHERE z.zone_code = 'Z1')/3600.0 AS \"Z1\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z2')/3600.0 AS \"Z2\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z3')/3600.0 AS \"Z3\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z4')/3600.0 AS \"Z4\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z5')/3600.0 AS \"Z5\" FROM mart.power_pace_zone_time z JOIN core.activity a ON a.activity_id = z.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE z.zone_system = 'pace_pct_vth' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(z.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "HR zones -- weekly",
+      "description": "mart.hr_zone_time, no athlete_id: joined to core.activity (is_parent = false, athlete_id filter) and core.sport (discipline = 'run'). Stacked bars Z1..Z5, hours per ISO week (%LTHR based). This is the cross-check for the pace-zone panel: HR zone time is populated on any run with a heart-rate stream, including the 165 CSV-history sessions with no power stream, so it should have broader coverage than pace zones.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', z.local_date)::timestamp AS time, sum(z.seconds) FILTER (WHERE z.zone_code = 'Z1')/3600.0 AS \"Z1\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z2')/3600.0 AS \"Z2\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z3')/3600.0 AS \"Z3\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z4')/3600.0 AS \"Z4\", sum(z.seconds) FILTER (WHERE z.zone_code = 'Z5')/3600.0 AS \"Z5\" FROM mart.hr_zone_time z JOIN core.activity a ON a.activity_id = z.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(z.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Efficiency factor",
+      "description": "mart.activity_wide, no athlete_id: joined to core.activity (is_parent = false, athlete_id filter) and core.sport (discipline = 'run'). Points, one per qualifying steady session (duration_s BETWEEN 2700 AND 14400, data_quality IN ('good','fair'), efficiency_factor NOT NULL) -- consecutive points are different sessions, not a continuous trend. Only about 6 runs currently qualify, since 165 of the 171 runs are CSV history with data_quality = 'unknown'.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 6
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT aw.start_time_local::timestamp AS time, aw.efficiency_factor AS \"Efficiency factor\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(aw.local_date) AND aw.duration_s BETWEEN 2700 AND 14400 AND aw.data_quality IN ('good','fair') AND aw.efficiency_factor IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Decoupling",
+      "description": "mart.activity_wide, no athlete_id: joined to core.activity (is_parent = false, athlete_id filter) and core.sport (discipline = 'run'). Points, same qualifying-session filter as the efficiency factor panel (duration_s BETWEEN 2700 AND 14400, data_quality IN ('good','fair'), decoupling_pct NOT NULL) -- consecutive points are different sessions. Only about 6 runs currently qualify, since 165 of the 171 runs are CSV history with data_quality = 'unknown'.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 6
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT aw.start_time_local::timestamp AS time, aw.decoupling_pct AS \"Decoupling (%)\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(aw.local_date) AND aw.duration_s BETWEEN 2700 AND 14400 AND aw.data_quality IN ('good','fair') AND aw.decoupling_pct IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Running power curve",
+      "description": "mart.power_curve_best (kind = 'run_power'), no athlete_id and no sport_code: joined to core.activity (is_parent = false, athlete_id filter) and core.sport (discipline = 'run') for scope, plus a local_date window per series. Four overlaid windows -- last 28 days / 90 days / 365 days / all time -- each taking max(value) per duration_s so the curve shows the single best effort at each duration within that window, not an average. X axis is duration in seconds, not time.",
+      "type": "xychart",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "seriesMapping": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 28 days (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND pc.local_date >= current_date - interval '28 days' GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 90 days (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND pc.local_date >= current_date - interval '90 days' GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "C",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 365 days (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND pc.local_date >= current_date - interval '365 days' GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "D",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"All time (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Cadence trend",
+      "description": "core.activity, run discipline only. avg_cadence per session, points. Present on all 171 runs, but the absolute value is source-dependent: Garmin reports avg_cadence for running as either one-leg steps/min (roughly 85) or both-legs steps/min (roughly 170) depending on the recording source, and this dashboard does not assert which. Read this panel for TREND over time, not against an absolute cadence target.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, a.avg_cadence AS \"Avg cadence\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) AND a.avg_cadence IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Weekly ascent",
+      "description": "core.activity, run discipline only. sum(ascent_m) per ISO week, in metres. Vertical volume matters for trail prep -- watch for weeks that are high in distance/hours but flat in ascent, or vice versa.",
+      "type": "timeseries",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "lengthm",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(a.ascent_m) AS \"Ascent (m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Recent runs",
+      "description": "Every run in the period, most recent first. Pace is spelled the way the watch spells it, minutes and seconds per kilometre, and is blank for a run recorded without distance rather than shown as zero. Duration is timer time, not elapsed.",
+      "type": "table",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance (km)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "km"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Date",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT aw.local_date AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.duration_s AS \"Duration\", aw.distance_m/1000.0 AS \"Distance (km)\", CASE WHEN pace.s_per_km IS NULL THEN NULL ELSE (pace.s_per_km / 60)::text || ':' || lpad((pace.s_per_km % 60)::text, 2, '0') END AS \"Pace (min/km)\", aw.avg_hr AS \"Avg HR\", aw.avg_power AS \"Avg power (W)\", aw.tss AS \"TSS\", aw.tss_method AS \"TSS method\", aw.data_quality AS \"Data quality\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = a.sport_code CROSS JOIN LATERAL (SELECT round(aw.duration_s * 1000.0 / NULLIF(aw.distance_m, 0))::int AS s_per_km) pace WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(aw.local_date) ORDER BY aw.local_date DESC"
+        }
+      ]
+    }
+  ]
+}

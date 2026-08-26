@@ -42,6 +42,26 @@ def test_plan_respects_dependency_order_daily_load_before_pmc() -> None:
     assert views_in_order.index("mart.daily_load") < views_in_order.index("mart.pmc")
 
 
+def test_plan_respects_coaching_views_dependency_order() -> None:
+    """Migrations 018/019: coach_flags reads wellness_baseline AND ramp_risk; ramp_risk
+    reads pmc/daily_load (both among the historical six, refreshed before any of these).
+    power_pace_zone_time is independent (core.* only) -- its position is free, but it
+    must be registered so ops-refresh refreshes it at all."""
+    populated = dict.fromkeys(MART_VIEWS, True)
+
+    plan = refresh_plan(populated)
+
+    views_in_order = [step.view for step in plan]
+    assert views_in_order.index("mart.wellness_baseline") < views_in_order.index("mart.coach_flags")
+    assert views_in_order.index("mart.ramp_risk") < views_in_order.index("mart.coach_flags")
+    assert {
+        "mart.wellness_baseline",
+        "mart.ramp_risk",
+        "mart.coach_flags",
+        "mart.power_pace_zone_time",
+    } <= set(MART_VIEWS)
+
+
 def test_view_missing_from_population_mapping_raises_key_error() -> None:
     populated = {view: True for view in MART_VIEWS if view != "mart.pmc"}
 

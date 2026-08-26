@@ -56,6 +56,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "garminator.postgresql.secretName" . }}
                   key: password
+            {{- $plugins := include "garminator.grafana.plugins" . | fromJsonArray }}
+            {{- if gt (len $plugins) 0 }}
+            # Plugin download requires HTTPS egress: the NetworkPolicy opens port 443
+            # exactly while this list is non-empty (see values.yaml comment).
+            - name: GF_INSTALL_PLUGINS
+              value: {{ join "," $plugins | quote }}
+            {{- end }}
             # Grafana local access only: no public domain.
             - name: GF_SERVER_ROOT_URL
               value: "%(protocol)s://%(domain)s:%(http_port)s/"

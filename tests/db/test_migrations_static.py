@@ -176,6 +176,10 @@ EXPECTED_MIGRATION_FILES = [
     "013_threshold_power_source_home_trainer.sql",
     "014_core_activity_manual_source.sql",
     "015_core_sport_fit_map.sql",
+    "016_coach_notes.sql",
+    "017_plan.sql",
+    "018_baselines.sql",
+    "019_signals.sql",
 ]
 
 
@@ -227,7 +231,10 @@ def test_all_31_tables_and_views_are_commented_in_the_concatenated_migrations() 
     COMMENT ON TABLE / COMMENT ON MATERIALIZED VIEW on the other.
 
     31 objects from frozen DDL (research/05-postgres-schema.md) + 1 (raw.poll_window, L6
-    batch, migration 009) + 1 (core.sport_fit_map, L1 batch, migration 015) = 33.
+    batch, migration 009) + 1 (core.sport_fit_map, L1 batch, migration 015)
+    + 6 (coaching batch, migrations 016-019: core.note, core.plan_week, and the
+    materialized views wellness_baseline, power_pace_zone_time, ramp_risk, coach_flags)
+    = 39.
     """
     full_text = "\n".join(
         (REPO_MIGRATIONS_DIR / name).read_text(encoding="utf-8")
@@ -238,7 +245,7 @@ def test_all_31_tables_and_views_are_commented_in_the_concatenated_migrations() 
         r"COMMENT ON (?:TABLE|MATERIALIZED VIEW)\s+([a-z_]+\.[a-z_]+)", full_text
     )
 
-    assert len(set(created)) == 33, f"expected 33 objects, found {len(set(created))}: {created}"
+    assert len(set(created)) == 39, f"expected 39 objects, found {len(set(created))}: {created}"
     missing = set(created) - set(commented)
     assert not missing, f"created objects without matching COMMENT ON: {missing}"
 

@@ -7,9 +7,9 @@ endpoints archive no file -- their entire content is the JSON payload already si
 ``core.sleep_stage`` and ``core.wellness_sample`` stayed empty after a fully successful
 poll, and the wellness dashboard showed nothing with no error anywhere to explain it.
 
-UNIT OF WORK: THE LOCAL DAY, NOT THE PAYLOAD. Eight endpoints each contribute a few columns
-of the SAME ``core.daily_wellness`` row. Writing per payload would mean eight upserts per
-day, each having to preserve the columns the other seven own -- one forgotten column and a
+UNIT OF WORK: THE LOCAL DAY, NOT THE PAYLOAD. A dozen endpoints each contribute a few columns
+of the SAME ``core.daily_wellness`` row. Writing per payload would mean one upsert per payload per
+day, each having to preserve the columns the others own -- one forgotten column and a
 later endpoint silently blanks an earlier one. Merging in memory first, then writing once
 per day, makes that class of bug unrepresentable.
 
@@ -43,9 +43,12 @@ from garminator.transform.wellness import (
     SleepStageRow,
     WellnessSampleRow,
     extract_body_battery,
+    extract_floors,
     extract_hrv,
+    extract_intensity_minutes,
     extract_resting_hr,
     extract_sleep,
+    extract_steps,
     extract_stress,
     extract_training_readiness,
     extract_vo2max,
@@ -54,7 +57,7 @@ from garminator.transform.wellness import (
 from garminator.transform.wellness_store import combine_source_hashes, store_wellness_day
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from datetime import date
 
 logger = logging.getLogger(__name__)
@@ -67,6 +70,9 @@ WELLNESS_ENDPOINTS: tuple[str, ...] = (
     "get_rhr_day",
     "get_stress_data",
     "get_body_battery",
+    "get_steps_data",
+    "get_floors",
+    "get_intensity_minutes_data",
     "get_training_status",
     "get_max_metrics",
     "get_body_composition",
@@ -269,6 +275,21 @@ class MergedDay:
     samples: tuple[WellnessSampleRow, ...]
 
 
+#: The three whole-day counters, each an endpoint contributing exactly one scalar column of
+#: ``core.daily_wellness`` through an extractor that needs nothing but its payload. Kept as a
+#: table rather than three near-identical blocks: adding a fourth counter is then one line.
+#: The column is set by an explicit ``replace`` rather than by a column name resolved at
+#: runtime, so a typo is a type error here instead of a silently unwritten column.
+_DAILY_COUNTERS: tuple[tuple[str, Callable[[DailyWellnessRow, Any], DailyWellnessRow]], ...] = (
+    ("get_steps_data", lambda row, payload: replace(row, steps=extract_steps(payload))),
+    ("get_floors", lambda row, payload: replace(row, floors=extract_floors(payload))),
+    (
+        "get_intensity_minutes_data",
+        lambda row, payload: replace(row, intensity_minutes=extract_intensity_minutes(payload)),
+    ),
+)
+
+
 def merge_day(day: DayPayloads, *, athlete_id: int) -> MergedDay:
     """Turn one day's payloads into the rows to write. PURE: no connection, no clock.
 
@@ -318,6 +339,11 @@ def merge_day(day: DayPayloads, *, athlete_id: int) -> MergedDay:
         )
         daily = replace(daily, body_battery_high=high, body_battery_low=low)
         samples.extend(bb_samples)
+
+    for endpoint, apply_counter in _DAILY_COUNTERS:
+        counter_payload = day.payloads.get(endpoint)
+        if counter_payload is not None:
+            daily = apply_counter(daily, counter_payload)
 
     # VO2max: get_training_status is preferred, get_max_metrics is the fallback. Both carry
     # the same `mostRecentVO2Max` block; taking the first that yields a running value avoids

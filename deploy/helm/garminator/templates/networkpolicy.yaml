@@ -64,7 +64,8 @@ spec:
         - port: 443
           protocol: TCP
 ---
-# Grafana: outbound allowed only to PostgreSQL.
+# Grafana: outbound allowed only to PostgreSQL, plus HTTPS while Grafana plugins
+# are installed (GF_INSTALL_PLUGINS downloads them from grafana.com at startup).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -87,4 +88,12 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
+    {{- if gt (len (include "garminator.grafana.plugins" . | fromJsonArray)) 0 }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
 {{- end }}

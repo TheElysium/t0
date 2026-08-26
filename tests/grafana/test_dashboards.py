@@ -62,6 +62,10 @@ def _parse_core_tables() -> dict[str, set[str]]:
         "004_core_activity.sql",
         "005_core_series.sql",
         "006_core_wellness.sql",
+        # Coaching batch: flat CREATE TABLE DDL like 003-006, same extraction applies
+        # (dashboards query core.note / core.plan_week annotations).
+        "016_coach_notes.sql",
+        "017_plan.sql",
     ):
         text = (MIGRATIONS_DIR / filename).read_text(encoding="utf-8")
         for match in _CREATE_TABLE_RE.finditer(text):
@@ -166,6 +170,47 @@ MART_VIEWS: dict[str, set[str]] = {
         "intensity_factor_method",
         "decoupling_pct",
         "efficiency_factor",
+    },
+    # Coaching views (migrations 018/019). Same rule as above: manually copied from
+    # each view's FINAL SELECT projection.
+    "mart.wellness_baseline": {
+        "athlete_id",
+        "local_date",
+        "hrv_value",
+        "hrv_baseline",
+        "hrv_dev_ratio",
+        "rhr_value",
+        "rhr_baseline",
+        "rhr_dev_bpm",
+    },
+    "mart.ramp_risk": {
+        "athlete_id",
+        "local_date",
+        "tss",
+        "trimp",
+        "ctl",
+        "atl",
+        "tsb",
+        "ctl_reliable",
+        "dctl_per_week",
+        "monotony",
+        "strain",
+        "estimated_share_7d",
+    },
+    "mart.coach_flags": {
+        "athlete_id",
+        "local_date",
+        "rule_code",
+        "level",
+        "detail",
+    },
+    "mart.power_pace_zone_time": {
+        "activity_id",
+        "local_date",
+        "sport_code",
+        "zone_system",
+        "zone_code",
+        "seconds",
     },
 }
 

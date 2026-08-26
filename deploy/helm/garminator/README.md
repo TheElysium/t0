@@ -104,6 +104,11 @@ Parameters to review before a real first deployment (see `values.yaml`, commente
 - Volume sizes (`*.persistence.size`), to adjust to the athlete's actual history
   (backfill from 2025-04-03, batch L10).
 - `backup.schedule` and `backup.retention` if the default weekly rhythm does not suit.
+- `grafana.plugins` -- Grafana.com plugins installed at pod start (default:
+  `volkovlabs-form-panel`, used by the "07 Data Entry" dashboard to write
+  `core.plan_week` and manual RPE directly from Grafana). While this list is non-empty,
+  the NetworkPolicy opens outbound HTTPS for the Grafana pod (plugin download at
+  startup); set it to an empty list to restore PostgreSQL-only egress.
 
 ## Garmin polling (CronJob `scheduler`)
 

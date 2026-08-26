@@ -1,0 +1,410 @@
+{
+  "uid": "garminator-swim",
+  "title": "Swimming",
+  "description": "Swim-only board: core.activity filtered to core.sport.discipline = 'swim' (sport_codes lap_swimming, open_water). No power/cadence/ascent at activity level for swim -- built on distance, pace and core.swim_length.",
+  "tags": [
+    "garminator",
+    "sport"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
+  "refresh": "",
+  "templating": {
+    "list": [
+      {
+        "name": "athlete_id",
+        "type": "query",
+        "datasource": "PostgreSQL",
+        "query": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "definition": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "refresh": 1,
+        "sort": 1,
+        "current": {},
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Notes",
+        "datasource": "PostgreSQL",
+        "enable": true,
+        "iconColor": "rgba(255, 96, 96, 1)",
+        "target": {
+          "refId": "Anno",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT n.local_date::timestamp AS time, n.note AS text, n.kind AS tags FROM core.note n WHERE n.athlete_id = $athlete_id ORDER BY n.local_date"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Weekly volume -- hours",
+      "type": "timeseries",
+      "description": "core.activity, swim sessions (core.sport.discipline = 'swim', is_parent = false), sum(duration_s)/3600 per ISO week (bar). duration_s is timer time, the volume column. Shown alongside the distance panel because hours and metres compress at very different scales on one axis.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(a.duration_s) / 3600.0 AS \"Volume (hours)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Weekly volume -- distance",
+      "type": "timeseries",
+      "description": "core.activity, swim sessions, sum(distance_m) per ISO week (bar), in metres -- swim volume in km would be unreadably small on a weekly grid. Companion panel to the hours view at left; kept as two panels rather than a dual axis for readability.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "lengthm",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(a.distance_m) AS \"Distance (m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Pool vs open water -- weekly distance",
+      "type": "timeseries",
+      "description": "core.activity, weekly distance_m split by sport_code (lap_swimming vs open_water), stacked bars. Open-water pace and distance are GPS-derived and less reliable than pool lengths counted at the wall -- treat the open-water series as approximate.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "lengthm",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(CASE WHEN a.sport_code = 'lap_swimming' THEN a.distance_m ELSE 0 END) AS \"Pool (m)\", sum(CASE WHEN a.sport_code = 'open_water' THEN a.distance_m ELSE 0 END) AS \"Open water (m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Pace per 100 m vs CSS (rest excluded)",
+      "type": "timeseries",
+      "description": "Average pace per 100 m of every swim in the period, against critical swim speed read from core.threshold. Computed from swim time, so the rest between sets does not inflate it -- that is what makes the number comparable to CSS, which is a speed while swimming. Values are seconds per 100 m so the series stays a number the chart can scale, formatted as hh:mm:ss for reading -- 00:01:40 is 1:40 /100 m. A lower point is a FASTER swim, so a dip is a good session.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dthms",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 6
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, a.swim_time_s / NULLIF(a.distance_m, 0) * 100.0 AS \"Pace (min/100 m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, 100.0 / NULLIF(t.css_m_s, 0) AS \"CSS pace (min/100 m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code CROSS JOIN core.threshold t WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) AND t.athlete_id = $athlete_id AND t.discipline = 'swim' AND upper_inf(t.validity) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Strokes per active length -- monthly",
+      "type": "timeseries",
+      "description": "core.swim_length joined to core.activity, avg(total_strokes) over length_type = 'active' rows, per calendar month. Restricted to sport_code = 'lap_swimming' (pool) because open water has no counted lengths. A creeping rise at constant pace points to technique or strength fade.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "pointSize": 5,
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('month', a.local_date)::timestamp AS time, avg(l.total_strokes) AS \"Avg strokes / length\" FROM core.swim_length l JOIN core.activity a ON a.activity_id = l.activity_id WHERE l.length_type = 'active' AND a.sport_code = 'lap_swimming' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "SWOLF trend -- monthly",
+      "type": "timeseries",
+      "description": "SWOLF = seconds per length + strokes per length, computed per active length in core.swim_length as duration_s + total_strokes, averaged per calendar month. Restricted to sport_code = 'lap_swimming'. SWOLF is only comparable within a single pool length, and this schema does not record pool length -- read this as a within-athlete trend over time, never as an absolute number or a cross-pool comparison. Built despite that caveat because the trend direction is still informative; if the pool length changes across the dataset the trend would be misleading, but nothing in this schema flags that case.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "pointSize": 5,
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('month', a.local_date)::timestamp AS time, avg(l.duration_s + l.total_strokes) AS \"SWOLF\" FROM core.swim_length l JOIN core.activity a ON a.activity_id = l.activity_id WHERE l.length_type = 'active' AND a.sport_code = 'lap_swimming' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Stroke mix",
+      "type": "piechart",
+      "description": "core.swim_length, count of active lengths (length_type = 'active') grouped by swim_stroke, time-range filtered. Idle lengths are excluded so the mix reflects actual swimming, not the roughly 157 idle/rest lengths that carry a NULL stroke.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT coalesce(l.swim_stroke, 'unknown') AS \"Stroke\", count(*) AS \"Lengths\" FROM core.swim_length l JOIN core.activity a ON a.activity_id = l.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE l.length_type = 'active' AND s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Weekly TSS",
+      "type": "timeseries",
+      "description": "Series A: mart.activity_wide.tss for swim sessions (joined to core.activity for athlete_id, discipline = 'swim', is_parent = false), summed per ISO week (bar). Swim TSS is computed via tss_method = 'swim_css' when a critical swim speed is available. Series B: count of swim sessions in that week with needs_manual_rpe = true, so a low TSS week caused by a missing RPE entry (rather than a genuinely light week) is visible.",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(w.tss) AS \"TSS\" FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, count(*) FILTER (WHERE a.needs_manual_rpe) AS \"Sessions needing RPE\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Longest swim per week",
+      "type": "timeseries",
+      "description": "core.activity, max(distance_m) per ISO week among swim sessions (discipline = 'swim', is_parent = false), in metres. The endurance anchor -- tracks the longest continuous session each week regardless of total weekly volume.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "lengthm",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, max(a.distance_m) AS \"Longest swim (m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Recent swims",
+      "type": "table",
+      "description": "Every swim in the period, most recent first. Pace is computed from swim time, rest between sets excluded, and spelled the way the watch spells it -- minutes and seconds per 100 m. It is blank for a swim recorded without distance rather than shown as zero. Duration is the whole session including rest; the gap between the two columns is the recovery. Swim time source says whether swim time came from the length messages or from the session summary.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Swim time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance (m)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "lengthm"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT to_char(a.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", a.name AS \"Name\", a.duration_s AS \"Duration\", a.swim_time_s AS \"Swim time\", a.distance_m AS \"Distance (m)\", CASE WHEN pace.s_per_100m IS NULL THEN NULL ELSE (pace.s_per_100m / 60)::text || ':' || lpad((pace.s_per_100m % 60)::text, 2, '0') END AS \"Pace (min/100 m)\", w.tss AS \"TSS\", w.tss_method AS \"TSS method\", a.swim_time_source AS \"Swim time source\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code LEFT JOIN mart.activity_wide w ON w.activity_id = a.activity_id CROSS JOIN LATERAL (SELECT round(a.swim_time_s * 100.0 / NULLIF(a.distance_m, 0))::int AS s_per_100m) pace WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) ORDER BY a.local_date DESC"
+        }
+      ]
+    }
+  ]
+}

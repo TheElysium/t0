@@ -109,3 +109,127 @@ class FakeRawStoreConnection:
 @pytest.fixture
 def raw_store_conn() -> FakeRawStoreConnection:
     return FakeRawStoreConnection()
+
+
+@dataclass
+class CoreMetricRow:
+    """Minimal reflection of a ``core.activity_metric`` row (migrations/005)."""
+
+    activity_id: int
+    metric: str
+    method_code: str
+    value: float | None
+    is_canonical: bool
+
+
+class FakeCoreCursor:
+    def __init__(self, conn: FakeCoreConnection) -> None:
+        self._conn = conn
+        self._result: list[tuple[Any, ...]] = []
+
+    def execute(self, query: str, params: Any = None) -> None:
+        normalized = " ".join(query.split()).upper()
+        self._conn.executed.append(normalized)
+        if normalized.startswith("SELECT NEEDS_MANUAL_RPE FROM CORE.ACTIVITY"):
+            (activity_id,) = params
+            needs = self._conn.activities.get(activity_id)
+            self._result = [] if needs is None else [(needs,)]
+        elif normalized.startswith("SELECT METHOD_CODE FROM CORE.ACTIVITY_METRIC"):
+            activity_id, metric = params
+            canonical = [
+                row
+                for row in self._conn.metrics.values()
+                if row.activity_id == activity_id and row.metric == metric and row.is_canonical
+            ]
+            # Real schema: partial unique index guarantees at most one; a stub returning
+            # two would let an invariant violation pass unnoticed.
+            assert len(canonical) <= 1, "two canonical rows: index invariant violated"
+            self._result = [] if not canonical else [(canonical[0].method_code,)]
+        elif normalized.startswith("DELETE FROM CORE.ACTIVITY_METRIC"):
+            activity_id, metric, method_code = params
+            self._conn.metrics.pop((activity_id, metric, method_code), None)
+            self._result = []
+        elif normalized.startswith("UPDATE CORE.ACTIVITY_METRIC SET IS_CANONICAL"):
+            activity_id, metric = params
+            for row in self._conn.metrics.values():
+                if row.activity_id == activity_id and row.metric == metric:
+                    row.is_canonical = False
+            self._result = []
+        elif normalized.startswith("INSERT INTO CORE.ACTIVITY_METRIC"):
+            activity_id, metric, method_code, value, is_canonical, _threshold_id = params
+            key = (activity_id, metric, method_code)
+            if is_canonical:
+                for row in self._conn.metrics.values():
+                    if row.activity_id == activity_id and row.metric == metric and row.is_canonical:
+                        raise AssertionError(
+                            "INSERT violates activity_metric_canonical_uq "
+                            f"({activity_id}, {metric}): {row.method_code} already canonical"
+                        )
+            self._conn.metrics[key] = CoreMetricRow(
+                activity_id=activity_id,
+                metric=metric,
+                method_code=method_code,
+                value=value,
+                is_canonical=is_canonical,
+            )
+            self._result = []
+        elif normalized.startswith("UPDATE CORE.ACTIVITY SET NEEDS_MANUAL_RPE"):
+            (activity_id,) = params
+            assert activity_id in self._conn.activities, "activity vanished mid-transaction"
+            self._conn.activities[activity_id] = False
+            self._result = []
+        else:
+            raise AssertionError(f"SQL query not modeled by this stub: {normalized!r}")
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._result[0] if self._result else None
+
+    def __enter__(self) -> FakeCoreCursor:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+@dataclass
+class FakeCoreConnection:
+    """Stub for the ``core.*`` side of :class:`garminator.garmin.raw_store.DBConnection`,
+    as exercised by ``garminator.api.rpe``.
+
+    Models the two tables the RPE endpoint touches — ``core.activity``
+    (``needs_manual_rpe`` flag only) and ``core.activity_metric`` (keyed by its real
+    primary key ``(activity_id, metric, method_code)``) — and enforces the same
+    single-canonical invariant as the partial unique index
+    ``activity_metric_canonical_uq`` (migrations/005): a stub accepting a second
+    canonical INSERT would let a test pass that PostgreSQL would really refuse.
+    """
+
+    activities: dict[int, bool] = field(default_factory=dict)
+    metrics: dict[tuple[int, str, str], CoreMetricRow] = field(default_factory=dict)
+    executed: list[str] = field(default_factory=list)
+    commits: int = 0
+
+    def cursor(self) -> FakeCoreCursor:
+        return FakeCoreCursor(self)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def add_activity(self, activity_id: int, *, needs_manual_rpe: bool = False) -> None:
+        """Simulate a pre-existing ``core.activity`` row."""
+        self.activities[activity_id] = needs_manual_rpe
+
+    def set_canonical_tss(self, activity_id: int, method_code: str, value: float | None) -> None:
+        """Simulate a pre-existing canonical TSS from another method."""
+        self.metrics[(activity_id, "tss", method_code)] = CoreMetricRow(
+            activity_id=activity_id,
+            metric="tss",
+            method_code=method_code,
+            value=value,
+            is_canonical=True,
+        )
+
+
+@pytest.fixture
+def core_conn() -> FakeCoreConnection:
+    return FakeCoreConnection()

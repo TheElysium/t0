@@ -115,12 +115,20 @@ _CATALOG_BY_NAME: dict[str, EndpointSpec] = {spec.name: spec for spec in CATALOG
 #: that distinction was immaterial. We keep the conservative choice: an empty daily call
 #: costs less than a history gap, and the second endpoint stays accessible via
 #: ``--endpoint`` without code changes.
+#:
+#: Daily activity counters -- ``get_steps_data``, ``get_floors`` and
+#: ``get_intensity_minutes_data`` each feed one column of ``core.daily_wellness``
+#: (extractors in :mod:`garminator.transform.wellness`, all three written against observed
+#: payloads rather than documentation).
 DEFAULT_ENDPOINTS: tuple[str, ...] = (
     "get_sleep_data",
     "get_hrv_data",
     "get_rhr_day",
     "get_stress_data",
     "get_body_battery",
+    "get_steps_data",
+    "get_floors",
+    "get_intensity_minutes_data",
     "get_training_readiness",
     "get_training_status",
     "get_body_composition",

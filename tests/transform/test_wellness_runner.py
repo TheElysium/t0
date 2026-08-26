@@ -3,7 +3,7 @@
 Two levels, deliberately separated.
 
 ``merge_day`` is PURE, so it is tested directly on hand-written payloads: it is where the
-eight endpoints collapse into a single ``core.daily_wellness`` row, and where an endpoint
+wellness endpoints collapse into a single ``core.daily_wellness`` row, and where an endpoint
 answering empty must leave a hole rather than blank a column another endpoint filled.
 
 ``transform_wellness_days`` is tested against ``FakeConnection``, a scripted in-memory
@@ -60,6 +60,7 @@ def test_endpoints_contribute_to_a_single_daily_row() -> None:
                 },
                 "get_hrv_data": {"hrvSummary": {"lastNightAvg": 62.0, "status": "BALANCED"}},
                 "get_stress_data": {"avgStressLevel": 31},
+                "get_steps_data": [{"steps": 12345}],
                 "get_training_status": {
                     "mostRecentVO2Max": {"generic": {"vo2MaxPreciseValue": 58.4}}
                 },
@@ -71,7 +72,7 @@ def test_endpoints_contribute_to_a_single_daily_row() -> None:
     daily = merged.daily
     assert (daily.athlete_id, daily.local_date) == (ATHLETE_ID, DAY)
     assert (daily.resting_hr, daily.hrv_last_night_avg, daily.hrv_status) == (48, 62.0, "BALANCED")
-    assert (daily.avg_stress, daily.vo2max_running) == (31, 58.4)
+    assert (daily.avg_stress, daily.steps, daily.vo2max_running) == (31, 12345, 58.4)
 
 
 def test_absent_endpoints_leave_holes_never_zeroes() -> None:
@@ -80,6 +81,7 @@ def test_absent_endpoints_leave_holes_never_zeroes() -> None:
     daily = merged.daily
     assert daily.resting_hr is None
     assert daily.avg_stress is None
+    assert daily.steps is None
     assert daily.body_battery_high is None
     assert daily.weight_kg is None
     assert daily.training_readiness is None

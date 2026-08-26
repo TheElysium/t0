@@ -482,6 +482,115 @@ def extract_weight_kg(payload: dict[str, Any], *, local_date: date) -> float | N
     return None
 
 
+def extract_steps(payload: Any) -> int | None:
+    """``get_steps_data`` -> the daily total, or ``None`` when no valid data is present.
+
+    Garmin's current response is a list of interval records, each carrying an incremental
+    ``steps`` value. Some Garmin responses instead provide ``totalSteps`` or wrap the
+    interval records in ``stepsList``; support all observed shapes without treating a
+    partial interval list as the authoritative total when a total is available.
+    """
+    if isinstance(payload, dict):
+        total = _as_int(payload.get("totalSteps"))
+        if total is not None:
+            return None if total < 0 else total
+        entries = payload.get("stepsList")
+        if entries is None and "steps" in payload:
+            entries = [payload]
+    elif isinstance(payload, list):
+        entries = payload
+    else:
+        return None
+
+    if not isinstance(entries, list):
+        return None
+    values = [
+        steps
+        for entry in entries
+        if isinstance(entry, dict)
+        for steps in [_as_int(entry.get("steps"))]
+        if steps is not None and steps >= 0
+    ]
+    return sum(values) if values else None
+
+
+def _floor_column_index(payload: dict[str, Any], key: str, fallback: int) -> int:
+    """Position of ``key`` in a ``floorValuesArray`` row, read from the payload's own
+    descriptor list rather than hardcoded.
+
+    ``get_floors`` ships ``floorsValueDescriptorDTOList``, a self-describing index ->
+    column map. Resolving through it means a Garmin-side column reorder produces correct
+    numbers instead of silently swapping ascent and descent. ``fallback`` is the position
+    observed on 2026-08-26 and applies only when the descriptor list is absent.
+    """
+    descriptors = payload.get("floorsValueDescriptorDTOList")
+    if isinstance(descriptors, list):
+        for descriptor in descriptors:
+            if isinstance(descriptor, dict) and descriptor.get("key") == key:
+                index = _as_int(descriptor.get("index"))
+                if index is not None and index >= 0:
+                    return index
+    return fallback
+
+
+def extract_floors(payload: Any) -> int | None:
+    """``get_floors`` -> floors climbed over the day, or ``None`` when unreadable.
+
+    The payload carries ``floorValuesArray``, one row per 15-minute bucket shaped
+    ``[startTimeGMT, endTimeGMT, floorsAscended, floorsDescended]`` -- column positions
+    resolved through :func:`_floor_column_index`. Only ascent is summed: the column
+    records floors CLIMBED, and adding descent back would double-count every staircase.
+
+    A payload whose buckets are all zero yields ``0``, not ``None``: a genuinely flat day
+    and a day the barometer never registered are indistinguishable from the response
+    alone, and the endpoint answering with a full bucket array is itself the evidence that
+    the day was measured. On this athlete's history, ascent stops being reported after
+    2026-08-03 while the buckets keep arriving -- which is exactly why the two cases must
+    not be merged into a silent ``NULL``.
+    """
+    if not isinstance(payload, dict):
+        return None
+    buckets = payload.get("floorValuesArray")
+    if not isinstance(buckets, list):
+        return None
+    ascended_at = _floor_column_index(payload, "floorsAscended", 2)
+    total = 0
+    seen = False
+    for bucket in buckets:
+        if not isinstance(bucket, list) or len(bucket) <= ascended_at:
+            continue
+        ascended = _as_int(bucket[ascended_at])
+        if ascended is None or ascended < 0:
+            continue
+        total += ascended
+        seen = True
+    return total if seen else None
+
+
+def extract_intensity_minutes(payload: Any) -> int | None:
+    """``get_intensity_minutes_data`` -> the day's intensity minutes, or ``None``.
+
+    Garmin counts a vigorous minute twice, so the daily figure the watch displays is
+    ``moderateMinutes + 2 * vigorousMinutes``. That weighting is not assumed from
+    documentation: the same payload also carries ``startDayMinutes`` and
+    ``endDayMinutes``, the running WEEKLY total before and after the day, and their
+    difference matches the weighted sum on every day checked (2026-07-26 .. 08-26,
+    including 256 moderate + 215 vigorous = 686 = 756 - 70). ``weeklyTotal`` versus
+    ``weeklyModerate`` / ``weeklyVigorous`` closes the same identity at week scale.
+
+    The weekly running totals are deliberately NOT used as the source: they reset on the
+    week boundary, so a Monday would read as the whole previous week's residue.
+    """
+    if not isinstance(payload, dict):
+        return None
+    moderate = _as_int(payload.get("moderateMinutes"))
+    vigorous = _as_int(payload.get("vigorousMinutes"))
+    if moderate is None and vigorous is None:
+        return None
+    total = max(moderate or 0, 0) + 2 * max(vigorous or 0, 0)
+    return total
+
+
 def extract_training_readiness(payload: Any) -> int | None:
     """``get_training_readiness`` -> the day's score, or ``None``.
 
@@ -508,9 +617,12 @@ __all__ = [
     "SleepStageRow",
     "WellnessSampleRow",
     "extract_body_battery",
+    "extract_floors",
     "extract_hrv",
+    "extract_intensity_minutes",
     "extract_resting_hr",
     "extract_sleep",
+    "extract_steps",
     "extract_stress",
     "extract_training_readiness",
     "extract_vo2max",

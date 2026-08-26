@@ -23,9 +23,12 @@ from garminator.transform.wellness import (
     METRIC_ID_HRV,
     METRIC_ID_STRESS,
     extract_body_battery,
+    extract_floors,
     extract_hrv,
+    extract_intensity_minutes,
     extract_resting_hr,
     extract_sleep,
+    extract_steps,
     extract_stress,
     extract_training_readiness,
     extract_vo2max,
@@ -363,6 +366,92 @@ def test_weight_without_a_scale_stays_none() -> None:
     # The real case for this athlete: dateWeightList comes back empty on every payload.
     assert extract_weight_kg({"dateWeightList": []}, local_date=LOCAL_DATE) is None
     assert extract_weight_kg({}, local_date=LOCAL_DATE) is None
+
+
+def test_steps_uses_the_authoritative_daily_total() -> None:
+    assert extract_steps({"totalSteps": 12345, "stepsList": [{"steps": 10}]}) == 12345
+
+
+def test_steps_sums_interval_records() -> None:
+    assert extract_steps([{"steps": 100}, {"steps": 250}, {"steps": 0}]) == 350
+
+
+def test_missing_or_negative_steps_stay_none() -> None:
+    assert extract_steps({}) is None
+    assert extract_steps({"totalSteps": -1}) is None
+
+
+# -- floors -----------------------------------------------------------------------------
+
+
+def _floors_payload(*buckets: tuple[int, int]) -> dict[str, object]:
+    """A get_floors response: 15-minute buckets plus the self-describing column map."""
+    return {
+        "floorValuesArray": [
+            ["2026-06-01T00:00:00.0", "2026-06-01T00:15:00.0", ascended, descended]
+            for ascended, descended in buckets
+        ],
+        "floorsValueDescriptorDTOList": [
+            {"key": "startTimeGMT", "index": 0},
+            {"key": "endTimeGMT", "index": 1},
+            {"key": "floorsAscended", "index": 2},
+            {"key": "floorsDescended", "index": 3},
+        ],
+    }
+
+
+def test_floors_sums_ascent_only() -> None:
+    # Descent must not be added back: the column counts floors CLIMBED, and every staircase
+    # that is walked back down would otherwise be counted twice.
+    assert extract_floors(_floors_payload((3, 3), (0, 0), (5, 2))) == 8
+
+
+def test_floors_follows_the_payload_column_map() -> None:
+    # A Garmin-side column reorder must move the reader, not swap ascent and descent.
+    payload = _floors_payload((3, 9))
+    payload["floorsValueDescriptorDTOList"] = [
+        {"key": "startTimeGMT", "index": 0},
+        {"key": "endTimeGMT", "index": 1},
+        {"key": "floorsDescended", "index": 2},
+        {"key": "floorsAscended", "index": 3},
+    ]
+
+    assert extract_floors(payload) == 9
+
+
+def test_a_day_of_empty_buckets_is_zero_not_none() -> None:
+    # The real case since 2026-08-04: the buckets keep arriving, the barometer reports
+    # nothing. That is a measured zero, and it must not be confused with an absent day.
+    assert extract_floors(_floors_payload((0, 0), (0, 0))) == 0
+    assert extract_floors({}) is None
+    assert extract_floors([]) is None
+
+
+# -- intensity minutes ------------------------------------------------------------------
+
+
+def test_intensity_minutes_counts_a_vigorous_minute_twice() -> None:
+    # Garmin's own weighting, cross-checked against the weekly running totals the same
+    # payload carries: 18 + 2 * 31 = 80 = endDayMinutes 125 - startDayMinutes 45.
+    payload = {
+        "moderateMinutes": 18,
+        "vigorousMinutes": 31,
+        "startDayMinutes": 45,
+        "endDayMinutes": 125,
+    }
+
+    assert extract_intensity_minutes(payload) == 80
+
+
+def test_a_day_with_only_one_intensity_band_still_counts() -> None:
+    assert extract_intensity_minutes({"moderateMinutes": 12}) == 12
+    assert extract_intensity_minutes({"vigorousMinutes": 12}) == 24
+    assert extract_intensity_minutes({"moderateMinutes": 0, "vigorousMinutes": 0}) == 0
+
+
+def test_missing_intensity_minutes_stay_none() -> None:
+    assert extract_intensity_minutes({"weeklyTotal": 125}) is None
+    assert extract_intensity_minutes([]) is None
 
 
 def test_training_readiness_empty_list_stays_none() -> None:

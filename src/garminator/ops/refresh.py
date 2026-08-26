@@ -1,17 +1,24 @@
 """Refresh of materialized views ``mart.*`` (batch L10).
 
-Three facts, verified in migrations 007 and 008 (not guessed), underpin this module:
+Three facts, verified in migrations 007/008 then 016-019 (not guessed), underpin this
+module:
 
-1. **Dependency order.** Only one materialized view reads another: ``mart.pmc`` does
-   ``LEFT JOIN mart.daily_load`` (migration 007, CTE ``d``). No other ``mart`` view
-   appears in the SQL body of another (verified by textual search on both migrations:
-   the only occurrence of ``FROM mart.`` or ``JOIN mart.`` is that one). ``mart.
-   daily_load`` must be refreshed before ``mart.pmc``; the other four views
-   (``activity_load``, ``power_curve_best``, ``hr_zone_time``, ``activity_wide``)
-   read only ``core.*`` and have no ordering constraint with each other or the first two.
-2. **``CONCURRENTLY`` requires a UNIQUE index.** All six views have one
+1. **Dependency order.** Among the six historical views, only ``mart.pmc`` reads another
+   (``LEFT JOIN mart.daily_load``, migration 007, CTE ``d``); the other four
+   (``activity_load``, ``power_curve_best``, ``hr_zone_time``, ``activity_wide``) read
+   only ``core.*``. Migrations 016-019 add four views whose dependencies are documented
+   in the 019 header: ``mart.wellness_baseline`` reads core.* only; ``mart.ramp_risk``
+   reads ``mart.pmc`` and ``mart.daily_load``; ``mart.coach_flags`` reads
+   ``mart.wellness_baseline``, ``mart.pmc`` and ``mart.ramp_risk``;
+   ``mart.power_pace_zone_time`` reads core.* only. Hence the registration below:
+   historical six first (daily_load before pmc), then
+   wellness_baseline -> ramp_risk -> coach_flags, power_pace_zone_time anywhere after
+   its own creation.
+2. **``CONCURRENTLY`` requires a UNIQUE index.** All ten views have one
    (``activity_load_pk``, ``daily_load_pk``, ``pmc_pk``, ``power_curve_best_pk``,
-   ``hr_zone_time_pk``, ``activity_wide_pk``) -- condition explicitly documented by
+   ``hr_zone_time_pk``, ``activity_wide_pk``, ``wellness_baseline_pk``,
+   ``power_pace_zone_time_pk``, ``ramp_risk_pk``, ``coach_flags_pk``) -- condition
+   explicitly documented by
    the comment on ``mart.activity_load`` (migration 007): "The UNIQUE index is not
    decorative: it is the sine qua non condition for REFRESH MATERIALIZED VIEW
    CONCURRENTLY".
@@ -41,7 +48,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Materialized views of ``mart``, in correct refresh order. See point 1 of module
-#: docstring for justification from migrations 007/008.
+#: docstring for justification from migrations 007/008 (historical six) and the header
+#: of migration 019 (dependency chain of the coaching views).
 MART_VIEWS: tuple[str, ...] = (
     # Refreshed even though no dashboard reads it: migration 011 makes it a
     # counter-expert view, its gap with mart.activity_wide reveals if a threshold was
@@ -52,6 +60,13 @@ MART_VIEWS: tuple[str, ...] = (
     "mart.power_curve_best",
     "mart.hr_zone_time",
     "mart.activity_wide",
+    # Coaching views (018/019), dependency order: ramp_risk reads pmc/daily_load above;
+    # coach_flags reads wellness_baseline and ramp_risk. power_pace_zone_time is
+    # independent (core.* only) and closes the list.
+    "mart.wellness_baseline",
+    "mart.ramp_risk",
+    "mart.coach_flags",
+    "mart.power_pace_zone_time",
 )
 
 RefreshMode = Literal["concurrently", "with_data"]

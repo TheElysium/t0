@@ -1,4 +1,4 @@
-"""HTTP API: manual upload endpoint for FIT/TCX/ZIP files.
+"""HTTP API: manual upload endpoint for FIT/TCX/ZIP files, manual RPE entry endpoint.
 
 This package deliberately re-exports NOTHING (unlike ``garminator.garmin``):
 ``garminator.api.upload`` (and therefore ``garminator.api.app``) declares a route using
@@ -6,8 +6,8 @@ This package deliberately re-exports NOTHING (unlike ``garminator.garmin``):
 missing. Re-exporting those symbols here would break importing
 ``garminator.api.ingest`` (pure logic, no FastAPI/multipart dependency) in any
 environment without ``python-multipart``. Import the submodule you need directly:
-``garminator.api.ingest`` for the business logic, ``garminator.api.app``/``.upload`` for
-the HTTP layer.
+``garminator.api.ingest`` for the business logic, ``garminator.api.app``/``.upload``/
+``.rpe`` for the HTTP layer.
 """
 
 from __future__ import annotations
