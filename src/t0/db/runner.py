@@ -23,6 +23,11 @@ Principles that govern this module:
    violation or duplicate ``CREATE TABLE``, in a partially-applied state. The lock is
    taken in *try* mode (non-blocking): a second runner fails immediately and cleanly
    rather than blocking indefinitely in a container.
+6. **Relocatable migrations directory.** The default path is derived from this file's
+   location, which is only correct inside a source checkout: once the package is
+   installed as a wheel, ``site-packages/t0/db/`` has no repository root above it. The
+   container image copies the ``.sql`` files to a directory of its own and points
+   :data:`MIGRATIONS_DIR_ENV_VAR` at it, so the same command works in both layouts.
 """
 
 from __future__ import annotations
@@ -49,8 +54,13 @@ logger = logging.getLogger(__name__)
 #: reads it itself, without ever importing or constructing ``Settings``.
 DSN_ENV_VAR = "T0_POSTGRES_DSN"
 
-#: Default migrations directory: ``<repository root>/migrations``.
+#: Fallback migrations directory: ``<repository root>/migrations``. Valid in a source
+#: checkout only -- see :func:`resolve_migrations_dir` for the installed-package case.
 DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
+
+#: Name of the environment variable overriding the migrations directory. Set by the
+#: container image, which ships the ``.sql`` files outside the Python package.
+MIGRATIONS_DIR_ENV_VAR = "T0_MIGRATIONS_DIR"
 
 #: Table tracking applied migrations. Deliberately in ``public`` (schema always present,
 #: even before migration 001 creates ``raw``/``core``/``mart``) rather than in one of
@@ -124,7 +134,7 @@ def compute_checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def discover_migrations(migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> list[Migration]:
+def discover_migrations(migrations_dir: Path | None = None) -> list[Migration]:
     """List migrations from directory, sorted by version number.
 
     Files must follow the pattern ``NNN_name.sql`` (``NNN`` numeric, zero-padded or not).
@@ -134,8 +144,9 @@ def discover_migrations(migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> list[M
     Raises:
         MigrationError: if two files declare the same version number.
     """
+    resolved_dir = resolve_migrations_dir(migrations_dir)
     migrations: dict[int, Migration] = {}
-    for path in sorted(migrations_dir.glob("*.sql")):
+    for path in sorted(resolved_dir.glob("*.sql")):
         match = _FILENAME_RE.match(path.name)
         if match is None:
             continue
@@ -201,6 +212,32 @@ def resolve_dsn(dsn: str | None) -> str:
     if not value:
         raise MigrationError(f"No PostgreSQL DSN provided: pass --dsn, or set {DSN_ENV_VAR}.")
     return value
+
+
+def resolve_migrations_dir(migrations_dir: Path | None) -> Path:
+    """Resolve the migrations directory: explicit argument, environment, then fallback.
+
+    The fallback walks up from this file to the repository root, which only exists in a
+    source checkout. In the container image the package lives in ``site-packages`` and
+    the ``.sql`` files are copied elsewhere, so the image sets
+    :data:`MIGRATIONS_DIR_ENV_VAR`.
+
+    Raises:
+        MigrationError: if the resolved directory does not exist. Failing here is the
+            whole point: an empty ``glob`` on a missing directory would otherwise be
+            reported as "database is already up to date".
+    """
+    if migrations_dir is not None:
+        resolved = migrations_dir
+    else:
+        value = os.environ.get(MIGRATIONS_DIR_ENV_VAR)
+        resolved = Path(value) if value else DEFAULT_MIGRATIONS_DIR
+    if not resolved.is_dir():
+        raise MigrationError(
+            f"Migrations directory not found: {resolved}. "
+            f"Pass --migrations-dir, or set {MIGRATIONS_DIR_ENV_VAR}."
+        )
+    return resolved
 
 
 def connect(dsn: str) -> psycopg.Connection[tuple[Any, ...]]:
@@ -286,9 +323,7 @@ def apply_migration(conn: psycopg.Connection[tuple[Any, ...]], migration: Migrat
         conn.commit()
 
 
-def migrate(
-    dsn: str | None = None, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR
-) -> list[Migration]:
+def migrate(dsn: str | None = None, migrations_dir: Path | None = None) -> list[Migration]:
     """Apply all pending migrations, in order, after drift check.
 
     Returns:
@@ -332,7 +367,7 @@ class Status:
     drift: list[str]
 
 
-def status(dsn: str | None = None, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> Status:
+def status(dsn: str | None = None, migrations_dir: Path | None = None) -> Status:
     """Report current state without applying or modifying anything."""
     resolved_dsn = resolve_dsn(dsn)
     migrations = discover_migrations(migrations_dir)

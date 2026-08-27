@@ -19,6 +19,7 @@ import pytest
 
 from t0.db.runner import (
     ADVISORY_LOCK_KEY,
+    MIGRATIONS_DIR_ENV_VAR,
     AppliedMigration,
     MigrationError,
     MigrationLockError,
@@ -28,6 +29,7 @@ from t0.db.runner import (
     discover_migrations,
     plan_pending,
     release_lock,
+    resolve_migrations_dir,
 )
 
 if TYPE_CHECKING:
@@ -512,3 +514,66 @@ def test_dependency_guard_ignores_comments_and_literals() -> None:
     assert "mart.activity_load" not in _strip_sql_comments_and_literals(prose)
     assert "mart.activity_load" not in _strip_sql_comments_and_literals(literal)
     assert "mart.activity_load" in _strip_sql_comments_and_literals(real)
+
+
+# --------------------------------------------------------------------------------------
+# Migrations directory resolution
+#
+# The fallback (``<repository root>/migrations``) is derived from the source tree layout
+# and is wrong once the package is installed in site-packages, which is exactly what the
+# container image does. These tests pin the three-level precedence and, above all, the
+# refusal to run against a directory that does not exist: an empty glob would otherwise
+# be reported as "database is already up to date" while the schema is missing.
+# --------------------------------------------------------------------------------------
+
+
+def test_resolve_migrations_dir_prefers_explicit_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit argument wins over the environment variable."""
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setenv(MIGRATIONS_DIR_ENV_VAR, str(other))
+
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+
+    assert resolve_migrations_dir(explicit) == explicit
+
+
+def test_resolve_migrations_dir_reads_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no argument, the environment variable is used. This is the container case."""
+    monkeypatch.setenv(MIGRATIONS_DIR_ENV_VAR, str(tmp_path))
+
+    assert resolve_migrations_dir(None) == tmp_path
+
+
+def test_resolve_migrations_dir_falls_back_to_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With neither argument nor environment, the repository directory is used."""
+    monkeypatch.delenv(MIGRATIONS_DIR_ENV_VAR, raising=False)
+
+    assert resolve_migrations_dir(None) == REPO_MIGRATIONS_DIR
+
+
+def test_resolve_migrations_dir_rejects_missing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing directory raises instead of silently yielding zero migrations."""
+    monkeypatch.setenv(MIGRATIONS_DIR_ENV_VAR, str(tmp_path / "absent"))
+
+    with pytest.raises(MigrationError, match="Migrations directory not found"):
+        resolve_migrations_dir(None)
+
+
+def test_discover_migrations_rejects_missing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal reaches the caller through discover_migrations, the single reader."""
+    monkeypatch.delenv(MIGRATIONS_DIR_ENV_VAR, raising=False)
+
+    with pytest.raises(MigrationError, match="Migrations directory not found"):
+        discover_migrations(tmp_path / "absent")

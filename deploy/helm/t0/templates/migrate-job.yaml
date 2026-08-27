@@ -1,0 +1,136 @@
+{{- /*
+Schema migration Job, run as a Helm hook.
+
+Nothing else in this chart creates the schema: PostgreSQL starts on an empty
+volume and `initdb` only creates the database, so without this Job the scheduler
+CronJob fails on its first INSERT into `raw.api_response`.
+
+Hook phases, and why these two:
+  - `post-install`: on a fresh install the PostgreSQL StatefulSet is created in
+    the main phase, so a `pre-install` hook would have nothing to connect to.
+  - `pre-upgrade`: on an upgrade the database is already running, and the schema
+    must be in place BEFORE the new image starts reading it.
+
+Reuses the ingest image, which ships the .sql files at $T0_MIGRATIONS_DIR.
+
+The runner takes a PostgreSQL session advisory lock, so a second concurrent run
+fails immediately instead of half-applying anything; it is also idempotent, so a
+retried Job is a no-op once the schema is up to date.
+*/ -}}
+{{- if .Values.migrate.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "t0.fullname" . }}-migrate
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    "helm.sh/hook": post-install,pre-upgrade
+    # Lowest weight: nothing else in this chart is a hook today, but a future one
+    # (a seed Job, a backup before upgrade) must run after the schema exists.
+    "helm.sh/hook-weight": "-10"
+    # `before-hook-creation` deletes the previous Job, whose spec is immutable and
+    # would otherwise make the next release fail. `hook-succeeded` removes it once
+    # it worked -- a FAILED Job is deliberately kept so its logs survive.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "t0.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      # This Job only talks to PostgreSQL: no Garmin credentials, no service
+      # account token.
+      automountServiceAccountToken: false
+      {{- include "t0.scheduling" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.ingest.securityContext | nindent 8 }}
+      initContainers:
+        # On a fresh install the PostgreSQL pod is usually still starting when this
+        # hook fires. Without this wait the Job would fail, retry, and leave a
+        # confusing "connection refused" as the first thing an operator reads.
+        - name: wait-for-postgresql
+          image: "{{ .Values.ingest.image.repository }}:{{ include "t0.ingest.imageTag" . }}"
+          imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.ingest.containerSecurityContext | nindent 12 }}
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - python
+            - -c
+            - |
+              import os, sys, time
+              import psycopg
+
+              dsn = os.environ["T0_POSTGRES_DSN"]
+              deadline = time.monotonic() + float(os.environ["T0_WAIT_TIMEOUT_SECONDS"])
+              last = ""
+              while True:
+                  try:
+                      psycopg.connect(dsn, connect_timeout=5).close()
+                      break
+                  except Exception as exc:  # noqa: BLE001 -- any failure means "not ready yet"
+                      # The DSN carries the password: only the exception class and its
+                      # message are printed, never the DSN itself.
+                      last = f"{type(exc).__name__}: {exc}"
+                      if time.monotonic() >= deadline:
+                          print(f"PostgreSQL still unreachable: {last}", file=sys.stderr)
+                          raise SystemExit(1) from None
+                      time.sleep(3)
+              print("PostgreSQL is accepting connections.")
+          env:
+            {{- include "t0.postgresEnv" . | nindent 12 }}
+            - name: T0_WAIT_TIMEOUT_SECONDS
+              value: {{ .Values.migrate.waitForPostgresqlSeconds | quote }}
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONPYCACHEPREFIX
+              value: /tmp/pycache
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: migrate
+          image: "{{ .Values.ingest.image.repository }}:{{ include "t0.ingest.imageTag" . }}"
+          imagePullPolicy: {{ .Values.ingest.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.ingest.containerSecurityContext | nindent 12 }}
+            seccompProfile:
+              type: RuntimeDefault
+          # The migrations directory comes from T0_MIGRATIONS_DIR, set by the image:
+          # passing it here would hardcode a path the image is free to change.
+          command: ["python", "-m", "t0.db", "migrate"]
+          env:
+            {{- include "t0.postgresEnv" . | nindent 12 }}
+            - name: T0_LOG_LEVEL
+              value: {{ .Values.ingest.config.logLevel | quote }}
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONPYCACHEPREFIX
+              value: /tmp/pycache
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.ingest.tmpDirSizeLimit }}
+{{- end }}

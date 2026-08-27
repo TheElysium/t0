@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from t0.db.runner import (
-    DEFAULT_MIGRATIONS_DIR,
+    MIGRATIONS_DIR_ENV_VAR,
     MigrationError,
     format_status,
     migrate,
@@ -33,9 +33,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--migrations-dir",
-        default=DEFAULT_MIGRATIONS_DIR,
+        default=None,
         type=Path,
-        help="Directory of migration files (default: migrations/ from repository).",
+        help=(
+            f"Directory of migration files. If omitted, read from {MIGRATIONS_DIR_ENV_VAR}, "
+            "then from migrations/ relative to the repository root."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("migrate", help="Apply pending migrations.")

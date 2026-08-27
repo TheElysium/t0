@@ -97,6 +97,37 @@ postgresql:
     failureThreshold: 3
 
 # -----------------------------------------------------------------------
+# Schema migrations -- Helm hook Job, see templates/migrate-job.yaml
+#
+# Runs `python -m t0.db migrate` on post-install and pre-upgrade. Nothing else
+# creates the schema, so disabling this leaves an empty database and the
+# scheduler CronJob fails on its first write. Disable it only to apply the
+# migrations by hand (`kubectl create job --from=...` is not enough: a hook Job
+# is deleted once it succeeds).
+#
+# Uses the ingest image and the ingest security contexts: it is the same
+# artifact, running a different command.
+# -----------------------------------------------------------------------
+migrate:
+  enabled: true
+  # A migration failure is almost never transient (a syntax error, a checksum
+  # drift): retrying twice is enough to absorb a lost connection, and beyond
+  # that the failure must surface.
+  backoffLimit: 2
+  # Ceiling on the whole Job, init container included. Helm blocks on the hook
+  # for the duration, so this also bounds `helm upgrade`.
+  activeDeadlineSeconds: 900
+  # How long the init container waits for PostgreSQL to accept connections. On a
+  # fresh install the StatefulSet is often still starting when the hook fires.
+  waitForPostgresqlSeconds: 300
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+# -----------------------------------------------------------------------
 # t0-ingest -- poll Garmin, parse FIT, calculations, upload endpoint
 # -----------------------------------------------------------------------
 ingest:

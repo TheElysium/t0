@@ -123,6 +123,41 @@ Parameters to review before a real first deployment (see `values.yaml`, commente
   non-empty, the NetworkPolicy opens outbound HTTPS for the Grafana pod (plugin
   download at startup); keeping it empty restores PostgreSQL-only egress.
 
+## Schema migrations (hook Job `migrate`)
+
+The chart creates the schema itself. `templates/migrate-job.yaml` runs
+`python -m t0.db migrate` as a Helm hook:
+
+| Phase          | When it runs                                                      |
+| -------------- | ----------------------------------------------------------------- |
+| `post-install` | after the PostgreSQL StatefulSet exists -- on a fresh install there is nothing to connect to before the main phase. |
+| `pre-upgrade`  | before the new image starts, so the schema is ready when it reads. |
+
+`helm install` and `helm upgrade` block until the Job completes and **fail if it
+fails**: a release reported as `deployed` has a migrated schema.
+
+Points worth knowing:
+
+- An init container waits up to `migrate.waitForPostgresqlSeconds` (300 s) for
+  PostgreSQL to accept connections, so a first install does not fail on a database
+  that is merely still starting.
+- The runner takes a PostgreSQL **session advisory lock** in non-blocking mode: a
+  second concurrent run fails immediately instead of half-applying anything. It also
+  refuses to run if a previously applied file's checksum has changed.
+- The Job uses the **ingest image** -- same artifact, different command. The `.sql`
+  files live at `/app/migrations` in the image, pointed at by `T0_MIGRATIONS_DIR`;
+  they are not part of the Python wheel.
+- A **successful** Job is deleted; a **failed** one is kept, so
+  `kubectl logs job/<release>-migrate` still answers after a failed upgrade. The next
+  release deletes it before recreating it (`before-hook-creation`), because a Job spec
+  is immutable.
+- The Job is idempotent: rerunning it on an up-to-date schema applies nothing.
+- `migrate.enabled: false` disables it. Only do this to apply migrations by hand --
+  the scheduler CronJob fails on its first write against an empty database.
+
+What this hook does **not** do: seed the athlete and their thresholds. That data is
+personal and is never in the repository; see `docs/RUNBOOK.md`, section 1.
+
 ## Garmin polling (CronJob `scheduler`)
 
 This is the only chart object that calls Garmin Connect. It replaces the polling
@@ -266,6 +301,10 @@ The `<release>-postgresql-backup` `CronJob` runs `pg_dump --format=custom`
 every week (default Sunday 03:00, `backup.schedule`) to
 `<pvc fit-archive>/postgres-backups/`, with simple rotation (`backup.retention`
 dumps kept).
+
+A dump that has never been restored is a hypothesis, not a backup: `docs/RUNBOOK.md`,
+section 4, carries a restore drill that replays the latest dump into a throwaway
+database without touching `t0`. Run it once, after the first successful backup.
 
 Three guarantees of the backup script:
 

@@ -1,5 +1,5 @@
-# Minimal build context: only pyproject.toml, README.md, and src/ are copied
-# by Dockerfile. Everything else is excluded -- especially personal data,
+# Minimal build context: only pyproject.toml, README.md, src/ and migrations/ are
+# copied by Dockerfile. Everything else is excluded -- especially personal data,
 # whose inclusion in the context would expose the risk of leaking into an
 # image published on GHCR.
 

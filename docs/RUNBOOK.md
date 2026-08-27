@@ -32,8 +32,20 @@ All commands below assume `T0_POSTGRES_DSN` is defined in the environment
    python -m t0.db migrate
    ```
 
+   **On a Helm deployment this step is already done**: the chart runs the same command
+   as a `post-install`/`pre-upgrade` hook Job (`templates/migrate-job.yaml`), and Helm
+   waits for it before reporting the release as deployed. The command above is for a
+   local run, or for a cluster where `migrate.enabled` was set to `false`.
+
+   The runner reads its `.sql` files from `T0_MIGRATIONS_DIR` when that variable is set
+   (the container image sets it to `/app/migrations`), otherwise from `migrations/`
+   relative to the repository root -- which only exists in a source checkout.
+
    Verify the absence of drift: `python -m t0.db status` should display
    "Drifts detected: " with no `!` lines below.
+
+   The hook Job is deleted once it succeeds; a **failed** one is kept on purpose, so
+   `kubectl logs job/<release>-migrate` still answers after a failed `helm upgrade`.
 
 2. The six `mart.*` views are automatically populated on creation by migrations 007/008
    (`CREATE MATERIALIZED VIEW` without `WITH NO DATA`): no additional action is needed at
@@ -171,6 +183,115 @@ format, in `fitArchive.subPaths.postgresBackups` of the shared PVC, named
    produced by a tool that excludes materialized view data), see the next section:
    `python -m t0.ops refresh` automatically switches to non-concurrent refresh
    for this specific case.
+
+### Verifying a backup (restore drill)
+
+A dump that has never been restored is a hypothesis, not a backup. Run this drill
+**once after the first successful backup**, and again after any PostgreSQL major
+version change. It restores into a throwaway database on the same server and never
+touches `t0`.
+
+Cost: the drill database temporarily doubles the size of the data on the PostgreSQL
+volume. Check the free space first (`kubectl exec <postgresql pod> -- df -h /var/lib/postgresql/data`).
+
+1. Start a drill pod mounting the backup PVC. It carries no Garmin credential and no
+   service account token; the PVC is `ReadWriteOnce`, so this pod must land on the node
+   already holding it -- which is what `podAffinity` on the PostgreSQL pod below
+   guarantees. Replace `t0` with the release name if it differs.
+
+   ```
+   kubectl apply -f - <<'YAML'
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: t0-restore-drill
+   spec:
+     restartPolicy: Never
+     automountServiceAccountToken: false
+     securityContext:
+       runAsNonRoot: true
+       runAsUser: 999
+       runAsGroup: 999
+       # fsGroup MUST match `ingest.securityContext.fsGroup` (10001 by default).
+       # The kubelet applies fsGroup RECURSIVELY to the volume on every mount, so a
+       # different value here would re-chown the whole FIT archive and leave ingest
+       # unable to write to it -- the same trap documented in backup-cronjob.yaml.
+       fsGroup: 10001
+     affinity:
+       podAffinity:
+         requiredDuringSchedulingIgnoredDuringExecution:
+           - labelSelector:
+               matchLabels:
+                 app.kubernetes.io/instance: t0
+                 app.kubernetes.io/component: postgresql
+             topologyKey: kubernetes.io/hostname
+     containers:
+       - name: drill
+         image: postgres:16-alpine
+         command: ["sleep", "3600"]
+         env:
+           - name: PGHOST
+             value: t0-postgresql
+           - name: PGUSER
+             valueFrom:
+               secretKeyRef: { name: t0-postgresql, key: username }
+           - name: PGPASSWORD
+             valueFrom:
+               secretKeyRef: { name: t0-postgresql, key: password }
+         volumeMounts:
+           - name: backups
+             mountPath: /backups
+             subPath: postgres-backups
+             readOnly: true
+     volumes:
+       - name: backups
+         persistentVolumeClaim:
+           claimName: t0-fit-archive
+   YAML
+   ```
+
+2. Pick the dump and restore it into a fresh database:
+
+   ```
+   kubectl exec -it t0-restore-drill -- sh
+   ls -l /backups
+   dump=$(ls /backups/t0-*.dump | tail -1)   # names are fixed-width UTC: last == newest
+   createdb t0_restore_drill
+   pg_restore --no-owner --exit-on-error --dbname=t0_restore_drill "$dump"
+   ```
+
+   `--exit-on-error` is the point of the drill: without it `pg_restore` reports errors
+   and still exits 0, so a partial restore looks like a success.
+
+3. Check that the restored database holds what it should. A restore that produces an
+   empty `core.activity` has "succeeded" and is worthless:
+
+   ```
+   psql --dbname=t0_restore_drill -c "
+     SELECT (SELECT count(*) FROM public.schema_migration)  AS migrations,
+            (SELECT count(*) FROM core.activity)            AS activities,
+            (SELECT max(start_time_local) FROM core.activity) AS latest,
+            (SELECT count(*) FROM core.daily_wellness)      AS wellness_days;"
+   ```
+
+   Compare `migrations` with the number of `.sql` files in `migrations/`, and `latest`
+   with the date of the last activity you know about. The `mart` views are restored
+   without their data (`pg_dump` does not carry materialized view contents): that is
+   expected, `python -m t0.ops refresh` rebuilds them.
+
+4. Drop the drill database and delete the pod. Skipping this leaves a full copy of the
+   data occupying the PostgreSQL volume:
+
+   ```
+   dropdb t0_restore_drill
+   exit
+   ```
+   ```
+   kubectl delete pod t0-restore-drill
+   ```
+
+Record the date of the drill somewhere you will find it again. If a restore has not
+been verified in the last year, it has not been verified.
 
 ## 5. Refreshing `mart` views manually
 

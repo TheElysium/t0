@@ -188,3 +188,35 @@ tolerations:
   {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end -}}
+
+{{/*
+PostgreSQL connection environment, shared by the workloads that only need a
+database (the migration hook so far). Emits an `env` LIST, to be spliced into an
+existing `env:` key -- it does not emit the key itself.
+
+The three entries are ordered, not alphabetised: Kubernetes resolves $(VAR) only
+among variables ALREADY declared earlier in the same list, so PGUSER and
+PGPASSWORD must come before T0_POSTGRES_DSN.
+
+The DSN is passed as an environment variable and NEVER as an --dsn argument: a
+command-line argument is visible in plain text in the container process list,
+including via `kubectl describe pod`.
+
+The other workloads still inline this block; they predate the helper and are left
+alone rather than churned. New ones should use it.
+*/}}
+{{- define "t0.postgresEnv" -}}
+- name: PGUSER
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "t0.postgresql.secretName" . }}
+      key: username
+- name: PGPASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "t0.postgresql.secretName" . }}
+      key: password
+- name: T0_POSTGRES_DSN
+  value: >-
+    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+{{- end -}}

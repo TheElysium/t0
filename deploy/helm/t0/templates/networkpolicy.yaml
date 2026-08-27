@@ -1,7 +1,10 @@
 {{- if .Values.networkPolicy.enabled }}
 ---
-# PostgreSQL: accepts only inbound traffic from ingest, Grafana,
-# and the backup CronJob (same release labels).
+# PostgreSQL: accepts inbound traffic from any pod of the same release -- ingest,
+# Grafana, the backup and ops CronJobs, and the migration hook Job. The selector is
+# release-wide on purpose: a per-component list would have to be extended every time
+# a workload is added, and forgetting it fails as a connection timeout at 3 a.m.
+# No egress policy targets those pods, so they reach DNS and PostgreSQL freely.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
