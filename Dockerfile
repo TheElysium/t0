@@ -38,7 +38,8 @@ ENV PYTHONUNBUFFERED=1 \
     GARMINTOKENS=/data/garmin-tokens \
     T0_FIT_ARCHIVE_PATH=/data/fit-archive
 
-EXPOSE 8000
+# Must stay in sync with the CMD below and with `ingest.service.port` in the chart.
+EXPOSE 8080
 
 # The healthcheck intentionally stays independent of runtime configuration: the
 # FastAPI factory loads settings only when a request needs them.

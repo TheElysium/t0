@@ -182,6 +182,23 @@ ingest:
     failureThreshold: 3
 
 # -----------------------------------------------------------------------
+# Pod scheduling (applies to every workload of the release)
+# -----------------------------------------------------------------------
+# The fit-archive PVC below is ReadWriteOnce and is mounted by five workloads
+# (ingest, scheduler, transform, ops-reconcile, backup). On a single-node cluster
+# nothing is needed here. On a multi-node cluster with node-local storage
+# (k3s local-path, hostPath...), a pod scheduled on another node stays Pending
+# forever: pin the release to the node holding the volume, for example
+#   nodeSelector:
+#     kubernetes.io/hostname: homelab-node-1
+# The alternative is a ReadWriteMany StorageClass (NFS, Longhorn), declared in
+# fitArchive.persistence.storageClassName + accessModes.
+scheduling:
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+
+# -----------------------------------------------------------------------
 # FIT file archive -- PVC shared between ingestion and backup CronJob.
 # Also contains Garmin token store (subdirectory) and PostgreSQL dumps
 # (subdirectory), to remain at THREE PVCs.

@@ -51,6 +51,7 @@ spec:
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false
+          {{- include "t0.scheduling" . | nindent 10 }}
           securityContext:
             {{- toYaml .Values.ingest.securityContext | nindent 12 }}
           containers:

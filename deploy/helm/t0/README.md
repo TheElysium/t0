@@ -15,7 +15,7 @@ equivalent to full account access. It must exist in the target namespace before
 `t0-garmin-credentials`), with keys `username` and `password`.
 
 ```bash
-kubectl create namespace t0   # si besoin
+kubectl create namespace t0   # if needed
 
 kubectl create secret generic t0-garmin-credentials \
   --namespace t0 \
@@ -103,11 +103,25 @@ Parameters to review before a real first deployment (see `values.yaml`, commente
 - Volume sizes (`*.persistence.size`), to adjust to the athlete's actual history
   (backfill from 2025-04-03, batch L10).
 - `backup.schedule` and `backup.retention` if the default weekly rhythm does not suit.
-- `grafana.plugins` -- Grafana.com plugins installed at pod start (default:
-  `volkovlabs-form-panel`, used by the "07 Data Entry" dashboard to write
-  `core.plan_week` and manual RPE directly from Grafana). While this list is non-empty,
-  the NetworkPolicy opens outbound HTTPS for the Grafana pod (plugin download at
-  startup); set it to an empty list to restore PostgreSQL-only egress.
+- `scheduling.nodeSelector` / `scheduling.affinity` / `scheduling.tolerations` -- applied to
+  every workload of the release. Mandatory on a **multi-node** cluster with node-local
+  storage: the `fit-archive` PVC is `ReadWriteOnce` and is mounted by five workloads
+  (`ingest`, `scheduler`, `transform`, `ops-reconcile`, `backup`), so any pod scheduled on
+  another node stays `Pending` forever. Pin the release to the node holding the volume:
+
+  ```yaml
+  scheduling:
+    nodeSelector:
+      kubernetes.io/hostname: homelab-node-1
+  ```
+
+  A `ReadWriteMany` StorageClass (NFS, Longhorn) declared in
+  `fitArchive.persistence.storageClassName` plus `accessModes: [ReadWriteMany]` removes the
+  need for this pinning. Nothing to set on a single-node cluster.
+- `grafana.plugins` -- Grafana.com plugins installed at pod start. The default is an
+  empty list: none of the shipped dashboards needs a plugin. While this list is
+  non-empty, the NetworkPolicy opens outbound HTTPS for the Grafana pod (plugin
+  download at startup); keeping it empty restores PostgreSQL-only egress.
 
 ## Garmin polling (CronJob `scheduler`)
 
@@ -300,14 +314,18 @@ If enabled, it limits PostgreSQL to Release pods, Grafana to a single outbound
 to PostgreSQL, and ingestion to PostgreSQL + DNS + outbound HTTPS (necessary to
 reach the Garmin API).
 
-## Grafana dashboards (batch L9)
+## Grafana dashboards
 
-The `<release>-grafana-dashboards` ConfigMap is created **empty** by this chart
-and mounted at `/var/lib/grafana/dashboards`, with the provisioning provider
-already in place (`/etc/grafana/provisioning/dashboards`). Batch L9 only needs to
-add `*.json` keys to it (or provide its own ConfigMap via
-`grafana.dashboards.configMapName`) -- no chart modification is necessary to
-publish new dashboards.
+The `<release>-grafana-dashboards` ConfigMap is built from every `*.json` file in
+the chart's `dashboards/` directory (`.Files.Glob`) and mounted at
+`/var/lib/grafana/dashboards`, with the provisioning provider already in place
+(`/etc/grafana/provisioning/dashboards`). Adding or removing a dashboard is a
+matter of adding or removing a file in `dashboards/` -- no template change is
+necessary. Set `grafana.dashboards.configMapName` to mount an externally managed
+ConfigMap instead, in which case this chart creates none.
+
+Dashboard uids must stay unique: a collision makes Grafana reject the whole
+provisioning provider, not just the offending file.
 
 ## Offline validation
 

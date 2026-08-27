@@ -165,3 +165,26 @@ at startup. Returns a JSON array string; use `| fromJsonArray`.
 {{- end -}}
 {{- $plugins | toJson -}}
 {{- end -}}
+
+{{/*
+Pod scheduling constraints, shared by every workload of the release.
+The fit-archive PVC is ReadWriteOnce and is mounted by five workloads: on a
+multi-node cluster they must all land on the node holding the volume, otherwise
+the ones scheduled elsewhere stay Pending forever. Pinning the whole release with
+a nodeSelector is the simplest way to guarantee that; a ReadWriteMany
+StorageClass removes the need for it.
+*/}}
+{{- define "t0.scheduling" -}}
+{{- with .Values.scheduling.nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.scheduling.affinity }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.scheduling.tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
