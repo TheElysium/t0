@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from t0.api.health import router as health_router
 from t0.api.rpe import router as rpe_router
 from t0.api.upload import router as upload_router
 
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
             "that no computed method could measure."
         ),
     )
+    app.include_router(health_router)
     app.include_router(upload_router)
     app.include_router(rpe_router)
     return app
