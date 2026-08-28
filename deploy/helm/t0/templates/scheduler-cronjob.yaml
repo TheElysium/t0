@@ -101,7 +101,7 @@ spec:
                       key: password
                 - name: T0_POSTGRES_DSN
                   value: >-
-                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.host" . }}:{{ include "t0.postgresql.port" . }}/{{ .Values.postgresql.auth.database }}
                 # Read-only root: everything Python runtime writes by default under
                 # $HOME or in caches must go to /tmp.
                 - name: HOME

@@ -13,9 +13,9 @@ data:
       - name: PostgreSQL
         type: postgres
         access: proxy
-        url: {{ include "t0.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}
+        url: {{ include "t0.postgresql.host" . }}:{{ include "t0.postgresql.port" . }}
         database: {{ .Values.postgresql.auth.database }}
-        user: {{ .Values.postgresql.auth.username }}
+        user: $POSTGRESQL_USER
         isDefault: true
         editable: false
         secureJsonData:

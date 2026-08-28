@@ -47,3 +47,6 @@ deploy/seed/*.sql
 
 # Disposable local Grafana preview provisioning
 /.local-preview/
+
+# Local Helm values for the homelab release -- passwords and cluster-specific settings
+values-homelab.yaml

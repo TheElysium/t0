@@ -98,7 +98,7 @@ spec:
                 # via `kubectl describe pod`.
                 - name: T0_POSTGRES_DSN
                   value: >-
-                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.serviceName" . }}:{{ .Values.postgresql.service.port }}/{{ .Values.postgresql.auth.database }}
+                    postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.host" . }}:{{ include "t0.postgresql.port" . }}/{{ .Values.postgresql.auth.database }}
                 # This Job does not mount the ingest ConfigMap (it needs no Garmin
                 # settings): verbosity is picked up here alone, from the same value,
                 # so a single setting applies everywhere.

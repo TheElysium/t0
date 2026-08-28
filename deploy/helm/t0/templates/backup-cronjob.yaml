@@ -44,9 +44,9 @@ spec:
               imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
               env:
                 - name: PGHOST
-                  value: {{ include "t0.postgresql.serviceName" . | quote }}
+                  value: {{ include "t0.postgresql.host" . | quote }}
                 - name: PGPORT
-                  value: {{ .Values.postgresql.service.port | quote }}
+                  value: {{ include "t0.postgresql.port" . | quote }}
                 - name: PGDATABASE
                   value: {{ .Values.postgresql.auth.database | quote }}
                 - name: PGUSER

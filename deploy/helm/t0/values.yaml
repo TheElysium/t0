@@ -31,8 +31,33 @@ garminSecret:
 
 # -----------------------------------------------------------------------
 # PostgreSQL
+#
+# Two modes:
+#   - embedded (default, `enabled: true`): this chart deploys its own
+#     PostgreSQL StatefulSet + Service + Secret in the release namespace.
+#   - external (`enabled: false`): connect to a server this chart does not
+#     manage -- e.g. a CloudNativePG cluster. Then `external.host` is
+#     MANDATORY, the chart deploys no StatefulSet/Service, and credentials
+#     MUST come from a pre-existing Secret via `auth.existingSecret`
+#     (keys `username` and `password`) -- the `<cluster>-app` Secret of a
+#     CNPG cluster matches this shape. Secrets are namespaced: when the
+#     external server lives in another namespace, copy its Secret into the
+#     release namespace first and reference the copy.
 # -----------------------------------------------------------------------
 postgresql:
+  enabled: true
+
+  external:
+    # Host of the external server, e.g. with CloudNativePG the read-write
+    # Service: "<cluster>-rw.<namespace>.svc" (short form "<cluster>-rw" only
+    # works from the same namespace). Ignored while `enabled` is true.
+    host: ""
+    port: 5432
+    # Namespace of the external server, used ONLY by the NetworkPolicy egress
+    # rule (a pod selector never crosses a namespace boundary). Empty = any
+    # namespace, still restricted to the database port.
+    namespace: ""
+
   image:
     repository: postgres
     tag: "16-alpine"

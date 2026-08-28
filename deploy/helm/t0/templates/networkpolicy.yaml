@@ -1,10 +1,13 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if .Values.postgresql.enabled }}
 ---
 # PostgreSQL: accepts inbound traffic from any pod of the same release -- ingest,
 # Grafana, the backup and ops CronJobs, and the migration hook Job. The selector is
 # release-wide on purpose: a per-component list would have to be extended every time
 # a workload is added, and forgetting it fails as a connection timeout at 3 a.m.
 # No egress policy targets those pods, so they reach DNS and PostgreSQL freely.
+# External server (postgresql.enabled=false): nothing to select in this namespace,
+# the egress rules below carry the peer instead.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -26,6 +29,7 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
+{{- end }}
 ---
 # Ingest: outbound allowed to PostgreSQL, DNS, and HTTPS (Garmin API).
 # No inbound required unless the FIT upload port is used from another pod
@@ -45,14 +49,7 @@ spec:
   policyTypes:
     - Egress
   egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              {{- include "t0.selectorLabels" . | nindent 14 }}
-              app.kubernetes.io/component: postgresql
-      ports:
-        - port: 5432
-          protocol: TCP
+    {{- include "t0.postgresqlEgressRule" . | nindent 4 }}
     - to:
         - namespaceSelector: {}
       ports:
@@ -67,8 +64,12 @@ spec:
         - port: 443
           protocol: TCP
 ---
-# Grafana: outbound allowed only to PostgreSQL, plus HTTPS while Grafana plugins
+# Grafana: outbound allowed to PostgreSQL and DNS, plus HTTPS while Grafana plugins
 # are installed (GF_INSTALL_PLUGINS downloads them from grafana.com at startup).
+#
+# No Ingress rule on purpose, so nothing here blocks a LoadBalancer Service (see
+# grafana.service.type): the policy governs what Grafana may REACH, not who may
+# reach Grafana. Adding an Ingress rule would silently break LAN access.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -83,13 +84,16 @@ spec:
   policyTypes:
     - Egress
   egress:
+    {{- include "t0.postgresqlEgressRule" . | nindent 4 }}
+    # DNS. The datasource points at the PostgreSQL Service by NAME, so without this
+    # rule every panel fails to resolve it and Grafana reports a connection error
+    # that looks like a database outage.
     - to:
-        - podSelector:
-            matchLabels:
-              {{- include "t0.selectorLabels" . | nindent 14 }}
-              app.kubernetes.io/component: postgresql
+        - namespaceSelector: {}
       ports:
-        - port: 5432
+        - port: 53
+          protocol: UDP
+        - port: 53
           protocol: TCP
     {{- if gt (len (include "t0.grafana.plugins" . | fromJsonArray)) 0 }}
     - to:

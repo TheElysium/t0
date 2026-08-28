@@ -81,6 +81,34 @@ authentication failure on the first `helm upgrade`.
 the password in the database.** First run `ALTER USER t0 WITH
 PASSWORD '...';` on the instance, then update the value.
 
+## External PostgreSQL (CloudNativePG)
+
+The chart can skip its own StatefulSet and connect to a server it does not
+manage -- e.g. a CloudNativePG cluster:
+
+```yaml
+postgresql:
+  enabled: false
+  auth:
+    existingSecret: t0-postgresql   # keys `username` and `password`
+  external:
+    host: <cluster>-rw.<namespace>.svc.cluster.local
+    port: 5432
+    namespace: <namespace>          # used by the NetworkPolicy egress rule
+```
+
+Notes:
+
+- The CNPG `<cluster>-app` Secret already carries the `username`/`password`
+  keys, but Secrets are namespaced: copy it (or create an equivalent Secret for
+  the dedicated `t0` user) into the release namespace first.
+- The chart creates no database and no user. Point `postgresql.auth.database`
+  and `postgresql.auth.username` at an existing pair, or create `t0`/`t0` on the
+  external server before installing.
+- The schema migrations still run the same way, through the hook Job.
+- The NetworkPolicy egress peer becomes a namespace selector on
+  `external.namespace` (a pod selector never crosses a namespace boundary).
+
 ## Installation
 
 ```bash

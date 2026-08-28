@@ -11,7 +11,12 @@ STRICTLY LOCAL ACCESS: no Ingress, no TLS. Everything goes through port-forward.
 {{- end }}
 
   # PostgreSQL
+{{- if .Values.postgresql.enabled }}
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "t0.postgresql.serviceName" . }} {{ .Values.postgresql.service.port }}:{{ .Values.postgresql.service.port }}
+{{- else }}
+  EXTERNAL PostgreSQL at {{ include "t0.postgresql.host" . }}:{{ include "t0.postgresql.port" . }}
+  (not managed by this release -- no port-forward line here).
+{{- end }}
 
 GARMIN POLLING
 

@@ -23,6 +23,6 @@ data:
   # Garmin credentials).
   T0_LOG_LEVEL: {{ .Values.ingest.config.logLevel | quote }}
   TZ: {{ .Values.ingest.config.timezone | quote }}
-  PGHOST: {{ include "t0.postgresql.serviceName" . | quote }}
-  PGPORT: {{ .Values.postgresql.service.port | quote }}
+  PGHOST: {{ include "t0.postgresql.host" . | quote }}
+  PGPORT: {{ include "t0.postgresql.port" . | quote }}
   PGDATABASE: {{ .Values.postgresql.auth.database | quote }}

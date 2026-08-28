@@ -51,7 +51,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "t0.grafana.secretName" . }}
                   key: admin-password
-            # Consumed by datasource provisioning via $POSTGRESQL_PASSWORD.
+            # Consumed by datasource provisioning via $POSTGRESQL_USER and
+            # $POSTGRESQL_PASSWORD.
+            - name: POSTGRESQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "t0.postgresql.secretName" . }}
+                  key: username
             - name: POSTGRESQL_PASSWORD
               valueFrom:
                 secretKeyRef:
