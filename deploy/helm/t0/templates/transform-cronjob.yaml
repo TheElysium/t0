@@ -56,6 +56,12 @@ spec:
           # no service account token.
           automountServiceAccountToken: false
           {{- include "t0.scheduling" . | nindent 10 }}
+          # Same private GHCR image as the ingest Deployment: same pull secret,
+          # or every CronJob on an uncached node dies in ImagePullBackoff.
+          {{- if .Values.ingest.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml .Values.ingest.imagePullSecrets | nindent 12 }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.ingest.securityContext | nindent 12 }}
           containers:
