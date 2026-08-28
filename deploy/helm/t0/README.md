@@ -275,9 +275,38 @@ kubectl port-forward -n t0 svc/t0-ingest 8080:8080
 kubectl port-forward -n t0 svc/t0-postgresql 5432:5432
 ```
 
-Services are constrained to `ClusterIP`: the chart **refuses** to render
-`NodePort` or `LoadBalancer` (explicit error message), since there is no
-TLS and the requirement is strictly local access.
+### Service exposure
+
+The chart **refuses** to render a Service type it is not designed for, with an
+explicit error message rather than a silent exposure. The two Services do not get
+the same rule, because they do not carry the same risk:
+
+| Service | Accepted types | Why |
+|---|---|---|
+| `<release>-grafana` | `ClusterIP`, `LoadBalancer` | Asks for the admin password. Serving it on a trusted LAN is a reasonable choice. |
+| `<release>-ingest` | `ClusterIP` only | The upload endpoint is **unauthenticated**: whoever reaches it writes into the archive and the database. |
+
+Neither serves TLS. A `LoadBalancer` Grafana is plain HTTP on the LAN, so the
+password crosses the network in clear text and nothing here should ever be routed
+in from outside that network.
+
+To give Grafana a stable LAN address, set the type and let the load balancer know
+which address to claim. The annotation key belongs to the implementation, so the
+chart assumes none:
+
+```yaml
+grafana:
+  service:
+    type: LoadBalancer
+    annotations:
+      # Cilium LB-IPAM; MetalLB uses metallb.universe.tf/loadBalancerIPs
+      lbipam.cilium.io/ips: "192.168.1.211"
+```
+
+Grafana then answers on `http://192.168.1.211:3000`. A hostname is a separate,
+optional layer: an entry in the `hosts` file of each machine, or a record on the
+local DNS resolver, pointing at that address. Dropping the `:3000` would require
+an ingress controller, which this chart does not ship and does not assume.
 
 The PostgreSQL application password (account `t0`, distinct from the
 Garmin account) is retrieved the same way:

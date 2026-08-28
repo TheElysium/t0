@@ -291,8 +291,24 @@ grafana:
   plugins: []
 
   service:
+    # ClusterIP keeps Grafana reachable through `kubectl port-forward` only.
+    #
+    # LoadBalancer is the other accepted value, for a stable address on the LAN.
+    # It is a deliberate step: Grafana asks for the admin password, but it serves
+    # plain HTTP, so this is only reasonable on a network you trust. NodePort is
+    # refused outright -- see templates/grafana-service.yaml.
+    #
+    # The ingestion Service is NOT covered by this relaxation: its upload endpoint
+    # is unauthenticated and stays ClusterIP whatever happens.
     type: ClusterIP
     port: 3000
+    # Annotations on the Service, typically to claim a fixed LoadBalancer address.
+    # The key depends on the implementation, which is why nothing is assumed here:
+    #   Cilium LB-IPAM: lbipam.cilium.io/ips: "192.168.1.211"
+    #   MetalLB:        metallb.universe.tf/loadBalancerIPs: "192.168.1.211"
+    # Without one, the pool hands out the next free address, which moves between
+    # reinstalls -- fine for a test, annoying for a bookmark.
+    annotations: {}
 
   persistence:
     enabled: true
@@ -331,13 +347,16 @@ grafana:
     # and mounted -- ready to receive `*.json` keys (L9).
     configMapName: ""
 
+  # A Grafana serving five dashboards to one athlete sits around 150Mi resident.
+  # The limit is a ceiling against a runaway query, not a reservation: it is kept
+  # tight because the target cluster has roughly 2Gi of headroom in total.
   resources:
     requests:
       cpu: 100m
       memory: 128Mi
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 256Mi
 
 # -----------------------------------------------------------------------
 # PostgreSQL backup -- weekly pg_dump CronJob

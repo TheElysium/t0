@@ -7,9 +7,11 @@ metadata:
     {{- include "t0.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
 spec:
-  # ClusterIP only: no external exposure. The athlete reaches
-  # the FIT upload endpoint (batch L7) via `kubectl port-forward`.
-{{- include "t0.assertLocalOnlyService" (dict "key" "ingest.service.type" "type" .Values.ingest.service.type) }}
+{{- include "t0.assertServiceType" (dict
+      "key" "ingest.service.type"
+      "type" .Values.ingest.service.type
+      "allowed" (list "ClusterIP")
+      "reason" "The manual upload endpoint has NO authentication: whoever reaches it can write into the FIT archive and into the database. It stays reachable from inside the cluster only; upload a file through `kubectl port-forward`. This restriction is deliberately stricter than the one on Grafana, which at least asks for a password.") }}
   type: {{ .Values.ingest.service.type }}
   selector:
     {{- include "t0.selectorLabels" . | nindent 4 }}

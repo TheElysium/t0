@@ -6,9 +6,20 @@ metadata:
   labels:
     {{- include "t0.labels" . | nindent 4 }}
     app.kubernetes.io/component: grafana
+  {{- with .Values.grafana.service.annotations }}
+  # Free-form, because the address of a LoadBalancer is claimed through an
+  # annotation whose key belongs to the LB implementation, not to Kubernetes
+  # (`lbipam.cilium.io/ips` for Cilium, `metallb.universe.tf/loadBalancerIPs` for
+  # MetalLB). Hardcoding one of them here would tie the chart to a single CNI.
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  # ClusterIP only: access via `kubectl port-forward`, no Ingress.
-{{- include "t0.assertLocalOnlyService" (dict "key" "grafana.service.type" "type" .Values.grafana.service.type) }}
+{{- include "t0.assertServiceType" (dict
+      "key" "grafana.service.type"
+      "type" .Values.grafana.service.type
+      "allowed" (list "ClusterIP" "LoadBalancer")
+      "reason" "Grafana is protected by an admin password, so a LoadBalancer address on a trusted LAN is a legitimate choice -- but it still serves plain HTTP, so never route it in from outside that LAN. NodePort is refused: it opens a port on EVERY node instead of yielding one address, so there is nothing stable to bookmark and the surface is three times larger for no gain.") }}
   type: {{ .Values.grafana.service.type }}
   selector:
     {{- include "t0.selectorLabels" . | nindent 4 }}

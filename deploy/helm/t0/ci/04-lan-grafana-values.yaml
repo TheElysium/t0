@@ -1,0 +1,18 @@
+# Value set 4 -- Grafana exposed on the LAN through a LoadBalancer, with a fixed
+# address claimed via a Cilium LB-IPAM annotation.
+#
+# Renders the one branch the other three value sets never reach: the relaxed
+# service-type assertion and the Service annotations. The ingestion Service stays
+# ClusterIP here on purpose -- that restriction is not relaxable, and this file
+# would fail to render if someone ever made it so.
+# The passwords below are TEST values, never deployed.
+postgresql:
+  auth:
+    password: "test-password-postgres"
+grafana:
+  admin:
+    password: "test-password-grafana"
+  service:
+    type: LoadBalancer
+    annotations:
+      lbipam.cilium.io/ips: "192.168.1.211"

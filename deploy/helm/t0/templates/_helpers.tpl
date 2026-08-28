@@ -211,14 +211,24 @@ Grafana admin password. Same rule as above: no random generation, so a
 {{- end -}}
 
 {{/*
-Exposure safeguard: the athlete's requirement is STRICTLY LOCAL access
-(no Ingress, no TLS, no exposure outside cluster). We therefore refuse Service
-types that would open external access.
+Exposure safeguard: refuse a Service type this chart is not designed for.
+
+Arguments (dict):
+  - `key`     the values path, quoted back in the message so the reader knows what to fix
+  - `type`    the configured value
+  - `allowed` the list of accepted types
+  - `reason`  why the others are refused, for THIS Service
+
+Why the policy is passed in rather than hardcoded here: the two Services of this
+chart carry very different risk. Grafana sits behind an admin password and is
+meant to be reachable from the LAN; the ingest Service is an UNAUTHENTICATED
+upload endpoint that must never leave the cluster network. A single chart-wide
+"ClusterIP only" rule forced both to be relaxed at once, which is exactly the
+mistake this safeguard exists to prevent.
 */}}
-{{- define "t0.assertLocalOnlyService" -}}
-{{- $type := .type -}}
-{{- if not (eq $type "ClusterIP") -}}
-{{- fail (printf "\n\nERROR: %s = %q.\n\nThis chart is designed for strictly local access (no Ingress, no TLS).\nOnly ClusterIP type is allowed; access is via `kubectl port-forward`.\nExposing these services as NodePort or LoadBalancer would publish Grafana and the\nFIT upload endpoint without TLS on the network.\n" .key $type) -}}
+{{- define "t0.assertServiceType" -}}
+{{- if not (has .type .allowed) -}}
+{{- fail (printf "\n\nERROR: %s = %q.\n\nAccepted values: %s.\n\n%s\n" .key .type (join ", " .allowed) .reason) -}}
 {{- end -}}
 {{- end -}}
 
