@@ -25,6 +25,8 @@ from t0.fit.model import ParsedActivitySource
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from t0.fit.model import SwimLengthRow
+
 
 def _decode_messages(data: bytes) -> dict[str, Any]:
     """Decode raw FIT file bytes. SDK never raises: decode errors returned in list,
@@ -86,7 +88,7 @@ def decode_fit(data: bytes, *, activity_id: int) -> ParsedActivitySource:
     laps = [map_lap(msg, activity_id=activity_id) for msg in lap_msgs]
 
     lap_index_by_length = derive_lap_index_for_lengths(lap_msgs)
-    swim_lengths = []
+    swim_lengths: list[SwimLengthRow | None] = []
     for msg in length_msgs:
         length_message_index = msg.get("message_index")
         lap_index = (
@@ -95,12 +97,14 @@ def decode_fit(data: bytes, *, activity_id: int) -> ParsedActivitySource:
             else None
         )
         swim_lengths.append(map_length(msg, activity_id=activity_id, lap_index=lap_index))
-
+    # Zero-duration glitch lengths are dropped at mapping (see map_length): filter
+    # the None placeholders they left here.
+    usable_lengths: list[SwimLengthRow] = [length for length in swim_lengths if length is not None]
     return ParsedActivitySource(
         source_format="fit",
         samples=samples,
         laps=laps,
-        swim_lengths=swim_lengths,
+        swim_lengths=usable_lengths,
         session=session,
         start_time=start_time,
     )

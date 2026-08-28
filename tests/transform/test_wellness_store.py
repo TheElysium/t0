@@ -13,7 +13,7 @@ All rows below are synthetic, in the style of ``tests/transform/conftest.py``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from t0.transform.wellness import (
@@ -88,7 +88,10 @@ class FakeCursor:
         if normalized.startswith("INSERT INTO CORE.SLEEP_STAGE"):
             self._conn.stages.extend(rows)
         elif normalized.startswith("INSERT INTO CORE.WELLNESS_SAMPLE"):
-            self._conn.samples.extend(rows)
+            # Replays the DDL's ON CONFLICT (metric_id, t) DO NOTHING: the PK pair
+            # already present survives, the new row is dropped.
+            existing = {(row[0], row[1]) for row in self._conn.samples}
+            self._conn.samples.extend(row for row in rows if (row[0], row[1]) not in existing)
 
 
 def _daily(**overrides: Any) -> DailyWellnessRow:
@@ -229,6 +232,39 @@ def test_samples_of_other_days_are_untouched() -> None:
     _store(conn, stages=[], samples=[_sample(METRIC_ID_STRESS, 5, 25)])
 
     assert other in conn.samples
+
+
+def test_a_reading_already_stored_under_another_day_is_not_duplicated() -> None:
+    # A night-boundary reading (observed: HRV at 23:15) arrives in the payloads of
+    # TWO consecutive days. The DELETE scopes THIS day only, so the row stored under
+    # the previous day's local_date survives it -- without ON CONFLICT DO NOTHING the
+    # insert collides on wellness_sample_pk and the whole day fails.
+    conn = FakeConnection()
+    late_evening = datetime(2026, 6, 1, 23, 15, tzinfo=UTC)
+    # First write happened while processing the PREVIOUS day: its local_date is
+    # the previous day, which the DELETE of the current day does not touch.
+    first_day_row = (
+        METRIC_ID_HRV,
+        late_evening,
+        ATHLETE_ID,
+        40.0,
+        LOCAL_DATE - timedelta(days=1),
+    )
+    conn.samples.append(first_day_row)
+
+    next_day = LOCAL_DATE
+    duplicate = WellnessSampleRow(
+        metric_id=METRIC_ID_HRV,
+        t=late_evening,
+        athlete_id=ATHLETE_ID,
+        value=40.0,
+        local_date=next_day,
+    )
+    _store(conn, stages=[], samples=[duplicate])
+
+    # First write wins: the same PK is NOT stored twice, and the surviving row keeps
+    # the day tag it was first written with.
+    assert conn.samples.count(first_day_row) == 1
 
 
 def test_phases_are_dropped_when_no_session_could_be_extracted() -> None:

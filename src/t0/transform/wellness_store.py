@@ -240,6 +240,14 @@ def _replace_samples(
     stress series came back EMPTY this pass must still clear whatever the previous pass
     stored for stress, and deriving the scope from the rows to insert would make exactly
     that case a no-op.
+
+    ``ON CONFLICT DO NOTHING``: a night-boundary reading (observed: HRV reading at
+    23:15) can appear in the payloads of TWO consecutive days -- Garmin includes the
+    late-evening readings in each day's series. The DELETE above only scopes THIS day,
+    so the row previously stored under the previous day's ``local_date`` survives it,
+    and the same ``(metric_id, t)`` would collide. First write wins: the value is
+    identical, only the day tag differs, and a stable tag beats a tag that migrates
+    from day to day on every replay.
     """
     if metric_ids:
         cur.execute(
@@ -254,7 +262,8 @@ def _replace_samples(
     cur.executemany(
         """
         INSERT INTO core.wellness_sample (metric_id, t, athlete_id, value, local_date)
-        VALUES (%s, %s, %s, %s, %s);
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (metric_id, t) DO NOTHING;
         """,
         [(s.metric_id, s.t, s.athlete_id, s.value, s.local_date) for s in samples],
     )

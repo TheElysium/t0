@@ -73,6 +73,32 @@ def test_map_record_maps_known_fields_and_prefers_enhanced() -> None:
     assert row.extra == {"unknown_field_123": 42}
 
 
+def test_map_record_maps_heart_rate_zero_to_none() -> None:
+    # Garmin emits 0 when the optical sensor had no reading (really observed on
+    # backfill files, alongside developer-field 65535 artifacts). core.sample's
+    # sample_hr_range CHECK (20..260) refuses it, and the NULL convention forbids
+    # writing a fake 0: out-of-range -> None. The .FIT file stays in the archive.
+    msg = {"timestamp": datetime(2026, 8, 1, 6, 0, 10, tzinfo=UTC), "heart_rate": 0}
+    row = map_record(msg, activity_id=1, start_time=T0)
+    assert row.heart_rate is None
+
+
+def test_map_record_maps_heart_rate_absurd_high_to_none() -> None:
+    msg = {"timestamp": datetime(2026, 8, 1, 6, 0, 10, tzinfo=UTC), "heart_rate": 300}
+    row = map_record(msg, activity_id=1, start_time=T0)
+    assert row.heart_rate is None
+
+
+def test_map_record_keeps_plausible_heart_rate_boundaries() -> None:
+    msg = {
+        "timestamp": datetime(2026, 8, 1, 6, 0, 10, tzinfo=UTC),
+        "heart_rate": 20,
+    }
+    assert map_record(msg, activity_id=1, start_time=T0).heart_rate == 20
+    msg["heart_rate"] = 260
+    assert map_record(msg, activity_id=1, start_time=T0).heart_rate == 260
+
+
 def test_map_record_without_timestamp_raises() -> None:
     with pytest.raises(FitParseError, match="timestamp"):
         map_record({"heart_rate": 100}, activity_id=1, start_time=T0)
@@ -120,6 +146,7 @@ def test_map_length_active_preserves_float_duration() -> None:
         "total_strokes": 18,
     }
     row = map_length(msg, activity_id=3, lap_index=1)
+    assert row is not None
 
     assert row.length_index == 5
     assert row.lap_index == 1
@@ -137,8 +164,32 @@ def test_map_length_idle_is_accepted() -> None:
         "length_type": "idle",
     }
     row = map_length(msg, activity_id=3, lap_index=None)
+    assert row is not None
     assert row.length_type == "idle"
     assert row.lap_index is None
+
+
+def test_map_length_zero_duration_returns_none() -> None:
+    # Spurious zero-duration 'idle' length really observed on a backfill swim:
+    # carries no information and violates swim_length_dur_pos (duration_s > 0).
+    # Dropped at mapping (None), not rejected: a glitch is not a structural defect.
+    msg = {
+        "message_index": 9,
+        "start_time": T0,
+        "total_timer_time": 0.0,
+        "length_type": "idle",
+    }
+    assert map_length(msg, activity_id=3, lap_index=None) is None
+
+
+def test_map_length_negative_duration_returns_none() -> None:
+    msg = {
+        "message_index": 10,
+        "start_time": T0,
+        "total_timer_time": -0.5,
+        "length_type": "idle",
+    }
+    assert map_length(msg, activity_id=3, lap_index=None) is None
 
 
 def test_map_length_unexpected_length_type_raises() -> None:

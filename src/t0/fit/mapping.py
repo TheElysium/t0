@@ -69,6 +69,17 @@ RECORD_FIELD_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("vertical_ratio", ("vertical_ratio",)),
 )
 
+#: Plausibility bounds applied to the mapped ``heart_rate``, mirroring the DDL
+#: constraint ``core.sample.sample_hr_range`` (migrations/005_core_series.sql).
+#: Garmin emits 0 -- or other absurd values -- when the optical sensor had NO
+#: reading (device glitch, developer-field artifacts observed on real backfill
+#: files). Per the repository's NULL convention (``t0.transform.rows`` docstring:
+#: NULL means "not computable", never conflated with 0), an out-of-range reading
+#: is mapped to NULL rather than written as a fake value. The original .FIT file
+#: stays in the archive: the raw reading remains reconstructible from source.
+SAMPLE_HR_MIN = 20
+SAMPLE_HR_MAX = 260
+
 #: Mapping table ``lap`` (mesg num 19) → ``core.activity_lap``.
 #: ``np_watts`` / ``np_convention`` intentionally absent: see
 #: :class:`t0.fit.model.LapRow` docstring.
@@ -187,6 +198,9 @@ def map_record(msg: dict[str, Any], *, activity_id: int, start_time: datetime) -
     if not isinstance(t, datetime):
         raise FitParseError("Record message missing usable timestamp: row rejected.")
     mapped, consumed = _apply_specs(msg, RECORD_FIELD_SPECS)
+    hr = mapped.get("heart_rate")
+    if hr is not None and not (SAMPLE_HR_MIN <= int(hr) <= SAMPLE_HR_MAX):
+        mapped["heart_rate"] = None
     extra = _build_extra(msg, consumed, exclude={"timestamp"})
     elapsed_s = round((t - start_time).total_seconds())
     return SampleRow(activity_id=activity_id, t=t, elapsed_s=elapsed_s, extra=extra, **mapped)
@@ -224,12 +238,24 @@ def map_lap(msg: dict[str, Any], *, activity_id: int) -> LapRow:
     )
 
 
-def map_length(msg: dict[str, Any], *, activity_id: int, lap_index: int | None) -> SwimLengthRow:
+def map_length(
+    msg: dict[str, Any], *, activity_id: int, lap_index: int | None
+) -> SwimLengthRow | None:
     """Convert decoded ``length`` message to :class:`SwimLengthRow`.
 
     ``duration_s`` NOT rounded (unlike ``lap``): column is ``real`` to preserve FIT
     centisecond precision (migration 004 comment). ``lap_index`` provided by caller: isolated
     ``length`` message doesn't carry its lap attachment (see :func:`derive_lap_index_for_lengths`).
+
+    Returns:
+        ``None`` for a ZERO-duration length -- observed in real backfill files as a
+        spurious ``idle`` length (manual rest glitch). It carries no information and
+        would violate the DDL constraint ``swim_length_dur_pos`` (``duration_s > 0``):
+        the row is dropped, the original file stays in the archive.
+
+    Raises:
+        FitParseError: if ``timestamp``/``start_time`` absent or ``length_type``
+            unexpected -- structural defects, unlike the zero-duration quirk above.
     """
     start_time = msg.get("start_time")
     if not isinstance(start_time, datetime):
@@ -237,6 +263,8 @@ def map_length(msg: dict[str, Any], *, activity_id: int, lap_index: int | None) 
     duration = msg.get("total_timer_time", msg.get("total_elapsed_time"))
     if duration is None:
         raise FitParseError("Length message missing usable duration: row rejected.")
+    if float(duration) <= 0:
+        return None
     length_type = msg.get("length_type")
     if length_type not in ("active", "idle"):
         raise FitParseError(
