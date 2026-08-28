@@ -75,4 +75,10 @@ jobs:
         run: |
           docker run --detach --rm --name t0-api -p 8080:8080 t0-ingest:ci
           trap 'docker stop t0-api' EXIT
-          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/openapi.json
+          # --retry-all-errors is required, not just --retry-connrefused: docker
+          # userland-proxy ACCEPTS the connection as soon as the container exists,
+          # then closes it while uvicorn is still binding its port. curl sees a
+          # RESET (error 56), which --retry-connrefused does NOT cover -- the smoke
+          # test then races its own container's startup and fails at random.
+          curl --fail --retry 10 --retry-all-errors --retry-delay 1 http://127.0.0.1:8080/openapi.json \
+            || { echo "--- container logs ---"; docker logs t0-api; exit 1; }
