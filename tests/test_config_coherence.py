@@ -146,11 +146,13 @@ def test_every_prefixed_configmap_key_is_actually_read_by_the_code() -> None:
         )
 
 
-def _minutes_of_day(schedule: str) -> int:
-    """Convert ``"15 5 * * *"`` into minutes since midnight.
+def _daily_fire_times(schedule: str) -> tuple[int, ...]:
+    """Return the minutes-since-midnight at which a fixed daily schedule fires.
 
-    Rejects anything that is not a fixed daily schedule: the ordering comparison
-    below would be meaningless on a ``*/10`` or a restricted weekday.
+    Accepts a single hour (``"15 5 * * *"`` -> ``(315,)``) or a comma list of hours
+    sharing one minute (``"0 10,15,22 * * *"`` -> ``(600, 900, 1320)``). Rejects
+    anything else -- a step (``*/10``), a range, or a restricted day/month/weekday --
+    where the ordering comparison below would be meaningless.
     """
     minute, hour, day_of_month, month, day_of_week = schedule.split()
     assert (day_of_month, month, day_of_week) == (
@@ -158,7 +160,8 @@ def _minutes_of_day(schedule: str) -> int:
         "*",
         "*",
     ), f"non-daily schedule: {schedule!r}"
-    return int(hour) * 60 + int(minute)
+    assert "/" not in hour and "-" not in hour, f"non-fixed hours: {schedule!r}"
+    return tuple(sorted(int(h) * 60 + int(minute) for h in hour.split(",")))
 
 
 def _helm_schedule(block: str) -> str:
@@ -182,15 +185,20 @@ def test_transform_is_scheduled_between_polling_and_refresh() -> None:
     dashboards stay blank for a whole day without a single alarm. One changed number
     in values.yaml is enough to cause it; hence this guard.
     """
-    polling = _minutes_of_day(_helm_schedule("scheduler"))
-    transform = _minutes_of_day(_helm_schedule("transform"))
-    refresh = _minutes_of_day(_helm_schedule("opsRefresh"))
+    polling = _daily_fire_times(_helm_schedule("scheduler"))
+    transform = _daily_fire_times(_helm_schedule("transform"))
+    refresh = _daily_fire_times(_helm_schedule("opsRefresh"))
 
-    assert polling < transform < refresh, (
-        f"daily order broken: polling {polling}, transform {transform}, "
-        f"refresh {refresh} (minutes since midnight). Transform must follow polling "
-        f"and precede the view refresh."
+    assert len(polling) == len(transform) == len(refresh), (
+        f"the three chained CronJobs must fire the same number of times per day: "
+        f"polling {polling}, transform {transform}, refresh {refresh}."
     )
+    for p, t, r in zip(polling, transform, refresh, strict=True):
+        assert p < t < r, (
+            f"daily order broken within a cycle: polling {p}, transform {t}, "
+            f"refresh {r} (minutes since midnight). Each transform must follow its "
+            f"polling and precede its view refresh."
+        )
 
 
 def test_chart_batch_limit_matches_the_code_default() -> None:

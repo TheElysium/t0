@@ -395,12 +395,12 @@ backup:
 # to non-concurrent mode for an unpopulated view (REFRESH ... CONCURRENTLY refuses it),
 # then switches back to concurrent on subsequent runs.
 # Transformation raw.fit_file -> core.* -- the link that feeds the views.
-# See templates/transform-cronjob.yaml. Scheduled BETWEEN polling (05:00) and
-# ops-refresh (05:30): refreshing empty core.* tables SUCCEEDS and leaves
-# dashboards blank with no alarm signal.
+# See templates/transform-cronjob.yaml. Scheduled BETWEEN each polling cycle and
+# its ops-refresh (+15 min / +30 min): refreshing empty core.* tables SUCCEEDS and
+# leaves dashboards blank with no alarm signal.
 transform:
   enabled: true
-  schedule: "15 5 * * *"   # daily 05:15, between polling and refresh
+  schedule: "15 10,15,22 * * *"   # 10:15, 15:15, 22:15 -- 15 min after each poll
   # Maximum number of files processed per run. Several short runs beat one long
   # run that a pod eviction would reset to zero: each transformed file is committed
   # individually, a run interrupted loses only the current file. Initial backfill
@@ -423,7 +423,7 @@ transform:
 
 opsRefresh:
   enabled: true
-  schedule: "30 5 * * *"   # daily 05:30
+  schedule: "30 10,15,22 * * *"   # 10:30, 15:30, 22:30 -- 30 min after each poll
   startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -441,7 +441,9 @@ opsRefresh:
 # row not yet inserted) and cry orphan.
 opsReconcile:
   enabled: true
-  schedule: "0 7 * * *"   # daily 07:00, after polling (05:00) and refresh (05:30)
+  schedule: "0 7 * * *"   # daily 07:00 -- quiet window after the previous night's last
+                          # cycle (22:30) and before the day's first poll (10:00), so the
+                          # read-only scan never overlaps an archiving run
   # Recalculates sha256 of EVERY file instead of comparing sizes.
   # Re-reads the entire volume: enable only on suspected silent corruption,
   # or temporarily via `kubectl create job --from=...`.
@@ -461,10 +463,14 @@ opsReconcile:
 # for detail on choices (concurrencyPolicy, backoffLimit, token store persistence).
 scheduler:
   enabled: true
-  # Once a day, early morning: night data (sleep, HRV) is then consolidated
-  # on Garmin's side. `refreshLookbackDays` (on code side, default 3) re-polls
-  # recent days anyway, so late consolidation is never lost.
-  schedule: "0 5 * * *"
+  # Three cycles a day (10:00, 15:00, 22:00): the 10:00 run captures the night data
+  # (sleep, HRV) once Garmin has consolidated it, the 15:00 and 22:00 runs surface the
+  # day's activities soon after the watch syncs. Every run polls ALL endpoints -- there
+  # is no health-only vs activity-only run. Frequency carries no lockout risk: each run
+  # REUSES the persisted token (see t0.garmin.client.login), it does not re-authenticate.
+  # `refreshLookbackDays` (code side, default 3) re-polls recent days anyway, so late
+  # consolidation is never lost.
+  schedule: "0 10,15,22 * * *"
   # Limit on windows processed per endpoint and run. It spreads initial catchup
   # over several days instead of sending hundreds of calls on the first run --
   # which is also what protects the account.
@@ -508,7 +514,8 @@ scheduler:
 # at the same time as `scheduler.enabled`.
 opsBackfill:
   enabled: true
-  schedule: "0 6 * * *"    # daily 06:00, after refresh
+  schedule: "0 6 * * *"    # daily 06:00 -- reports the lag left by the previous day's
+                           # three polling cycles (read-only monitoring, polls nothing)
   # MUST remain ALIGNED with the polling history start date: a mismatch would
   # report lag for a period nobody polls. Identical to
   # t0.ops.backfill.DEFAULT_HISTORY_START_ISO.
