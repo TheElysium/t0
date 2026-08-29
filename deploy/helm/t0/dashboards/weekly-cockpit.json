@@ -265,11 +265,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "string"
-              },
-              {
-                "id": "decimals",
-                "value": null
+                "value": "dateTimeAsLocalNoDateIfToday"
               },
               {
                 "id": "color",
@@ -289,6 +285,10 @@
                     }
                   ]
                 }
+              },
+              {
+                "id": "decimals",
+                "value": 0
               }
             ]
           }
@@ -299,7 +299,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.duration_s / 3600.0 AS \"Last recorded sleep\", to_char(s.wake_date, 'YYYY-MM-DD') AS \"Night of\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1"
+          "rawSql": "SELECT s.duration_s / 3600.0 AS \"Last recorded sleep\", s.wake_date::timestamptz AS \"Night of\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1"
         }
       ]
     },
