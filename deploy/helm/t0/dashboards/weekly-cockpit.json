@@ -205,8 +205,8 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "Last recorded sleep",
-      "description": "Total sleep duration of the most recent recorded night, independent of the time picker. Red below 6 h, amber below 7 h. The second value is the wake_date of that night: if it is not this morning, the watch did not report since (nothing to show for last night). The stage split and the sleep score are on the row below.",
+      "title": "Last night's sleep",
+      "description": "Total sleep duration of LAST NIGHT (wake_date = today, Europe/Paris), independent of the time picker. Red below 6 h, amber below 7 h. EMPTY means there is no row for this morning yet: either the watch reported nothing, or the morning cycle has not ingested it (poll 10:00 -> visible ~10:30). The stage split and the sleep score on the row below apply the same rule.",
       "gridPos": {
         "x": 10,
         "y": 0,
@@ -223,7 +223,7 @@
           "values": false
         },
         "orientation": "horizontal",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "colorMode": "value",
         "graphMode": "none",
         "text": {
@@ -256,50 +256,14 @@
             ]
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Night of"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "dateTimeAsLocalNoDateIfToday"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "text"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "text",
-                      "value": null
-                    }
-                  ]
-                }
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "targets": [
         {
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.duration_s / 3600.0 AS \"Last recorded sleep\", s.wake_date::timestamptz AS \"Night of\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1"
+          "rawSql": "SELECT s.duration_s / 3600.0 AS \"Last night's sleep\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND s.wake_date = (now() AT TIME ZONE 'Europe/Paris')::date"
         }
       ]
     },
@@ -550,8 +514,8 @@
     {
       "id": 5,
       "type": "piechart",
-      "title": "Last recorded sleep -- stage split",
-      "description": "Same most-recent core.sleep_session row (ORDER BY wake_date DESC LIMIT 1) as the panel to its left -- its 'Night of' value tells you which night this is -- broken into deep/light/rem/awake seconds so the split is visual. Empty donut when there is no sleep row yet.",
+      "title": "Last night's sleep -- stage split",
+      "description": "Same rule as the panel to its left: LAST NIGHT only (wake_date = today), so the donut is empty exactly when the duration stat is. Broken into deep/light/rem/awake seconds so the split is visual.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 12,
@@ -589,7 +553,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "WITH last_night AS (SELECT s.deep_s, s.light_s, s.rem_s, s.awake_s FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1) SELECT 'Deep' AS \"Stage\", deep_s AS \"Seconds\" FROM last_night UNION ALL SELECT 'Light', light_s FROM last_night UNION ALL SELECT 'REM', rem_s FROM last_night UNION ALL SELECT 'Awake', awake_s FROM last_night"
+          "rawSql": "WITH last_night AS (SELECT s.deep_s, s.light_s, s.rem_s, s.awake_s FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND s.wake_date = (now() AT TIME ZONE 'Europe/Paris')::date) SELECT 'Deep' AS \"Stage\", deep_s AS \"Seconds\" FROM last_night UNION ALL SELECT 'Light', light_s FROM last_night UNION ALL SELECT 'REM', rem_s FROM last_night UNION ALL SELECT 'Awake', awake_s FROM last_night"
         }
       ]
     },
@@ -597,7 +561,7 @@
       "id": 4,
       "type": "stat",
       "title": "Sleep score",
-      "description": "Garmin's sleep score for the most recent recorded night. Red below 60, amber below 75. The stage breakdown that feeds it is the donut to the left.",
+      "description": "Garmin's sleep score for LAST NIGHT (wake_date = today, same rule as the duration stat). Red below 60, amber below 75. Empty when the watch reported nothing.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 20,
@@ -654,7 +618,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.sleep_score AS \"Sleep score\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id ORDER BY s.wake_date DESC LIMIT 1"
+          "rawSql": "SELECT s.sleep_score AS \"Sleep score\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND s.wake_date = (now() AT TIME ZONE 'Europe/Paris')::date"
         }
       ]
     },
