@@ -200,7 +200,7 @@ kubectl create job -n t0 --from=cronjob/t0-scheduler manual-poll
 kubectl logs -n t0 -l app.kubernetes.io/component=scheduler --tail=100 -f
 ```
 
-`values.yaml` keys (`scheduler.*`): `enabled`, `schedule` (default `0 5 * * *`),
+`values.yaml` keys (`scheduler.*`): `enabled`, `schedule` (default `0 10,15,22 * * *`),
 `maxWindowsPerEndpoint` (default `60`, limits the number of windows -- and thus
 requests -- per run), `activityFiles` (set to `false` to add `--no-activity-files`:
 JSON polling alone, without downloading .FIT/.TCX), and `endpoints`, which must
@@ -217,9 +217,9 @@ same account -- this is exactly what causes a Garmin Connect account to be block
 
 ### Transformation `raw` -> `core` (`transform`)
 
-The `transform` CronJob (keys `transform.*`, default `15 5 * * *`) decodes archived
+The `transform` CronJob (keys `transform.*`, default `15 10,15,22 * * *`) decodes archived
 files and writes `core.*` rows from which `mart.*` views derive. It is scheduled
-**between** polling (`0 5`) and view refresh (`30 5`), and this order is a requirement:
+**between** each polling cycle (`0 10,15,22`) and its view refresh (`30 10,15,22`), and this order is a requirement:
 refreshing before transformation succeeds -- by recopying emptiness -- and leaves
 dashboards blank with no error signal. `tests/test_config_coherence.py` refuses any
 value that would break this order.

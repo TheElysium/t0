@@ -33,8 +33,8 @@ The chart deploys, in addition to PostgreSQL and Grafana, five periodic workload
 
 | Object | Values | Role |
 | --- | --- | --- |
-| CronJob `scheduler` | `scheduler.*` -- default `0 5 * * *` | **Garmin polling.** Also catches up history, pass by pass. Archives .FIT/.TCX activity files on PVC (can be disabled via `scheduler.activityFiles: false`, which passes `--no-activity-files`). |
-| CronJob `ops-refresh` | `opsRefresh.*` -- default `30 5 * * *` | Refreshes the six materialized views `mart.*`. |
+| CronJob `scheduler` | `scheduler.*` -- default `0 10,15,22 * * *` | **Garmin polling.** Also catches up history, pass by pass. Archives .FIT/.TCX activity files on PVC (can be disabled via `scheduler.activityFiles: false`, which passes `--no-activity-files`). |
+| CronJob `ops-refresh` | `opsRefresh.*` -- default `30 10,15,22 * * *` | Refreshes the six materialized views `mart.*`. |
 | CronJob `ops-backfill-status` | `opsBackfill.*` -- default `0 6 * * *`, enabled | Read-only report on backfill progress. Does not poll anything. |
 | CronJob `ops-reconcile` | `opsReconcile.*` -- default `0 7 * * *`, enabled | Compares `raw.fit_file` inventory to actual PVC content. Read-only both sides, no deletions. Only fails on rows without files (orphaned files are harmless). |
 | CronJob `postgresql-backup` | `backup.*` | `pg_dump --format=custom` to PVC. |

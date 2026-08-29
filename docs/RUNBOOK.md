@@ -359,7 +359,7 @@ This is the piece that actually queries Garmin. Manifest:
 | Key | Default | Effect |
 | --- | --- | --- |
 | `scheduler.enabled` | `true` | Completely disables polling if `false`. |
-| `scheduler.schedule` | `"0 5 * * *"` | Schedule. One run per day is enough: Garmin consolidates sleep and HRV several hours after waking. |
+| `scheduler.schedule` | `"0 10,15,22 * * *"` | Schedule. Three cycles a day: the 10:00 run captures the consolidated night data (sleep, HRV), the 15:00 and 22:00 runs surface the day's activities soon after the watch syncs. |
 | `scheduler.maxWindowsPerEndpoint` | `60` | Windows processed per endpoint per run. Bounds the duration of a run and the number of requests to a non-public API. |
 | `scheduler.activityFiles` | `true` | When `false`, adds `--no-activity-files`: JSON polling only, without downloading .FIT/.TCX. |
 | `scheduler.endpoints` | the 10 of `DEFAULT_ENDPOINTS` | Must stay aligned with the code catalog; `tests/test_config_coherence.py` verifies it. |
