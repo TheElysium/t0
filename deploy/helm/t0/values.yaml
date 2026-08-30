@@ -1,9 +1,11 @@
 # values.yaml -- t0
 #
-# Chart designed for STRICTLY LOCAL access: no Ingress, no TLS.
-# The athlete accesses services via `kubectl port-forward`. See the chart
-# README for exact commands, including manual creation of the Garmin Secret
-# (never created by this chart).
+# Chart designed for STRICTLY LOCAL access by default: no Ingress, no TLS.
+# Services are ClusterIP; access is via `kubectl port-forward`. Grafana has two
+# optional LAN exposure modes -- LoadBalancer Service or Gateway HTTPRoute
+# (grafana.gateway) -- both plain HTTP, never routed in from outside. See the
+# chart README for exact commands, including manual creation of the Garmin
+# Secret (never created by this chart).
 
 # -----------------------------------------------------------------------
 # Logical namespace / common labeling
@@ -309,6 +311,30 @@ grafana:
     # Without one, the pool hands out the next free address, which moves between
     # reinstalls -- fine for a test, annoying for a bookmark.
     annotations: {}
+
+  # Exposure through the Kubernetes Gateway API (HTTPRoute), for clusters that
+  # run one -- e.g. the shared Cilium Envoy Gateway in `gateway-system`. The
+  # route consumes no LoadBalancer address and serves Grafana under a real
+  # hostname. Plain HTTP end to end: same trust model as the LoadBalancer mode,
+  # LAN only, never routed in from outside.
+  #
+  # The Service type is independent of this switch: with `service.type:
+  # LoadBalancer` AND `gateway.enabled: true` both set, Grafana is reachable
+  # through BOTH paths at once -- that is exactly the zero-downtime migration
+  # sequence (attach the route while the LB still exists, then flip the Service
+  # back to ClusterIP once the hostname is the habit). The LoadBalancer path
+  # stays the fallback for clusters without a Gateway.
+  gateway:
+    enabled: false
+    # MANDATORY when `enabled` is true -- the chart refuses to render an
+    # HTTPRoute without an explicit hostname, the same way it refuses an
+    # unplanned Service type. An implicit default would silently publish
+    # Grafana under a name nobody chose.
+    hostname: ""
+    parentRefs:
+      - name: homelab
+        namespace: gateway-system
+        sectionName: http
 
   persistence:
     enabled: true

@@ -1,8 +1,11 @@
 # Chart t0
 
 Homelab deployment of the t0 pipeline: Garmin ingestion (`t0-ingest`),
-PostgreSQL, Grafana. **Strictly local access**: no Ingress, no TLS. Services are
-`ClusterIP`; access is via `kubectl port-forward`.
+PostgreSQL, Grafana. **No TLS, no Ingress resource.** Default exposure is
+strictly local: Services are `ClusterIP`, access via `kubectl port-forward`.
+Optional LAN exposure of Grafana is possible either through a `LoadBalancer`
+Service or an HTTPRoute on a cluster Gateway (see "Service exposure" below).
+The ingest Service stays `ClusterIP` in every case.
 
 This chart deploys nothing on its own -- the athlete runs `helm install`
 on their homelab cluster.
@@ -305,8 +308,45 @@ grafana:
 
 Grafana then answers on `http://192.168.1.211:3000`. A hostname is a separate,
 optional layer: an entry in the `hosts` file of each machine, or a record on the
-local DNS resolver, pointing at that address. Dropping the `:3000` would require
-an ingress controller, which this chart does not ship and does not assume.
+local DNS resolver, pointing at that address. Dropping the `:3000` and the
+`hosts`-file edits requires routing through a Gateway -- see below.
+
+### Gateway exposure (HTTPRoute, optional)
+
+For clusters that run the Kubernetes Gateway API (e.g. the shared Cilium Envoy
+Gateway of this homelab), Grafana can be published under a hostname instead of
+a LoadBalancer address. The route consumes no address from the LB-IPAM pool and
+is served by the Gateway the cluster already runs -- no extra component:
+
+```yaml
+grafana:
+  gateway:
+    enabled: true
+    hostname: t0.homelab.internal        # MANDATORY, chart refuses to render without it
+    parentRefs:                          # defaults below; override for another Gateway
+      - name: homelab
+        namespace: gateway-system
+        sectionName: http
+```
+
+The hostname must be covered by the DNS record pointing at the Gateway address
+(here the wildcard `*.homelab.internal` -> `192.168.1.212`), and the Gateway
+listener must allow routes from the release namespace
+(`allowedRoutes.namespaces.from: All` on the shared homelab Gateway).
+
+The Service type is independent of this switch. During a migration, keeping
+`service.type: LoadBalancer` while enabling the gateway makes Grafana reachable
+through **both** paths at once -- attach the route, verify
+`curl http://t0.homelab.internal/login`, then flip the Service back to
+`ClusterIP` and drop the address-claiming annotation once the hostname is the
+habit. The LoadBalancer path stays the fallback for clusters without a Gateway.
+
+Same trust model as the LoadBalancer mode: plain HTTP behind the admin
+password, LAN only, never routed in from outside.
+
+**The ingest Service gets no HTTPRoute, ever** -- the upload endpoint is
+unauthenticated; an HTTPRoute would be the same hole with a hostname on it. If
+a remotely reachable upload is ever wanted, it needs authentication first.
 
 The PostgreSQL application password (account `t0`, distinct from the
 Garmin account) is retrieved the same way:
@@ -427,7 +467,7 @@ provisioning provider, not just the offending file.
 
 This chart is designed to be fully validated without touching a cluster:
 
-Three reference value sets are provided in `ci/` (test passwords, never deployed):
+Five reference value sets are provided in `ci/` (test passwords, never deployed):
 
 ```bash
 for v in deploy/helm/t0/ci/*.yaml; do
@@ -436,9 +476,11 @@ for v in deploy/helm/t0/ci/*.yaml; do
 done
 ```
 
-- `ci/01-defaut-values.yaml` - default configuration, secrets provided.
-- `ci/02-secrets-externes-values.yaml` - all pre-existing Secrets, NetworkPolicy enabled.
+- `ci/01-default-values.yaml` - default configuration, secrets provided.
+- `ci/02-external-secrets-values.yaml` - all pre-existing Secrets, NetworkPolicy enabled.
 - `ci/03-minimal-values.yaml` - without Grafana, without backup, without persistence.
+- `ci/04-lan-grafana-values.yaml` - Grafana on a LoadBalancer with a claimed address.
+- `ci/05-gateway-grafana-values.yaml` - Grafana behind an HTTPRoute on the shared Gateway.
 
 Without a values file, `helm template` **fails deliberately** (passwords not provided,
 see above).

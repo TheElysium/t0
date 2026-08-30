@@ -1,9 +1,15 @@
 t0 {{ .Chart.Version }} deployed in namespace {{ .Release.Namespace }}.
 
-STRICTLY LOCAL ACCESS: no Ingress, no TLS. Everything goes through port-forward.
+STRICTLY LOCAL ACCESS: no TLS. Everything is LAN or port-forward.
+{{- if and .Values.grafana.enabled .Values.grafana.gateway.enabled }}
+
+  # Grafana -- behind the shared Gateway
+  http://{{ .Values.grafana.gateway.hostname }}/login
+{{- else }}
 
   # Grafana
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "t0.fullname" . }}-grafana {{ .Values.grafana.service.port }}:{{ .Values.grafana.service.port }}
+{{- end }}
 {{- if .Values.ingest.service.enabled }}
 
   # Manual .FIT file upload endpoint

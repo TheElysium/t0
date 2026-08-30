@@ -1,0 +1,22 @@
+{{- if and .Values.grafana.enabled .Values.grafana.gateway.enabled }}
+{{- $hostname := trim .Values.grafana.gateway.hostname | default "" }}
+{{- if not $hostname }}
+{{- fail "\n\nERROR: grafana.gateway.enabled = true but grafana.gateway.hostname is empty.\n\nAn HTTPRoute publishes Grafana under the hostname it declares: an implicit default\nwould silently expose it under a name nobody chose. Set the hostname explicitly:\n\n  grafana:\n    gateway:\n      enabled: true\n      hostname: t0.homelab.internal\n\nThe hostname must be covered by the wildcard DNS record pointing at the Gateway\naddress (e.g. *.homelab.internal -> 192.168.1.212).\n" }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "t0.fullname" . }}-grafana
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  parentRefs:
+    {{- toYaml .Values.grafana.gateway.parentRefs | nindent 4 }}
+  hostnames:
+    - {{ $hostname | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ include "t0.fullname" . }}-grafana
+          port: {{ .Values.grafana.service.port }}
+{{- end }}
