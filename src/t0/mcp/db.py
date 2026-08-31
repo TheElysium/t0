@@ -1,24 +1,4 @@
-"""Read-only database access for the MCP server.
-
-Dedicated role ``t0_mcp_ro``, never the ingest credentials (HANDOFF-MCP §3): the
-DSN arrives from its own Secret via :class:`t0.settings.Settings`. Defense in
-depth against a mis-granted role: the connection itself is opened
-``default_transaction_read_only = on``, so even a bug in this codebase cannot
-issue a mutating statement -- the read-only guarantee does not rest on grants
-alone. ``statement_timeout`` is set per connection through connection options:
-tool output is unbounded by design, so a runaway query must be cut by the
-server, not by a client-side timeout racing the event loop.
-
-Sync psycopg + :mod:`psycopg_pool`, executed through ``asyncio.to_thread`` by
-the tool layer. The MCP is single-user (one athlete, one CLI client at human
-question rate): a small pool and blocking calls in worker threads are the
-simplest correct shape -- no async psycopg driver, no event-loop-aware pool.
-
-No exception text ever carries the DSN: psycopg error messages expose host and
-user names but never the password; still, everything crossing the tool boundary
-is reduced to a generic :class:`QueryError`, and the rich exception only goes to
-the server log (which a client never reads).
-"""
+"""Read-only database access for the MCP server (role t0_mcp_ro)."""
 
 from __future__ import annotations
 
@@ -37,9 +17,8 @@ logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_S = 5
 
-#: Server-side guards applied to EVERY connection of the pool, via libpq
-#: connection options (there is no "SET" surviving pool recycling reliably --
-#: options are part of the connection itself).
+# Connection options, not SET: options are part of the connection itself and
+# survive pool recycling.
 _CONNECTION_OPTIONS = "default_transaction_read_only=on"
 
 
@@ -48,11 +27,7 @@ class QueryError(RuntimeError):
 
 
 class SqlRunner(Protocol):
-    """What the pure handlers need from the database: rows in, dicts out.
-
-    Handlers depend on this Protocol, not on :class:`Reader` -- tests inject a
-    fake runner, and the handlers stay transport- and driver-independent.
-    """
+    """What the handlers need from the database: rows in, dicts out."""
 
     def fetch(self, sql: str, params: Mapping[str, Any]) -> list[dict[str, Any]]: ...
 
@@ -60,12 +35,7 @@ class SqlRunner(Protocol):
 
 
 class Reader:
-    """Connection pool over the read-only role, opened lazily on first use.
-
-    Lazy open matters for tests and for the health probes: building the ASGI app
-    must not attempt a database connection (the Kubernetes probe decides
-    readiness itself; tests without a database never trigger one).
-    """
+    """Connection pool over the read-only role, opened lazily on first use."""
 
     def __init__(self, dsn: str, statement_timeout_ms: int) -> None:
         self._dsn = dsn
@@ -122,11 +92,7 @@ class Reader:
             raise QueryError("database query failed") from None
 
     def check(self) -> None:
-        """Probe the connection path: SELECT 1. Raises on any failure.
-
-        Bounded by the pool's connect_timeout: a half-open TCP connection cannot
-        hold the readiness probe past its own timeout.
-        """
+        """Probe the connection path: SELECT 1, bounded by the connect timeout."""
         try:
             with self._connection_pool().connection() as conn:
                 conn.execute("SELECT 1")

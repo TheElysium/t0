@@ -1,15 +1,4 @@
-"""Entrypoint: ``python -m t0.mcp``.
-
-Refuses to start without the Bearer token or the read-only DSN (same refusal
-is re-checked in :func:`t0.mcp.server.create_app`): an MCP server that cannot
-authenticate its clients or cannot say where it reads from must fail loudly,
-not degrade. The same Settings class is shared with ingest/scheduler, whose
-environments have neither variable -- hence every MCP field is optional and
-the refusal lives here, at the MCP entrypoint, not in Settings.
-
-Startup log cites port and tool count, never the token nor the DSN: both live
-in K8s Secrets and must never reach the container logs.
-"""
+"""Entrypoint: ``python -m t0.mcp``."""
 
 from __future__ import annotations
 

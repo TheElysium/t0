@@ -1,10 +1,4 @@
-"""Pure handler tests: query -> shape -> round, no database.
-
-These pin the two non-negotiable output guards of HANDOFF-MCP §4 -- the safety
-LIMIT bound to ``mcp_max_rows`` and the double rounding -- and the rule that
-interpretation flags are never elided: a None flag must survive to the output
-as null, because "no data" and "data without its caveat" are different facts.
-"""
+"""Pure handler tests: query -> shape -> round, no database."""
 
 from __future__ import annotations
 
@@ -59,17 +53,14 @@ def test_get_pmc_rounds_and_never_elides_flags(fake_runner: FakeRunner) -> None:
     assert rows[0]["ctl"] == 42.01
     assert rows[0]["tsb_same_day"] == -13.01
     assert rows[0]["date"] == "2026-08-30"
-    # Flags present and honest, even false.
     assert rows[0]["ctl_reliable"] is False
     assert rows[0]["has_estimated_load"] is True
-    # Second row is all-None data: nulls survive, flags still there.
     assert rows[1]["tss"] is None and rows[1]["ctl"] is None
     assert rows[1]["ctl_reliable"] is True
     assert rows[1]["has_estimated_load"] is None
 
 
 def test_every_handler_binds_the_safety_limit(fake_runner: FakeRunner) -> None:
-    """LIMIT is a bound parameter fed with mcp_max_rows, not string-built SQL."""
     cases: list[tuple[str, Callable[[], Any]]] = [
         ("FROM MART.PMC", lambda: handlers.get_pmc(fake_runner, max_rows=MAX_ROWS)),
         (
@@ -146,9 +137,9 @@ def test_list_activities_surfaces_method_flags_and_parent(
     assert row["np_reliable"] is True
     assert row["data_quality"] == "good"
     assert row["is_parent"] is False
-    assert row["duration_s"] == 5400  # integer stays integer
-    assert row["np_watts"] == 234.0  # watt-like values round to whole watts
-    assert row["avg_hr"] == 149  # rounded to 0 decimals
+    assert row["duration_s"] == 5400
+    assert row["np_watts"] == 234.0
+    assert row["avg_hr"] == 149
     assert row["trimp"] is None
 
 
@@ -226,8 +217,6 @@ def test_get_power_curve_shapes_value_and_record_date(fake_runner: FakeRunner) -
 def test_get_wellness_rounds_the_deviation_ratio_at_three_decimals(
     fake_runner: FakeRunner,
 ) -> None:
-    """The coach rule fires at hrv_dev_ratio <= -0.15: two decimals would
-    quantize away the very threshold."""
     fake_runner.queue(
         "FROM MART.WELLNESS_BASELINE",
         [

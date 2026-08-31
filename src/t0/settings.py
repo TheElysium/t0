@@ -87,11 +87,8 @@ class Settings(BaseSettings):
         ),
     )
 
-    # MCP server (src/t0/mcp, docs/HANDOFF-MCP.md). ALL optional: ingest and the
-    # scheduler share this Settings class and have no reason to possess MCP
-    # credentials. The MCP entrypoint (t0.mcp.__main__) refuses to start when
-    # token or DSN are absent; nothing else reads these fields. SecretStr for
-    # the same reason as every other credential: no value in logs or errors.
+    # MCP server (src/t0/mcp). All optional: ingest and the scheduler share this
+    # class; the MCP entrypoint refuses to start when token or DSN are absent.
     mcp_bearer_token: SecretStr | None = Field(
         default=None,
         description="Static Bearer token required by the MCP server (Authorization header).",

@@ -1,11 +1,4 @@
-"""Protocol smoke test over the real transport stack.
-
-The MCP SDK client (streamable HTTP) runs against the assembled ASGI app via
-httpx's ASGI transport -- no socket, but the full server stack: Bearer
-middleware, Starlette routing, FastMCP stateless session handling, tool
-dispatch, and the handler layer behind it (fed by the FakeRunner, so no
-database). Pins HANDOFF-MCP §7: exactly 7 tools, and one tool round-trips.
-"""
+"""Protocol smoke test over the real transport stack: 7 tools, one round-trip."""
 
 from __future__ import annotations
 
@@ -37,9 +30,8 @@ EXPECTED_TOOLS = {
 
 @asynccontextmanager
 async def _mcp_client(mcp_app: Any, token: str | None) -> AsyncIterator[ClientSession]:
-    """Open an SDK client session against the ASGI app, running the app's
-    lifespan manually (ASGI transport does not run it; the streamable HTTP
-    session manager requires it)."""
+    """Open an SDK client session against the ASGI app; the app lifespan runs
+    manually (ASGI transport does not run it)."""
     request_headers = {"Authorization": f"Bearer {token}"} if token else {}
     http_client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=mcp_app),

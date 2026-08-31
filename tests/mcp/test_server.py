@@ -1,9 +1,4 @@
-"""Entrypoint refusal and instructions-block coherence tests.
-
-The entrypoint must refuse to start without T0_MCP_BEARER_TOKEN /
-T0_MCP_POSTGRES_DSN (HANDOFF-MCP §3/§5) and the refusal must not leak values.
-The instructions block must stay welded to the migrations it recycles.
-"""
+"""Entrypoint refusal and instructions-block coherence tests."""
 
 from __future__ import annotations
 
@@ -122,9 +117,6 @@ def _normalized(text: str) -> str:
     ],
 )
 def test_instructions_recycle_the_migration_wording(migration: str, fragment: str) -> None:
-    """The quoted sentences must exist verbatim in BOTH places: the instructions
-    may not half-paraphrase the load-bearing comments, and the migrations may
-    not silently reword them out from under the server."""
     sql = _normalized((_MIGRATIONS / migration).read_text(encoding="utf-8"))
     instructions = _normalized(INSTRUCTIONS)
     quoted = _normalized(fragment)

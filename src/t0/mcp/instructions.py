@@ -1,16 +1,5 @@
-"""The ``instructions`` block of the MCP server, recycled from the migrations.
-
-HANDOFF-MCP §4: "The server ships an instructions block recycled from the
-load-bearing COMMENT ON text in the migrations (migrations/007_mart.sql and
-later)." Recycled means RECYCLED -- the sentences below quote the comments
-verbatim (modulo quotation marks) instead of half-paraphrasing them, because
-those comments are the audited source of every caveat. tests/mcp pins several
-exact fragments against the migration files, so the two cannot drift apart
-silently.
-
-The block tells the LLM how to read the numbers, which flags change their
-meaning, and what it must never conclude from a single number.
-"""
+"""The MCP ``instructions`` block: quotes the migration COMMENT ON text verbatim,
+pinned against the migration files by tests/mcp/test_server.py."""
 
 from __future__ import annotations
 

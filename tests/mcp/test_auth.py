@@ -1,10 +1,4 @@
-"""Bearer middleware tests over the real assembled ASGI app.
-
-The probes (/healthz) are exempt; everything else -- including the MCP endpoint
-itself -- requires exactly ``Bearer <token>``. The failure responses must not
-echo the expected token. starlette TestClient (not a raw httpx.Client): the
-ASGI transport is async-only in httpx, and TestClient manages the app lifespan.
-"""
+"""Bearer middleware tests over the real assembled ASGI app."""
 
 from __future__ import annotations
 
@@ -16,9 +10,8 @@ from tests.mcp.conftest import TEST_TOKEN
 
 
 def _client(mcp_app: Any) -> TestClient:
-    # raise_server_exceptions=False: a POST /mcp with an empty body hits the MCP
-    # protocol layer, which may raise before responding -- here we only observe
-    # what crossed the Bearer middleware.
+    # The MCP protocol layer may raise on a bare POST /mcp: observe the
+    # middleware, not the endpoint.
     return TestClient(mcp_app, raise_server_exceptions=False)
 
 
@@ -53,8 +46,6 @@ def test_token_is_case_sensitive(mcp_app: Any) -> None:
 
 
 def test_correct_token_passes_the_middleware(mcp_app: Any) -> None:
-    """The middleware forwards: any status other than 401 is its pass-through
-    signature (the endpoint itself answers on the protocol layer)."""
     response = _client(mcp_app).post(
         "/mcp", content=b"", headers={"Authorization": f"Bearer {TEST_TOKEN}"}
     )

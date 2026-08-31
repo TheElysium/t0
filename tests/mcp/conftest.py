@@ -1,12 +1,4 @@
-"""Shared fixtures for tests/mcp/.
-
-No database in this package unless one is explicitly provided (see
-test_db_reader.py, which skips without ``T0_TEST_POSTGRES_DSN`` like every
-other DB test of the repo): handlers take a :class:`~t0.mcp.db.SqlRunner`
-Protocol, so the pure tests and the protocol smoke test inject a fake runner,
-and the Reader is stubbed at instance level through ``monkeypatch`` (its pool
-therefore never opens).
-"""
+"""Shared fixtures for tests/mcp/: no database unless explicitly provided."""
 
 from __future__ import annotations
 
@@ -29,8 +21,7 @@ def build_settings(**overrides: Any) -> Settings:
     """Full Settings with MCP fields set, bypassing the environment."""
     values: dict[str, Any] = {
         "postgres_dsn": SecretStr("postgresql://user:pw@localhost:5432/db"),
-        # validation_alias of garmin_tokens_path: pydantic-settings matches the
-        # alias, not the field name, when populating from a dict.
+        # validation_alias: pydantic-settings matches the alias, not the name.
         "GARMINTOKENS": "/opt/t0-test/garmin-tokens",
         "fit_archive_path": "/opt/t0-test/fit-archive",
         "garmin_username": "athlete@example.invalid",
@@ -45,9 +36,8 @@ def build_settings(**overrides: Any) -> Settings:
 
 @dataclass
 class FakeRunner:
-    """In-memory :class:`SqlRunner`: rows are matched to queries by a marker
-    substring, calls are recorded. A query nobody queued fails the test loudly
-    rather than silently returning nothing."""
+    """In-memory SqlRunner: rows matched by marker substring, calls recorded,
+    unqueued query fails loudly."""
 
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     _rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -78,9 +68,7 @@ def fake_runner() -> FakeRunner:
 
 @pytest.fixture
 def stub_reader(fake_runner: FakeRunner, monkeypatch: pytest.MonkeyPatch) -> Reader:
-    """A Reader whose queries are answered by ``fake_runner``: the pool never
-    opens, while the server code exercises the exact call path (to_thread
-    included) it uses in production."""
+    """Reader whose queries are answered by ``fake_runner``; the pool never opens."""
     reader = Reader(dsn=TEST_MCP_DSN, statement_timeout_ms=1_000)
     monkeypatch.setattr(reader, "fetch", fake_runner.fetch)
     monkeypatch.setattr(reader, "fetch_one", fake_runner.fetch_one)

@@ -1,15 +1,5 @@
-"""Integration tests of the read-only Reader against real PostgreSQL.
-
-Same discipline as tests/db/test_runner_integration.py: these run only if
-PostgreSQL is reachable via T0_TEST_POSTGRES_DSN (a test-dedicated database,
-never production) and skip otherwise -- no local PostgreSQL in the original
-execution environment, see L1 end report.
-
-What they pin beyond the pure tests: the connection options actually reach the
-server (statement_timeout, read-only transaction), and the curated SQL runs
-against the real mart schemas -- including the daterange-as-text trick and the
-is_parent join.
-"""
+"""Reader integration tests against real PostgreSQL, skipped without
+T0_TEST_POSTGRES_DSN (same discipline as tests/db/test_runner_integration.py)."""
 
 from __future__ import annotations
 
@@ -29,9 +19,7 @@ TEST_DSN_ENV_VAR = "T0_TEST_POSTGRES_DSN"
 def _require_test_dsn() -> str:
     dsn = os.environ.get(TEST_DSN_ENV_VAR)
     if not dsn:
-        pytest.skip(
-            f"{TEST_DSN_ENV_VAR} not set: no test PostgreSQL available (see L1 end report)."
-        )
+        pytest.skip(f"{TEST_DSN_ENV_VAR} not set: no test PostgreSQL available.")
     return dsn
 
 

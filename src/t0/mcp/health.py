@@ -1,20 +1,4 @@
-"""Liveness and readiness endpoints for the MCP Deployment probes.
-
-Same discipline as :mod:`t0.api.health` (the ingest Deployment), because the
-split is the whole point:
-
-- /healthz (liveness): process alive, event loop answers, NOTHING else checked.
-  A failing liveness probe restarts the container, and a restart can fix
-  neither PostgreSQL nor the network -- a dependency outage must never
-  translate into a restart loop.
-- /readyz (readiness): the MCP is ready when its one dependency, the read-only
-  PostgreSQL path, works. Failure answers 503: the Service stops routing to
-  this pod, and readiness failures never restart anything.
-
-No exception text is ever echoed in a response: connection errors carry host
-and user names, and the DSN carries the database password (see t0.settings on
-value leakage). A generic detail is all a probe consumer needs.
-"""
+"""Liveness and readiness endpoints for the MCP Deployment probes."""
 
 from __future__ import annotations
 
@@ -34,7 +18,7 @@ if TYPE_CHECKING:
 
 
 async def healthz(request: Request) -> JSONResponse:
-    """Liveness: process alive. Deliberately dependency-free, see module docstring."""
+    """Liveness only -- a dependency outage must never cause a restart."""
     return JSONResponse({"status": "ok"})
 
 

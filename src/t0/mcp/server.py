@@ -1,17 +1,4 @@
-"""MCP server assembly: seven curated tools over the marts, streamable HTTP.
-
-Shape (HANDOFF-MCP §1/§2): a FastMCP server in stateless session mode, served
-as a Starlette ASGI app at ``/mcp`` (streamable HTTP), wrapped in the Bearer
-middleware (:mod:`t0.mcp.auth`), with ``/healthz`` and ``/readyz`` beside it
-for the chart probes. Plain HTTP on the LAN is deliberate, exactly like
-Grafana; TLS is the Gateway's business.
-
-No raw-SQL escape hatch, no write tool: the seven handlers in
-:mod:`t0.mcp.handlers` are the entire query surface, and the database role is
-read-only on top of that. Refusing startup without a token or DSN is done at
-assembly time (:func:`create_app`) -- a misconfigured server must fail loudly
-instead of serving unauthenticated or on the wrong credentials.
-"""
+"""MCP server assembly: seven curated tools over the marts, streamable HTTP at /mcp."""
 
 from __future__ import annotations
 
@@ -36,10 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: The MCP binds every interface: it is reached through the ClusterIP Service /
-#: Gateway HTTPRoute, not through a sidecar localhost. Kubernetes decides what
-#: reaches it (S104 therefore does not apply: there is no direct LAN exposure
-#: of a pod).
+# Reached through the ClusterIP Service / Gateway HTTPRoute, not localhost.
 BIND_HOST = "0.0.0.0"  # noqa: S104
 
 
@@ -56,11 +40,8 @@ def create_mcp_server(settings: Settings, reader: Reader) -> FastMCP:
         json_response=True,
         host=BIND_HOST,
         port=settings.mcp_port,
-        # DNS rebinding protection is auto-enabled for localhost binds and
-        # checks the Host header: it would reject every request proxied by the
-        # Gateway under t0-mcp.homelab.internal. The client here is the Claude
-        # Code CLI with a static header, not a browser: the mitigation does not
-        # apply, authentication is the Bearer middleware's job.
+        # Host-header-based DNS rebinding protection would reject every
+        # Gateway-proxied request; the client is the CLI with a Bearer header.
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
 
@@ -158,14 +139,7 @@ def create_mcp_server(settings: Settings, reader: Reader) -> FastMCP:
 
 
 def create_app(settings: Settings, reader: Reader) -> ASGIApp:
-    """Assemble the ASGI app: MCP at /mcp, probes beside it, Bearer in front.
-
-    Raises:
-        McpConfigError: when the Bearer token or the read-only DSN is absent.
-            The server refuses to start rather than serve unauthenticated or
-            fall back to the ingest credentials. Messages cite variable names
-            only, never values.
-    """
+    """Assemble the ASGI app: MCP at /mcp, probes beside it, Bearer in front."""
     if settings.mcp_bearer_token is None:
         raise McpConfigError("T0_MCP_BEARER_TOKEN is required: refusing to start unauthenticated.")
     if settings.mcp_postgres_dsn is None:

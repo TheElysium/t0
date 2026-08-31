@@ -1,15 +1,4 @@
-"""Static Bearer token verification, as a plain ASGI middleware.
-
-HANDOFF-MCP §2: no OAuth 2.1 -- disproportionate for single-user LAN use behind
-the shared Gateway, and the real client (Claude Code CLI) accepts a static
-header. The token lives in a K8s Secret, is compared constant-time, and is
-NEVER logged: the 401 response and the exception messages carry no echo of what
-was expected or received.
-
-``/healthz`` and ``/readyz`` are exempt: they are consumed by the Kubernetes
-probes, which carry no token, and they expose nothing but "ok"/"database
-unreachable".
-"""
+"""Static Bearer token verification, as a plain ASGI middleware."""
 
 from __future__ import annotations
 
@@ -21,6 +10,7 @@ from starlette.responses import JSONResponse
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
 
+# Kubernetes probes carry no token and expose nothing sensitive.
 UNPROTECTED_PATHS = frozenset({"/healthz", "/readyz"})
 
 
