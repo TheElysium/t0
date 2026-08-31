@@ -240,6 +240,125 @@ ingest:
     failureThreshold: 3
 
 # -----------------------------------------------------------------------
+# t0-mcp -- MCP server: read-only data access for an LLM (docs/HANDOFF-MCP.md)
+# -----------------------------------------------------------------------
+# A NEW, SEPARATE process -- never merged into ingest. It reuses the SAME
+# Docker image (same artifact, different command: `python -m t0.mcp`) but gets
+# its own Deployment and Service, so that exposing the MCP can never, by
+# construction, expose the unauthenticated ingest upload endpoint. Only the MCP
+# Service may get an HTTPRoute; ingest stays ClusterIP whatever happens.
+mcp:
+  enabled: false
+
+  replicaCount: 1
+
+  image:
+    # Same image as ingest: the MCP is another entry point of the same Python
+    # package. Same repository, same tags.
+    repository: ghcr.io/theelysium/t0
+    tag: ""            # default: .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  # No dedicated imagePullSecrets here: same image, same registry as ingest --
+  # set `ingest.imagePullSecrets`, the MCP Deployment reads it too.
+
+  service:
+    # ClusterIP only (see templates/mcp-service.yaml): the LAN exposure mode of
+    # the MCP is the gated HTTPRoute below, nothing else.
+    type: ClusterIP
+    port: 8080
+
+  # Static Bearer token, verified by the MCP ASGI middleware. It lives in a
+  # Kubernetes Secret -- NEVER in this values file in a real deployment, NEVER
+  # generated randomly by the chart (same rule as postgresql.auth / grafana.admin:
+  # a regenerated token would silently break the client configuration).
+  auth:
+    # Preferred form: a pre-existing Secret, referenced only. Created once by
+    # the athlete (see README.md for the exact command), key `bearerTokenKey`.
+    bearerTokenExistingSecret: ""
+    bearerTokenKey: token
+    # Alternative for offline validation ONLY (chart creates the Secret itself
+    # from this value). Leave empty in a real deployment and use
+    # `bearerTokenExistingSecret`.
+    bearerToken: ""
+
+  # PostgreSQL access of the MCP: the DEDICATED read-only role `t0_mcp_ro`,
+  # never the application credentials. The role and its DSN Secret are created
+  # server-side (CNPG `managed.roles`, homelab repository) -- this chart only
+  # REFERENCES the Secret, it never creates it (same logic as
+  # postgresql.auth.existingSecret with an external server).
+  postgres:
+    # MANDATORY when `mcp.enabled` is true -- the chart refuses to render
+    # otherwise, with the Secret creation command in the error message.
+    dsnExistingSecret: ""
+    dsnKey: dsn
+
+  # Non-sensitive settings, passed as T0_MCP_* environment variables (the app
+  # reads them through `t0.settings`, env_prefix T0_).
+  config:
+    logLevel: INFO
+    # statement_timeout applied on the read-only connection (milliseconds): a
+    # curated query cannot run away, which matters given unbounded output.
+    # Default matches t0.settings.mcp_statement_timeout_ms.
+    statementTimeoutMs: 10000
+    # Safety LIMIT ceiling applied to every tool query (rows): unbounded output
+    # can make the tool call itself fail (context overflow / token cost).
+    maxRows: 500
+
+  # Maximum size of emptyDir mounted on /tmp (root filesystem read-only,
+  # same mechanism as ingest -- the MCP mounts no PVC).
+  tmpDirSizeLimit: 64Mi
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Exposure through the shared Gateway (HTTPRoute), same mechanism and same
+  # gating idiom as grafana.gateway: the chart refuses to render an HTTPRoute
+  # without an explicit hostname. Plain HTTP on the LAN, like every exposure of
+  # this chart; real TLS is a separate homelab task the MCP inherits unchanged.
+  gateway:
+    enabled: false
+    # MANDATORY when `enabled` is true. An implicit default would silently
+    # publish the MCP under a name nobody chose.
+    hostname: ""
+    parentRefs:
+      - name: homelab
+        namespace: gateway-system
+        sectionName: http
+
+# -----------------------------------------------------------------------
 # Pod scheduling (applies to every workload of the release)
 # -----------------------------------------------------------------------
 # The fit-archive PVC below is ReadWriteOnce and is mounted by five workloads

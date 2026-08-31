@@ -18,6 +18,9 @@ dependencies = [
     "garminconnect==0.3.2",
     "garmin-fit-sdk==21.213.0",
     "psycopg[binary]==3.2.3",
+    # Connection pooling for the MCP read-only role (t0.mcp.db): the official
+    # companion package, kept explicit rather than letting the mcp pin drag it in.
+    "psycopg-pool==3.2.6",
     "apscheduler==3.10.4",
     "fastapi==0.115.5",
     # Required AT RUNTIME by File()/UploadFile parameters of the upload endpoint
@@ -25,8 +28,14 @@ dependencies = [
     # shows up on first actual send, not on import.
     "python-multipart==0.0.20",
     "uvicorn[standard]==0.32.1",
-    "pydantic==2.10.2",
+    # 2.11 floor is the mcp SDK's own requirement (1.x line); pydantic-settings
+    # 2.6.1 accepts it, so only pydantic itself moves.
+    "pydantic==2.11.7",
     "pydantic-settings==2.6.1",
+    # MCP server (docs/HANDOFF-MCP.md). 1.x line pinned: 2.x restructured the
+    # whole public API (mcp.server.mcpserver) for too little gain here, and the
+    # 1.x line is the one documented for streamable HTTP + stateless mode.
+    "mcp==1.29.1",
 ]
 
 [project.optional-dependencies]

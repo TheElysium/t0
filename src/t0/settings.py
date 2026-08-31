@@ -87,6 +87,45 @@ class Settings(BaseSettings):
         ),
     )
 
+    # MCP server (src/t0/mcp, docs/HANDOFF-MCP.md). ALL optional: ingest and the
+    # scheduler share this Settings class and have no reason to possess MCP
+    # credentials. The MCP entrypoint (t0.mcp.__main__) refuses to start when
+    # token or DSN are absent; nothing else reads these fields. SecretStr for
+    # the same reason as every other credential: no value in logs or errors.
+    mcp_bearer_token: SecretStr | None = Field(
+        default=None,
+        description="Static Bearer token required by the MCP server (Authorization header).",
+    )
+    mcp_postgres_dsn: SecretStr | None = Field(
+        default=None,
+        description=(
+            "PostgreSQL DSN of the read-only role t0_mcp_ro, dedicated to the MCP server "
+            "(never the ingest role)."
+        ),
+    )
+    mcp_statement_timeout_ms: int = Field(
+        default=10_000,
+        ge=1,
+        description=(
+            "statement_timeout set on every MCP read-only connection: a curated query "
+            "cannot run away despite the unbounded tool output."
+        ),
+    )
+    mcp_max_rows: int = Field(
+        default=500,
+        ge=1,
+        description=(
+            "Safety LIMIT injected into every MCP tool query: unbounded output can make "
+            "the tool call itself fail (context overflow)."
+        ),
+    )
+    mcp_port: int = Field(
+        default=8000,
+        ge=1,
+        le=65535,
+        description="TCP port the MCP server (uvicorn) listens on.",
+    )
+
 
 def _env_var_name(field_name: str) -> str:
     """Environment variable name for a field."""

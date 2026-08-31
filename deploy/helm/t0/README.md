@@ -1,10 +1,12 @@
 # Chart t0
 
 Homelab deployment of the t0 pipeline: Garmin ingestion (`t0-ingest`),
-PostgreSQL, Grafana. **No TLS, no Ingress resource.** Default exposure is
+PostgreSQL, Grafana, and an optional MCP server (`t0-mcp`, read-only data
+access for an LLM). **No TLS, no Ingress resource.** Default exposure is
 strictly local: Services are `ClusterIP`, access via `kubectl port-forward`.
 Optional LAN exposure of Grafana is possible either through a `LoadBalancer`
-Service or an HTTPRoute on a cluster Gateway (see "Service exposure" below).
+Service or an HTTPRoute on a cluster Gateway (see "Service exposure" below) --
+the MCP has its own gated Gateway exposure (see "MCP server" below).
 The ingest Service stays `ClusterIP` in every case.
 
 This chart deploys nothing on its own -- the athlete runs `helm install`
@@ -356,6 +358,135 @@ kubectl get secret -n t0 t0-postgresql \
   -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
+## MCP server (optional, read-only LLM access)
+
+`mcp.enabled: true` (default `false`) deploys the MCP server: a **new, separate
+process** -- never merged into `ingest`. It reuses the **same Docker image**
+(same artifact, another entry point: the container runs `python -m t0.mcp`
+instead of the ingest API server) but gets its own Deployment and Service
+(`<release>-mcp`, `ClusterIP` only). This separation is what guarantees, by
+construction, that exposing the MCP never exposes the unauthenticated ingest
+upload endpoint.
+
+The MCP gives an LLM read-only access to the training marts through curated
+tools -- no raw SQL, no writes. Design and security contract:
+[`docs/HANDOFF-MCP.md`](../../../docs/HANDOFF-MCP.md).
+
+### Required secrets
+
+**The chart never creates the read-only DSN Secret, and generates no token.**
+
+1. **Bearer token** (`mcp.auth.*`) -- static token verified by the MCP ASGI
+   middleware; the client sends it on every request. Create it once, then
+   reference the Secret (preferred form):
+
+   ```bash
+   openssl rand -base64 32 | tr -d '/+=' | cut -c1-32
+   kubectl create secret generic t0-mcp-auth \
+     --namespace t0 \
+     --from-literal=token='<the token>'
+   ```
+
+   ```yaml
+   mcp:
+     auth:
+       bearerTokenExistingSecret: t0-mcp-auth   # key: bearerTokenKey, default `token`
+   ```
+
+   For offline validation only, `mcp.auth.bearerToken` lets the chart create
+   the Secret from an explicit value -- never in a committed values file. With
+   neither set, `helm template`/`helm install` **fails** with an explicit
+   message: no token is randomly generated, because a token regenerated on
+   every `helm upgrade` would silently break the client configuration.
+
+2. **Read-only DSN** (`mcp.postgres.dsnExistingSecret`) -- the MCP connects to
+   PostgreSQL through the **dedicated read-only role `t0_mcp_ro`**, never the
+   application credentials. The role is created on the server side (CNPG
+   `managed.roles`, homelab repository) and its DSN Secret with it; the chart
+   only **references** it (same logic as `postgresql.auth.existingSecret`):
+
+   ```bash
+   kubectl create secret generic t0-mcp-ro-dsn \
+     --namespace t0 \
+     --from-literal=dsn='postgresql://t0_mcp_ro:<password>@<host>:5432/t0'
+   ```
+
+   ```yaml
+   mcp:
+     postgres:
+       dsnExistingSecret: t0-mcp-ro-dsn   # key: dsnKey, default `dsn`
+   ```
+
+   If `mcp.enabled` is true and this value is empty, rendering **fails** with
+   the Secret creation command in the message. Object grants for `t0_mcp_ro`
+   live in the t0 migration `020_mcp_ro_grants.sql` (USAGE + SELECT on `mart.*`,
+   default privileges for future tables).
+
+### LAN exposure through the Gateway
+
+Same mechanism and same gating idiom as `grafana.gateway`: the HTTPRoute is
+rendered only when both `mcp.enabled` and `mcp.gateway.enabled` are true, and
+the chart **refuses to render without an explicit hostname**:
+
+```yaml
+mcp:
+  enabled: true
+  gateway:
+    enabled: true
+    hostname: t0-mcp.homelab.internal     # MANDATORY, chart refuses to render without it
+    parentRefs:                           # defaults below; override for another Gateway
+      - name: homelab
+        namespace: gateway-system
+        sectionName: http
+```
+
+The hostname must be covered by the wildcard DNS record pointing at the Gateway
+(`*.homelab.internal` -> `192.168.1.212`). Plain HTTP on the LAN, like every
+exposure of this chart; real TLS is a separate homelab task the MCP inherits
+unchanged. The MCP Service accepts `ClusterIP` only (`t0.assertServiceType`):
+its one exposure mode is this route, behind the Bearer token.
+
+Without the Gateway route, the Service stays reachable via port-forward only.
+
+### Client wiring (Claude Code CLI)
+
+```bash
+claude mcp add --transport http t0 \
+  http://t0-mcp.homelab.internal/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Set once -- no per-session `port-forward`. The token is readable from the
+Secret if needed:
+
+```bash
+kubectl get secret -n t0 t0-mcp-auth \
+  -o jsonpath='{.data.token}' | base64 -d; echo
+```
+
+### Guardrails
+
+- `mcp.config.statementTimeoutMs` (default `5000`) -- `statement_timeout` on
+  the read-only connection: a curated query cannot run away.
+- `mcp.config.maxRows` (default `500`) -- safety `LIMIT` ceiling applied to
+  every tool query: unbounded output can make the tool call itself fail
+  (context overflow / token cost).
+- Probes: `/healthz` (liveness) and `/readyz` (readiness -- tests the Postgres
+  connection), same pattern as the ingest Deployment.
+
+### NetworkPolicy caveat
+
+The chart's NetworkPolicy stays **disabled by default** and is unchanged by
+`mcp.enabled`. If `networkPolicy.enabled` is ever turned on while the MCP is
+exposed through the Gateway, add an ingress rule Gateway→MCP and egress
+MCP→PostgreSQL:5432, then **re-test the Gateway path explicitly**: Envoy
+forwards traffic with a source identity that is not the client pod's, so a
+pod-to-pod policy can silently block the route (see
+[`docs/HANDOFF-GATEWAY.md`](../../../docs/HANDOFF-GATEWAY.md) §4).
+
+**The ingest Service gets no HTTPRoute and the MCP never shares its process:
+by design, not by configuration.**
+
 ## Persistent volumes
 
 Three PVCs:
@@ -467,7 +598,7 @@ provisioning provider, not just the offending file.
 
 This chart is designed to be fully validated without touching a cluster:
 
-Five reference value sets are provided in `ci/` (test passwords, never deployed):
+Six reference value sets are provided in `ci/` (test passwords, never deployed):
 
 ```bash
 for v in deploy/helm/t0/ci/*.yaml; do
@@ -481,6 +612,7 @@ done
 - `ci/03-minimal-values.yaml` - without Grafana, without backup, without persistence.
 - `ci/04-lan-grafana-values.yaml` - Grafana on a LoadBalancer with a claimed address.
 - `ci/05-gateway-grafana-values.yaml` - Grafana behind an HTTPRoute on the shared Gateway.
+- `ci/06-mcp-gateway-values.yaml` - MCP enabled, secrets referenced, HTTPRoute on the shared Gateway.
 
 Without a values file, `helm template` **fails deliberately** (passwords not provided,
 see above).

@@ -143,3 +143,46 @@ def test_settings_can_be_built_without_reading_a_local_dotenv(
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
 
     assert settings.garmin_password.get_secret_value() == FAKE_PASSWORD
+
+
+def test_mcp_fields_are_optional_with_safe_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ingest and the scheduler share this Settings class and their environments
+    carry no MCP variable: every MCP field must default to None or a safe value,
+    never to a credential (docs/HANDOFF-MCP.md)."""
+    _set_full_environment(monkeypatch)
+
+    settings = get_settings()
+
+    assert settings.mcp_bearer_token is None
+    assert settings.mcp_postgres_dsn is None
+    assert settings.mcp_statement_timeout_ms == 10_000
+    assert settings.mcp_max_rows == 500
+    assert settings.mcp_port == 8000
+
+
+def test_mcp_secrets_never_appear_in_repr_or_serialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same contract as the Garmin/DSN secrets: the MCP token and DSN live in
+    K8s Secrets and must not leak through any rendering path."""
+    mcp_token = "canari-jeton-mcp"
+    mcp_dsn = "postgresql://t0_mcp_ro:canari-dsn-mcp@localhost:5432/db"
+    monkeypatch.setenv("T0_MCP_BEARER_TOKEN", mcp_token)
+    monkeypatch.setenv("T0_MCP_POSTGRES_DSN", mcp_dsn)
+    _set_full_environment(monkeypatch)
+
+    settings = get_settings()
+    renderings = [
+        repr(settings),
+        str(settings),
+        str(settings.model_dump()),
+        settings.model_dump_json(),
+        str(settings.mcp_bearer_token),
+        str(settings.mcp_postgres_dsn),
+    ]
+
+    for rendering in renderings:
+        assert "canari-jeton-mcp" not in rendering
+        assert "canari-dsn-mcp" not in rendering

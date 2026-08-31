@@ -1,0 +1,23 @@
+{{- if .Values.mcp.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "t0.fullname" . }}-mcp
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+{{- include "t0.assertServiceType" (dict
+      "key" "mcp.service.type"
+      "type" .Values.mcp.service.type
+      "allowed" (list "ClusterIP")
+      "reason" "The MCP has exactly ONE exposure mode: the gated HTTPRoute (mcp.gateway.enabled + mcp.gateway.hostname) on the shared Gateway. A LoadBalancer address would open a second exposure path the chart does not track, and a NodePort the same. Keep the Service internal and enable the Gateway route for LAN access.") }}
+  type: {{ .Values.mcp.service.type }}
+  selector:
+    {{- include "t0.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+  ports:
+    - name: http
+      port: {{ .Values.mcp.service.port }}
+      targetPort: http
+{{- end }}
