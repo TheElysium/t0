@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from starlette.testclient import TestClient
+import pytest
+from starlette.testclient import TestClient, WebSocketDenialResponse
 
 from tests.mcp.conftest import TEST_TOKEN
 
@@ -57,3 +58,17 @@ def test_401_never_echoes_the_token(mcp_app: Any) -> None:
     response = _client(mcp_app).post("/mcp", content=b"")
 
     assert TEST_TOKEN not in response.text
+
+
+def test_websocket_scope_is_rejected_even_with_a_token(mcp_app: Any) -> None:
+    # The middleware answers the handshake with an HTTP 400 denial response.
+    with (
+        pytest.raises(WebSocketDenialResponse) as excinfo,
+        _client(mcp_app).websocket_connect(
+            "/mcp", headers={"Authorization": f"Bearer {TEST_TOKEN}"}
+        ),
+    ):
+        pass
+
+    assert excinfo.value.status_code == 400
+    assert b"unsupported protocol" in excinfo.value.content

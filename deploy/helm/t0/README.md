@@ -369,8 +369,7 @@ construction, that exposing the MCP never exposes the unauthenticated ingest
 upload endpoint.
 
 The MCP gives an LLM read-only access to the training marts through curated
-tools -- no raw SQL, no writes. Design and security contract:
-[`docs/HANDOFF-MCP.md`](../../../docs/HANDOFF-MCP.md).
+tools -- no raw SQL, no writes.
 
 ### Required secrets
 
@@ -481,8 +480,7 @@ The chart's NetworkPolicy stays **disabled by default** and is unchanged by
 exposed through the Gateway, add an ingress rule Gateway→MCP and egress
 MCP→PostgreSQL:5432, then **re-test the Gateway path explicitly**: Envoy
 forwards traffic with a source identity that is not the client pod's, so a
-pod-to-pod policy can silently block the route (see
-[`docs/HANDOFF-GATEWAY.md`](../../../docs/HANDOFF-GATEWAY.md) §4).
+pod-to-pod policy can silently block the route.
 
 **The ingest Service gets no HTTPRoute and the MCP never shares its process:
 by design, not by configuration.**

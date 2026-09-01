@@ -47,7 +47,7 @@ SELECT p.local_date, p.tss, p.ctl, p.atl, p.tsb, p.tsb_same_day,
  WHERE (%(athlete_id)s::int IS NULL OR p.athlete_id = %(athlete_id)s)
    AND (%(start)s::date IS NULL OR p.local_date >= %(start)s)
    AND (%(end)s::date IS NULL OR p.local_date <= %(end)s)
- ORDER BY p.local_date
+ ORDER BY p.local_date DESC
  LIMIT %(limit)s
 """
 
@@ -73,14 +73,18 @@ def get_pmc(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Performance Management Chart rows, dense calendar, oldest first."""
+    """Performance Management Chart rows, dense calendar, chronological.
+
+    The DESC order keeps the LIMIT window on the RECENT side; the Python
+    reversal restores chronological presentation: a bare get_pmc() call
+    (no dates) returns the latest max_rows days, never the oldest."""
     params = {
         "athlete_id": athlete_id,
         "start": parse_iso_date(start_date, "start_date"),
         "end": parse_iso_date(end_date, "end_date"),
         "limit": max_rows,
     }
-    return [_shape_pmc(row) for row in run.fetch(_PMC_SQL, params)]
+    return [_shape_pmc(row) for row in reversed(run.fetch(_PMC_SQL, params))]
 
 
 _ACTIVITY_COLUMNS = """
@@ -213,7 +217,7 @@ SELECT local_date, hrv_value, hrv_baseline, hrv_dev_ratio,
   FROM mart.wellness_baseline
  WHERE (%(start)s::date IS NULL OR local_date >= %(start)s)
    AND (%(end)s::date IS NULL OR local_date <= %(end)s)
- ORDER BY local_date
+ ORDER BY local_date DESC
  LIMIT %(limit)s
 """
 
@@ -237,13 +241,14 @@ def get_wellness(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[dict[str, Any]]:
-    """HRV / resting-HR readings with their 28-day rolling median baselines."""
+    """HRV / resting-HR readings with their 28-day rolling median baselines,
+    chronological (latest max_rows nights when no range is given)."""
     params = {
         "start": parse_iso_date(start_date, "start_date"),
         "end": parse_iso_date(end_date, "end_date"),
         "limit": max_rows,
     }
-    return [_shape_wellness(row) for row in run.fetch(_WELLNESS_SQL, params)]
+    return [_shape_wellness(row) for row in reversed(run.fetch(_WELLNESS_SQL, params))]
 
 
 _COACH_FLAGS_SQL = """
@@ -251,7 +256,7 @@ SELECT local_date, rule_code, level, detail
   FROM mart.coach_flags
  WHERE (%(start)s::date IS NULL OR local_date >= %(start)s)
    AND (%(end)s::date IS NULL OR local_date <= %(end)s)
- ORDER BY local_date, rule_code
+ ORDER BY local_date DESC, rule_code
  LIMIT %(limit)s
 """
 
@@ -272,13 +277,14 @@ def get_coach_flags(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fired amber/red rules, one row per (day, rule). Advisory only."""
+    """Fired amber/red rules, one row per (day, rule), chronological
+    (latest max_rows days when no range is given). Advisory only."""
     params = {
         "start": parse_iso_date(start_date, "start_date"),
         "end": parse_iso_date(end_date, "end_date"),
         "limit": max_rows,
     }
-    return [_shape_coach_flag(row) for row in run.fetch(_COACH_FLAGS_SQL, params)]
+    return [_shape_coach_flag(row) for row in reversed(run.fetch(_COACH_FLAGS_SQL, params))]
 
 
 _THRESHOLDS_SQL = """

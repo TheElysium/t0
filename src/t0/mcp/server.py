@@ -55,7 +55,8 @@ def create_mcp_server(settings: Settings, reader: Reader) -> FastMCP:
     ) -> list[dict[str, Any]]:
         """Performance Management Chart: daily CTL (42 d), ATL (7 d), TSB,
         with ctl_reliable and has_estimated_load flags. Dense calendar --
-        rest days are rows, not absences."""
+        rest days are rows, not absences. Chronological; with no date range,
+        the LATEST max_rows days."""
         return await asyncio.to_thread(
             handlers.get_pmc,
             reader,
@@ -103,7 +104,8 @@ def create_mcp_server(settings: Settings, reader: Reader) -> FastMCP:
         end_date: str | None = None,
     ) -> list[dict[str, Any]]:
         """Nightly HRV and resting HR with their 28-day rolling median
-        baselines and deviations -- deviations are the actionable quantity."""
+        baselines and deviations -- deviations are the actionable quantity.
+        Chronological; with no date range, the LATEST max_rows nights."""
         return await asyncio.to_thread(
             handlers.get_wellness,
             reader,
@@ -118,7 +120,8 @@ def create_mcp_server(settings: Settings, reader: Reader) -> FastMCP:
         end_date: str | None = None,
     ) -> list[dict[str, Any]]:
         """Fired amber/red coaching rules, one row per (day, rule), with the
-        triggering numbers in detail. Advisory only, never a decision."""
+        triggering numbers in detail. Chronological; with no date range, the
+        LATEST max_rows days. Advisory only, never a decision."""
         return await asyncio.to_thread(
             handlers.get_coach_flags,
             reader,

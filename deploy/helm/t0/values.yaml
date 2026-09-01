@@ -240,7 +240,7 @@ ingest:
     failureThreshold: 3
 
 # -----------------------------------------------------------------------
-# t0-mcp -- MCP server: read-only data access for an LLM (docs/HANDOFF-MCP.md)
+# t0-mcp -- MCP server: read-only data access for an LLM
 # -----------------------------------------------------------------------
 # A NEW, SEPARATE process -- never merged into ingest. It reuses the SAME
 # Docker image (same artifact, different command: `python -m t0.mcp`) but gets

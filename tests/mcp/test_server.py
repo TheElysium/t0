@@ -29,34 +29,25 @@ EXPECTED_TOOLS = (
 def test_create_app_refuses_without_token() -> None:
     settings = build_settings(mcp_bearer_token=None)
 
-    try:
+    with pytest.raises(McpConfigError, match="T0_MCP_BEARER_TOKEN"):
         create_app(settings, Reader(dsn=TEST_MCP_DSN, statement_timeout_ms=1_000))
-    except McpConfigError as exc:
-        assert "T0_MCP_BEARER_TOKEN" in str(exc)
-    else:
-        raise AssertionError("missing token must refuse to assemble")
 
 
 def test_create_app_refuses_without_dsn() -> None:
     settings = build_settings(mcp_postgres_dsn=None)
 
-    try:
+    with pytest.raises(McpConfigError, match="T0_MCP_POSTGRES_DSN"):
         create_app(settings, Reader(dsn="", statement_timeout_ms=1_000))
-    except McpConfigError as exc:
-        assert "T0_MCP_POSTGRES_DSN" in str(exc)
-    else:
-        raise AssertionError("missing DSN must refuse to assemble")
 
 
 def test_refusal_messages_never_contain_a_value() -> None:
     settings = build_settings(mcp_bearer_token=None, mcp_postgres_dsn=None)
 
     for _field in ("mcp_bearer_token", "mcp_postgres_dsn"):
-        try:
+        with pytest.raises(McpConfigError) as excinfo:
             create_app(settings, Reader(dsn="", statement_timeout_ms=1_000))
-        except McpConfigError as exc:
-            assert TEST_TOKEN not in str(exc)
-            assert TEST_MCP_DSN not in str(exc)
+        assert TEST_TOKEN not in str(excinfo.value)
+        assert TEST_MCP_DSN not in str(excinfo.value)
 
 
 def test_instructions_name_every_tool_and_every_flag() -> None:

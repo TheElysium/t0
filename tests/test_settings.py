@@ -150,7 +150,7 @@ def test_mcp_fields_are_optional_with_safe_defaults(
 ) -> None:
     """ingest and the scheduler share this Settings class and their environments
     carry no MCP variable: every MCP field must default to None or a safe value,
-    never to a credential (docs/HANDOFF-MCP.md)."""
+    never to a credential."""
     _set_full_environment(monkeypatch)
 
     settings = get_settings()

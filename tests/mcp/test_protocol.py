@@ -92,7 +92,8 @@ async def test_tool_round_trip_over_the_transport(mcp_app: Any, fake_runner: Fak
     assert not result.isError
     block = result.content[0]
     assert isinstance(block, TextContent)
-    # FastMCP serializes a list[dict] result into one JSON text block per row.
+    # FastMCP serializes each list element into its own JSON text block;
+    # exactly one row was queued, so the first block is that row's JSON object.
     payload = json.loads(block.text)
     assert payload["ftp_watts"] == 245.0
     assert payload["css_estimated"] is False

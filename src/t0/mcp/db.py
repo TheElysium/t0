@@ -50,13 +50,17 @@ class Reader:
                     f"-c statement_timeout={self._statement_timeout_ms} "
                     f"-c {_CONNECTION_OPTIONS}"
                 )
-                self._pool = ConnectionPool(
+                # Opened explicitly, not at constructor time: constructor-time
+                # open is deprecated in psycopg_pool 3.2.
+                pool = ConnectionPool(
                     conninfo=self._dsn,
                     min_size=1,
                     max_size=4,
-                    open=True,
+                    open=False,
                     kwargs={"connect_timeout": CONNECT_TIMEOUT_S, "options": options},
                 )
+                pool.open()
+                self._pool = pool
                 logger.info(
                     "MCP read-only pool opened (statement_timeout=%dms).",
                     self._statement_timeout_ms,

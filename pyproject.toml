@@ -32,7 +32,7 @@ dependencies = [
     # 2.6.1 accepts it, so only pydantic itself moves.
     "pydantic==2.11.7",
     "pydantic-settings==2.6.1",
-    # MCP server (docs/HANDOFF-MCP.md). 1.x line pinned: 2.x restructured the
+    # MCP server. 1.x line pinned: 2.x restructured the
     # whole public API (mcp.server.mcpserver) for too little gain here, and the
     # 1.x line is the one documented for streamable HTTP + stateless mode.
     "mcp==1.29.1",

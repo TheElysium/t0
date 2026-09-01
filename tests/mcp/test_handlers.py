@@ -18,17 +18,8 @@ MAX_ROWS = 7
 
 
 def _pmc_rows() -> list[dict[str, Any]]:
+    # The SQL now returns DESC: newest day first.
     return [
-        {
-            "local_date": date(2026, 8, 30),
-            "tss": 61.300000000000004,
-            "ctl": 42.005,
-            "atl": 55.0,
-            "tsb": None,
-            "tsb_same_day": -13.005,
-            "ctl_reliable": False,
-            "has_estimated_load": True,
-        },
         {
             "local_date": date(2026, 8, 31),
             "tss": None,
@@ -38,6 +29,16 @@ def _pmc_rows() -> list[dict[str, Any]]:
             "tsb_same_day": None,
             "ctl_reliable": True,
             "has_estimated_load": None,
+        },
+        {
+            "local_date": date(2026, 8, 30),
+            "tss": 61.300000000000004,
+            "ctl": 42.005,
+            "atl": 55.0,
+            "tsb": None,
+            "tsb_same_day": -13.005,
+            "ctl_reliable": False,
+            "has_estimated_load": True,
         },
     ]
 
@@ -49,13 +50,14 @@ def test_get_pmc_rounds_and_never_elides_flags(fake_runner: FakeRunner) -> None:
         fake_runner, max_rows=MAX_ROWS, start_date="2026-08-01", end_date="2026-08-31"
     )
 
+    # The DESC LIMIT window is on the recent side; presentation stays chronological.
+    assert [row["date"] for row in rows] == ["2026-08-30", "2026-08-31"]
+    assert rows[1]["tss"] is None and rows[1]["ctl"] is None
     assert rows[0]["tss"] == 61.3
     assert rows[0]["ctl"] == 42.01
     assert rows[0]["tsb_same_day"] == -13.01
-    assert rows[0]["date"] == "2026-08-30"
     assert rows[0]["ctl_reliable"] is False
     assert rows[0]["has_estimated_load"] is True
-    assert rows[1]["tss"] is None and rows[1]["ctl"] is None
     assert rows[1]["ctl_reliable"] is True
     assert rows[1]["has_estimated_load"] is None
 
@@ -237,6 +239,36 @@ def test_get_wellness_rounds_the_deviation_ratio_at_three_decimals(
     assert row["hrv_dev_ratio"] == -0.152
     assert row["hrv_value"] == 61.4
     assert row["rhr_dev_bpm"] == 1.7
+
+
+def test_get_wellness_preserves_chronological_order(fake_runner: FakeRunner) -> None:
+    fake_runner.queue(
+        "FROM MART.WELLNESS_BASELINE",
+        [
+            {
+                "local_date": date(2026, 8, 31),
+                "hrv_value": 60.0,
+                "hrv_baseline": 64.0,
+                "hrv_dev_ratio": None,
+                "rhr_value": 49.0,
+                "rhr_baseline": 47.0,
+                "rhr_dev_bpm": None,
+            },
+            {
+                "local_date": date(2026, 8, 30),
+                "hrv_value": 61.4,
+                "hrv_baseline": 64.25,
+                "hrv_dev_ratio": -0.1519999,
+                "rhr_value": 49.0,
+                "rhr_baseline": 47.3,
+                "rhr_dev_bpm": 1.7,
+            },
+        ],
+    )
+
+    rows = handlers.get_wellness(fake_runner, max_rows=MAX_ROWS)
+
+    assert [row["date"] for row in rows] == ["2026-08-30", "2026-08-31"]
 
 
 def test_get_coach_flags_passes_the_detail_through(fake_runner: FakeRunner) -> None:
