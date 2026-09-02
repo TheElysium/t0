@@ -10,6 +10,8 @@ if TYPE_CHECKING:
 
 DEFAULT_DIGITS = 2
 HRV_RATIO_DIGITS = 3
+# EF runs at ~0.02 m/s per bpm: 3 decimals would give one significant digit.
+EF_DIGITS = 4
 
 
 def round_number(value: Any, digits: int = DEFAULT_DIGITS) -> float | None:
@@ -165,7 +167,7 @@ def _shape_activity(row: dict[str, Any]) -> dict[str, Any]:
         "intensity_factor": round_number(row["intensity_factor"]),
         "intensity_factor_method": row["intensity_factor_method"],
         "decoupling_pct": round_number(row["decoupling_pct"]),
-        "efficiency_factor": round_number(row["efficiency_factor"], 3),
+        "efficiency_factor": round_number(row["efficiency_factor"], EF_DIGITS),
         "efficiency_factor_unit": _ef_unit(row["sport_code"]),
         # Always false: mart.activity_wide filters is_parent = false -- count
         # legs, never legs + parent.
@@ -173,7 +175,12 @@ def _shape_activity(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-_EF_UNIT_BY_SPORT = {"running": "m/s per bpm", "cycling": "W per bpm"}
+_EF_UNIT_BY_SPORT = {
+    "running": "m/s per bpm",
+    "trail_running": "m/s per bpm",
+    "cycling": "W per bpm",
+    "virtual_cycling": "W per bpm",
+}
 
 
 def _ef_unit(sport_code: str) -> str | None:
@@ -399,6 +406,18 @@ SELECT threshold_id, discipline,
  LIMIT %(limit)s
 """
 
+_DISCIPLINES_SQL = "SELECT DISTINCT discipline FROM core.threshold ORDER BY 1"
+
+
+def _validated_discipline(run: SqlRunner, discipline: str | None) -> str | None:
+    """Same contract as the sport_code filter: invalid is an error, never []."""
+    if discipline is None:
+        return None
+    known = [r["discipline"] for r in run.fetch(_DISCIPLINES_SQL, {})]
+    if discipline not in known:
+        raise ValueError(f"unknown discipline {discipline!r}; valid values: {', '.join(known)}.")
+    return discipline
+
 
 def _shape_threshold(row: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -429,5 +448,6 @@ def get_thresholds(
     discipline: str | None = None,
 ) -> list[dict[str, Any]]:
     """Historized physiological thresholds, by validity period."""
+    _validated_discipline(run, discipline)
     params = {"discipline": discipline, "limit": max_rows}
     return [_shape_threshold(row) for row in run.fetch(_THRESHOLDS_SQL, params)]

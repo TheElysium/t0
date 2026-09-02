@@ -142,7 +142,7 @@ def test_list_activities_surfaces_method_flags_and_parent(
     assert row["tss_method"] == "bike_power"
     assert row["intensity_factor_method"] == "bike_power"
     assert row["intensity_factor"] == 0.94
-    assert row["efficiency_factor"] == 1.123
+    assert row["efficiency_factor"] == 1.1234
     assert row["efficiency_factor_unit"] == "W per bpm"
     assert row["swim_time_s"] is None
     assert row["np_reliable"] is True
@@ -172,6 +172,27 @@ def test_list_activities_unknown_sport_code_fails_loudly(
 
     with pytest.raises(ValueError, match="swim.*cycling"):
         handlers.list_activities(fake_runner, max_rows=MAX_ROWS, sport_code="swim")
+
+
+@pytest.mark.parametrize(
+    ("sport_code", "unit"),
+    [
+        ("running", "m/s per bpm"),
+        ("trail_running", "m/s per bpm"),
+        ("cycling", "W per bpm"),
+        ("virtual_cycling", "W per bpm"),
+        ("lap_swimming", None),
+    ],
+)
+def test_efficiency_factor_unit_covers_both_families(
+    fake_runner: FakeRunner, sport_code: str, unit: str | None
+) -> None:
+    row = _activity_row(sport_code=sport_code)
+    fake_runner.queue("FROM MART.ACTIVITY_WIDE", [row])
+
+    result = handlers.list_activities(fake_runner, max_rows=MAX_ROWS)
+
+    assert result["rows"][0]["efficiency_factor_unit"] == unit
 
 
 def test_list_activities_virtual_cycling_distance_zero_is_null(
@@ -407,6 +428,15 @@ def test_get_thresholds_keeps_validity_as_text_and_css_estimated(
     assert row["css_estimated"] is False
     assert row["ftp_watts"] == 245.0
     assert row["weight_kg"] == 71.2
+
+
+def test_get_thresholds_unknown_discipline_fails_loudly(
+    fake_runner: FakeRunner,
+) -> None:
+    fake_runner.queue("FROM CORE.THRESHOLD", [{"discipline": "bike"}])
+
+    with pytest.raises(ValueError, match="cycling.*bike"):
+        handlers.get_thresholds(fake_runner, max_rows=MAX_ROWS, discipline="cycling")
 
 
 @pytest.mark.parametrize(

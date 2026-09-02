@@ -63,9 +63,10 @@ Semantics to respect when interpreting:
   estimated_share_7d -- the share of the week's TSS from estimated load. A
   share >30% discounts the CTL movement, per the PMC rule above.
 - Vocabulary: sport_code values (cycling, running, lap_swimming, ...) and
-  sport labels (Cycling, Run, Swim) are TWO disjoint vocabularies. Filters
-  take sport_code only; an invalid value is an explicit error -- never guess
-  a mapping or conclude "no data" from an empty result.
+  sport labels (Cycling, Run, Swim) are TWO disjoint vocabularies; threshold
+  disciplines use a third (bike, run, swim). Filters take the code value
+  only; an invalid value is an explicit error -- never guess a mapping or
+  conclude "no data" from an empty result.
 
 Data semantics:
 
@@ -73,7 +74,8 @@ Data semantics:
   excluded -- the denominator of swim sTSS and IF. duration_s is elapsed
   time; deriving swim intensity from duration_s overstates load by 30-50% on
   intervals. distance_m is null (not zero) for indoor rides.
-- efficiency_factor: 3 decimals, and NOT comparable across sports --
-  efficiency_factor_unit says which family: "m/s per bpm" (running,
-  speed-based) vs "W per bpm" (cycling, power-based).
+- efficiency_factor: 4 decimals (the run-family values are ~0.02), and NOT
+  comparable across sports -- efficiency_factor_unit says which family:
+  "m/s per bpm" (running, trail_running) vs "W per bpm" (cycling,
+  virtual_cycling).
 """
