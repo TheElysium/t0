@@ -587,8 +587,7 @@ def extract_intensity_minutes(payload: Any) -> int | None:
     vigorous = _as_int(payload.get("vigorousMinutes"))
     if moderate is None and vigorous is None:
         return None
-    total = max(moderate or 0, 0) + 2 * max(vigorous or 0, 0)
-    return total
+    return max(moderate or 0, 0) + 2 * max(vigorous or 0, 0)
 
 
 def extract_training_readiness(payload: Any) -> int | None:

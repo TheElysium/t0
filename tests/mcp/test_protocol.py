@@ -110,7 +110,9 @@ def _all_messages(exc: BaseException) -> str:
 
 @pytest.mark.anyio
 async def test_unauthenticated_protocol_client_is_rejected(mcp_app: Any) -> None:
-    with pytest.raises(BaseException) as excinfo:
+    # The MCP transport wraps auth rejections in its own exception hierarchy: any type
+    # (including anyio ExceptionGroup) counts, only the rejection itself matters.
+    with pytest.raises(BaseException) as excinfo:  # noqa: PT011
         async with _mcp_client(mcp_app, None):
             pass
 

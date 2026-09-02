@@ -22,12 +22,8 @@ So we block three doors at their respective entry points:
 from __future__ import annotations
 
 import socket
-from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 class NetworkAccessDeniedError(RuntimeError):
@@ -42,7 +38,7 @@ def _deny(what: str) -> object:
 
 
 @pytest.fixture(autouse=True)
-def block_all_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def block_all_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Block all network access during ``tests/garmin`` tests."""
 
     def _forbidden_socket(*_args: object, **_kwargs: object) -> object:
@@ -74,5 +70,3 @@ def block_all_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
             return _deny("requests.HTTPAdapter.send")
 
         monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", _forbidden_send)
-
-    yield

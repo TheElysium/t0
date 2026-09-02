@@ -513,7 +513,8 @@ def test_pvc_before_db_download_failure_writes_nothing(tmp_path: Path) -> None:
     )
 
     assert outcome.status == "failed"
-    assert outcome.error is not None and "simulated 429" in outcome.error
+    assert outcome.error is not None
+    assert "simulated 429" in outcome.error
     assert conn.rows == []
     assert not (tmp_path / "2026").exists()  # nothing ever reached PVC
 
@@ -634,7 +635,8 @@ def test_duplicate_content_across_activities_does_not_misattribute(tmp_path: Pat
     assert first.status == "archived"
     assert second.status == "duplicate_content"
     assert second.fit_file_id is None
-    assert second.error is not None and "111" in second.error
+    assert second.error is not None
+    assert "111" in second.error
     # The raw.fit_file row stays attributed to the winning activity, never re-attributed.
     assert len(conn.rows) == 1
     assert conn.rows[0].garmin_activity_id == 111
@@ -835,8 +837,10 @@ def test_as_log_line_content_for_each_status() -> None:
     assert "archived" in archived.as_log_line()
     assert "updated" in refreshed.as_log_line()
     assert "already archived" in present.as_log_line()
-    assert "DUPLICATE CONTENT" in duplicate.as_log_line() and "duplicate" in duplicate.as_log_line()
-    assert "FAILED" in failed.as_log_line() and "boom" in failed.as_log_line()
+    assert "DUPLICATE CONTENT" in duplicate.as_log_line()
+    assert "duplicate" in duplicate.as_log_line()
+    assert "FAILED" in failed.as_log_line()
+    assert "boom" in failed.as_log_line()
 
 
 def test_dest_dir_organized_by_year_month_from_window_date(tmp_path: Path) -> None:

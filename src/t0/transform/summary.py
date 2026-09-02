@@ -147,7 +147,10 @@ def _parse_garmin_time(raw: Any, *, field_name: str, activity_id: int) -> dateti
         )
         raise ValueError(msg)
     try:
-        return datetime.strptime(str(raw), _GARMIN_TIME_FORMAT)
+        # Naive by design: Garmin's "%Y-%m-%d %H:%M:%S" carries no offset; the local/GMT
+        # pair exists precisely to DERIVE tz_offset_s below (subtracting aware datetimes
+        # would silently convert, not measure the offset).
+        return datetime.strptime(str(raw), _GARMIN_TIME_FORMAT)  # noqa: DTZ007
     except ValueError as exc:
         msg = (
             f"activity {activity_id}: field '{field_name}'={raw!r} does not match "

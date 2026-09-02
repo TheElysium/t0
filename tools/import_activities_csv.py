@@ -229,6 +229,21 @@ def _resolve_columns(header: Sequence[str]) -> _Columns:
     )
 
 
+def _ngp_speed_mps(
+    record: Sequence[str], cols: _Columns, discipline: str
+) -> tuple[float | None, bool]:
+    """run_gap reads ngp_speed_mps. The export's own grade-adjusted pace is preferred over
+    the raw pace; gap_applied records honestly which of the two was used. Neither is read
+    outside running: the column holds km/h for cycling and skiing, and min/100 m for
+    swimming (see module docstring)."""
+    if discipline != "run":
+        return None, False
+    gap = _pace_to_mps(record[cols.gap_pace])
+    if gap is not None:
+        return gap, True
+    return _pace_to_mps(record[cols.avg_pace]), False
+
+
 def build_activity_row(
     record: Sequence[str], cols: _Columns, *, athlete_id: int, tz: ZoneInfo, line_no: int
 ) -> ActivityRow:
@@ -250,7 +265,9 @@ def build_activity_row(
     if raw_date is None:
         msg = f"line {line_no}: empty date."
         raise CsvImportError(msg)
-    naive_local = datetime.strptime(raw_date, "%Y-%m-%d %H:%M:%S")
+    # Naive by design: the CSV carries no offset; ``tz`` (operator-provided) is attached
+    # explicitly right below.
+    naive_local = datetime.strptime(raw_date, "%Y-%m-%d %H:%M:%S")  # noqa: DTZ007
     aware_local = naive_local.replace(tzinfo=tz)
     offset = aware_local.utcoffset()
     if offset is None:  # pragma: no cover - ZoneInfo always resolves an offset
@@ -276,19 +293,8 @@ def build_activity_row(
         if reference_s > 0:
             avg_speed_mps = distance_m / reference_s
 
-    # run_gap reads ngp_speed_mps. The export's own grade-adjusted pace is preferred over
-    # the raw pace; gap_applied records honestly which of the two was used. Neither is read
-    # outside running: the column holds km/h for cycling and skiing, and min/100 m for
-    # swimming (see module docstring).
     discipline = DISCIPLINE_BY_SPORT_CODE[sport_code]
-    ngp_speed_mps: float | None = None
-    gap_applied = False
-    if discipline == "run":
-        gap = _pace_to_mps(record[cols.gap_pace])
-        if gap is not None:
-            ngp_speed_mps, gap_applied = gap, True
-        else:
-            ngp_speed_mps = _pace_to_mps(record[cols.avg_pace])
+    ngp_speed_mps, gap_applied = _ngp_speed_mps(record, cols, discipline)
 
     np_watts = _num(record[cols.np_watts])
     swim_time_s = moving_s if discipline == "swim" else None

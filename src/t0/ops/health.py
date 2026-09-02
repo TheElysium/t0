@@ -253,19 +253,19 @@ def format_health_report(report: HealthReport) -> str:
 
     lines.append("")
     lines.append(f"Failed windows ({len(report.failed_windows)}):")
-    for fw in report.failed_windows[:_MAX_LISTED_LINES]:
-        lines.append(
-            f"  {fw.endpoint} / {fw.window_date} " f"(attempts={fw.attempts}): {fw.last_error}"
-        )
+    lines.extend(
+        f"  {fw.endpoint} / {fw.window_date} " f"(attempts={fw.attempts}): {fw.last_error}"
+        for fw in report.failed_windows[:_MAX_LISTED_LINES]
+    )
     if len(report.failed_windows) > _MAX_LISTED_LINES:
         lines.append(f"  ... and {len(report.failed_windows) - _MAX_LISTED_LINES} more.")
 
     lines.append("")
     lines.append(f"Stuck in_progress windows ({len(report.stuck_windows)}):")
-    for sw in report.stuck_windows[:_MAX_LISTED_LINES]:
-        lines.append(
-            f"  {sw.endpoint} / {sw.window_date} " f"(last attempt {sw.last_attempted_at})"
-        )
+    lines.extend(
+        f"  {sw.endpoint} / {sw.window_date} " f"(last attempt {sw.last_attempted_at})"
+        for sw in report.stuck_windows[:_MAX_LISTED_LINES]
+    )
     if len(report.stuck_windows) > _MAX_LISTED_LINES:
         lines.append(f"  ... and {len(report.stuck_windows) - _MAX_LISTED_LINES} more.")
 

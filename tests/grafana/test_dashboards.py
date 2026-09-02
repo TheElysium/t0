@@ -265,8 +265,7 @@ def _substitute_grafana_macros(sql: str) -> str:
     directly in argument).
     """
     sql = re.sub(r"\$__timeFilter\(([^)]*)\)", r"(\1 >= now() AND \1 <= now())", sql)
-    sql = re.sub(r"\$\w+", "'x'", sql)  # variables de templating ($athlete_id, $kind...)
-    return sql
+    return re.sub(r"\$\w+", "'x'", sql)  # variables de templating ($athlete_id, $kind...)
 
 
 def _check_query_against_schema(sql: str) -> list[str]:
@@ -307,11 +306,12 @@ def test_dashboards_directory_contains_files() -> None:
 def test_each_dashboard_is_valid_json_with_expected_keys(path: Path) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
 
-    assert isinstance(data.get("uid"), str) and data["uid"], f"{path.name}: missing uid"
-    assert isinstance(data.get("title"), str) and data["title"], f"{path.name}: missing title"
-    assert (
-        isinstance(data.get("panels"), list) and data["panels"]
-    ), f"{path.name}: panels must be non-empty list"
+    assert isinstance(data.get("uid"), str), f"{path.name}: uid must be a string"
+    assert data["uid"], f"{path.name}: missing uid"
+    assert isinstance(data.get("title"), str), f"{path.name}: title must be a string"
+    assert data["title"], f"{path.name}: missing title"
+    assert isinstance(data.get("panels"), list), f"{path.name}: panels must be a list"
+    assert data["panels"], f"{path.name}: panels must be non-empty list"
 
     for panel in data["panels"]:
         assert "id" in panel, f"{path.name}: panel missing id"
@@ -339,9 +339,9 @@ def test_each_dashboard_query_references_only_known_objects(
     assert sql_strings, f"{path.name}: no SQL queries found (unexpected)"
 
     all_errors: list[str] = []
-    for sql in sql_strings:
-        for err in _check_query_against_schema(sql):
-            all_errors.append(f"{err}\n  query: {sql}")
+    all_errors.extend(
+        f"{err}\n  query: {sql}" for sql in sql_strings for err in _check_query_against_schema(sql)
+    )
 
     assert not all_errors, f"{path.name}:\n" + "\n".join(all_errors)
 

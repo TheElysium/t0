@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "backfill-status":
         conn = connect(dsn)
         try:
-            today = args.today if args.today is not None else datetime.now().date()
+            today = args.today if args.today is not None else datetime.now().astimezone().date()
             progress = backfill_progress(
                 cast("DBConnection", conn),
                 endpoints=args.endpoints,

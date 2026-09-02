@@ -160,7 +160,8 @@ def _daily_fire_times(schedule: str) -> tuple[int, ...]:
         "*",
         "*",
     ), f"non-daily schedule: {schedule!r}"
-    assert "/" not in hour and "-" not in hour, f"non-fixed hours: {schedule!r}"
+    assert "/" not in hour, f"non-fixed hours: {schedule!r}"
+    assert "-" not in hour, f"non-fixed hours: {schedule!r}"
     return tuple(sorted(int(h) * 60 + int(minute) for h in hour.split(",")))
 
 

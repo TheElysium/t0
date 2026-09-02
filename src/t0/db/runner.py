@@ -387,18 +387,18 @@ def format_status(report: Status) -> str:
     """Plain text rendering of :class:`Status`, used by the CLI."""
     lines = ["Applied migrations:"]
     if report.applied:
-        for row in report.applied:
-            lines.append(f"  [{row.version:03d}] {row.name} — {row.applied_at.isoformat()}")
+        lines.extend(
+            f"  [{row.version:03d}] {row.name} — {row.applied_at.isoformat()}"
+            for row in report.applied
+        )
     else:
         lines.append("  (none)")
     lines.append("Pending migrations:")
     if report.pending:
-        for m in report.pending:
-            lines.append(f"  [{m.version:03d}] {m.name}")
+        lines.extend(f"  [{m.version:03d}] {m.name}" for m in report.pending)
     else:
         lines.append("  (none)")
     if report.drift:
         lines.append("Drift detected:")
-        for issue in report.drift:
-            lines.append(f"  ! {issue}")
+        lines.extend(f"  ! {issue}" for issue in report.drift)
     return "\n".join(lines)

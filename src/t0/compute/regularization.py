@@ -75,6 +75,29 @@ def detect_gaps(elapsed_s: Sequence[int]) -> list[Gap]:
     return gaps
 
 
+def _interpolated(prev_v: float, curr_v: float, gap: int) -> tuple[list[float], list[bool]]:
+    """Linear interpolation of a short gap (§1.3 point 1): ``gap`` samples."""
+    return (
+        [prev_v + (curr_v - prev_v) * (k / (gap + 1)) for k in range(1, gap + 1)],
+        [True] * gap,
+    )
+
+
+def _long_gap(
+    first_missing: int,
+    last_missing: int,
+    *,
+    pause_intervals: Collection[tuple[int, int]],
+    fill_value: float,
+) -> tuple[list[float], list[bool], bool]:
+    """Samples for a long gap: none + ``True`` flag if fully paused (§1.3 point 2),
+    else ``fill_value`` imputation (point 3)."""
+    if any(start <= first_missing and last_missing <= end for start, end in pause_intervals):
+        return [], [], True
+    gap = last_missing - first_missing + 1
+    return [fill_value] * gap, [True] * gap, False
+
+
 def regularize_series(
     elapsed_s: Sequence[int],
     values: Sequence[float],
@@ -107,9 +130,6 @@ def regularize_series(
     if not elapsed_s:
         return RegularizedSeries((), (), 0, 0, 0, "unknown", ())
 
-    def fully_paused(first_missing: int, last_missing: int) -> bool:
-        return any(start <= first_missing and last_missing <= end for start, end in pause_intervals)
-
     out_values: list[float] = [values[0]]
     out_imputed: list[bool] = [False]
     imputed_seconds = 0
@@ -127,21 +147,22 @@ def regularize_series(
             raise ValueError(msg)
         gap = curr_t - prev_t - 1
         if 0 < gap <= max_interp_gap_s:
-            for k in range(1, gap + 1):
-                frac = k / (gap + 1)
-                out_values.append(prev_v + (curr_v - prev_v) * frac)
-                out_imputed.append(True)
-                imputed_seconds += 1
+            samples, imputed = _interpolated(prev_v, curr_v, gap)
+            out_values.extend(samples)
+            out_imputed.extend(imputed)
+            imputed_seconds += gap
         elif gap > max_interp_gap_s:
-            if fully_paused(prev_t + 1, curr_t - 1):
+            samples, imputed, paused = _long_gap(
+                prev_t + 1, curr_t - 1, pause_intervals=pause_intervals, fill_value=fill_value
+            )
+            if paused:
                 excised_seconds += gap
                 # curr_v added next: output index is first of spliced segment.
                 segment_boundaries.append(len(out_values))
             else:
-                for _ in range(gap):
-                    out_values.append(fill_value)
-                    out_imputed.append(True)
-                    imputed_seconds += 1
+                out_values.extend(samples)
+                out_imputed.extend(imputed)
+                imputed_seconds += gap
         out_values.append(curr_v)
         out_imputed.append(False)
 

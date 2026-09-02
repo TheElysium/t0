@@ -53,7 +53,8 @@ def test_get_pmc_rounds_and_never_elides_flags(fake_runner: FakeRunner) -> None:
     # The DESC LIMIT window is on the recent side; presentation stays chronological.
     rows = result["rows"]
     assert [row["date"] for row in rows] == ["2026-08-30", "2026-08-31"]
-    assert rows[1]["tss"] is None and rows[1]["ctl"] is None
+    assert rows[1]["tss"] is None
+    assert rows[1]["ctl"] is None
     assert rows[0]["tss"] == 61.3
     assert rows[0]["ctl"] == 42.01
     assert rows[0]["tsb_same_day"] == -13.01

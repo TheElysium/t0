@@ -17,7 +17,8 @@ import pytest
 
 _MODULE_PATH = Path(__file__).resolve().parents[2] / "tools" / "import_activities_csv.py"
 _SPEC = importlib.util.spec_from_file_location("_import_activities_csv", _MODULE_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
+assert _SPEC is not None
+assert _SPEC.loader is not None
 importer = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = importer
 _SPEC.loader.exec_module(importer)
