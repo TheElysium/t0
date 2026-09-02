@@ -42,6 +42,9 @@ spec:
             app.kubernetes.io/component: ops-backfill-status
         spec:
           restartPolicy: OnFailure
+          # No <SERVICE>_HOST/_PORT env injection: a Service named t0-mcp would
+          # shadow T0_MCP_PORT (Settings env prefix) with a tcp:// URL.
+          enableServiceLinks: false
           automountServiceAccountToken: false
           {{- include "t0.scheduling" . | nindent 10 }}
           # Same private GHCR image as the ingest Deployment: same pull secret,

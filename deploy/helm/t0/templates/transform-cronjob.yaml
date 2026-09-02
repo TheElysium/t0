@@ -54,6 +54,9 @@ spec:
           restartPolicy: OnFailure
           # This Job only talks to PostgreSQL and the PVC: no Garmin credentials,
           # no service account token.
+          # No <SERVICE>_HOST/_PORT env injection: a Service named t0-mcp would
+          # shadow T0_MCP_PORT (Settings env prefix) with a tcp:// URL.
+          enableServiceLinks: false
           automountServiceAccountToken: false
           {{- include "t0.scheduling" . | nindent 10 }}
           # Same private GHCR image as the ingest Deployment: same pull secret,

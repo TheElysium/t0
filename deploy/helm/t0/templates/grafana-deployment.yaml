@@ -26,6 +26,9 @@ spec:
         checksum/postgresql-secret: {{ include (print $.Template.BasePath "/postgresql-secret.yaml") . | sha256sum }}
         {{- end }}
     spec:
+      # No <SERVICE>_HOST/_PORT env injection: a Service named t0-mcp would
+      # shadow T0_MCP_PORT (Settings env prefix) with a tcp:// URL.
+      enableServiceLinks: false
       automountServiceAccountToken: false
       {{- include "t0.scheduling" . | nindent 6 }}
       securityContext:
