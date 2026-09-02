@@ -10,12 +10,12 @@ import uvicorn
 from t0.logging_setup import configure_logging
 from t0.mcp.db import Reader
 from t0.mcp.server import BIND_HOST, create_app
-from t0.settings import get_settings
+from t0.settings import get_mcp_settings
 
 if TYPE_CHECKING:
     from pydantic import SecretStr
 
-    from t0.settings import Settings
+    from t0.settings import McpSettings
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ _UNCONFIGURED_MESSAGE = (
 )
 
 
-def _require_mcp_settings(settings: Settings) -> tuple[SecretStr, SecretStr]:
+def _require_mcp_settings(settings: McpSettings) -> tuple[SecretStr, SecretStr]:
     """Refuse to start without the token or the read-only DSN; names only."""
     token = settings.mcp_bearer_token
     dsn = settings.mcp_postgres_dsn
@@ -37,7 +37,9 @@ def _require_mcp_settings(settings: Settings) -> tuple[SecretStr, SecretStr]:
 def main() -> int:
     """Build and serve the MCP app. Returns a process exit code."""
     configure_logging()
-    settings = get_settings()
+    # MCP scope, not the full Settings: this pod holds no ingest credentials
+    # by design, so only the T0_MCP_* variables are validated here.
+    settings = get_mcp_settings()
     try:
         _token, dsn = _require_mcp_settings(settings)
     except RuntimeError as exc:

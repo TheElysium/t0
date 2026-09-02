@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from starlette.types import ASGIApp
 
     from t0.mcp.db import Reader
-    from t0.settings import Settings
+    from t0.settings import McpSettings
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class McpConfigError(RuntimeError):
     """MCP-specific configuration missing. Message names variables, never values."""
 
 
-def create_mcp_server(settings: Settings, reader: Reader) -> FastMCP:
+def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
     """Build the FastMCP server with exactly the seven curated tools."""
     mcp = FastMCP(
         "t0",
@@ -141,7 +141,7 @@ def create_mcp_server(settings: Settings, reader: Reader) -> FastMCP:
     return mcp
 
 
-def create_app(settings: Settings, reader: Reader) -> ASGIApp:
+def create_app(settings: McpSettings, reader: Reader) -> ASGIApp:
     """Assemble the ASGI app: MCP at /mcp, probes beside it, Bearer in front."""
     if settings.mcp_bearer_token is None:
         raise McpConfigError("T0_MCP_BEARER_TOKEN is required: refusing to start unauthenticated.")
