@@ -358,3 +358,34 @@ rather than a constant, and having eight copies of that choice was untenable.
   value: >-
     postgresql://$(PGUSER):$(PGPASSWORD)@{{ include "t0.postgresql.host" . }}:{{ include "t0.postgresql.port" . }}/{{ .Values.postgresql.auth.database }}
 {{- end -}}
+
+{{/*
+Exposure safeguard: refuse the placeholder `parentRefs` shipped in values.yaml.
+
+Arguments (dict):
+  - `key`        the values path, quoted back so the reader knows what to fix
+  - `parentRefs` the configured list
+  - `hostname`   the hostname the route publishes, for the message
+
+Why this exists: `hostname` is already guarded, but `parentRefs` was not, and it
+is the more treacherous half. The chart default is the literal `<gateway-name>`,
+which the API server ACCEPTS -- so the HTTPRoute is created, points at a Gateway
+that does not exist, and no controller ever reconciles it. Worse, its `status`
+keeps whatever the previous generation was granted and still reads `Accepted`,
+while the real proxy has dropped the virtual host and answers 404 on every path
+of the hostname. Nothing anywhere says "misconfigured"; the site is just gone.
+That is precisely the failure this chart refuses to ship silently.
+*/}}
+{{- define "t0.assertGatewayParentRefs" -}}
+{{- $key := .key -}}
+{{- $hostname := .hostname -}}
+{{- if not .parentRefs -}}
+{{- fail (printf "\n\nERROR: %s is empty.\n\nAn HTTPRoute with no parentRefs attaches to no Gateway: it is created, it is\nnever routed, and the Gateway answers 404 for %s. Declare the Gateway that\nshould serve it:\n\n  %s:\n    - name: <the Gateway resource name>\n      namespace: gateway-system\n      sectionName: http\n\nList the candidates with `kubectl get gateway -A`.\n" .key .hostname .key) -}}
+{{- end -}}
+{{- range .parentRefs -}}
+{{- $name := .name | toString -}}
+{{- if or (contains "<" $name) (contains ">" $name) -}}
+{{- fail (printf "\n\nERROR: %s still carries the placeholder name %q.\n\nThat is the value shipped in values.yaml, not a Gateway. Kubernetes accepts it,\nso the HTTPRoute IS created and its status may even keep reading `Accepted` from\nan earlier generation -- but no Gateway matches, the virtual host disappears and\nthe hostname answers 404 on EVERY path. Replace it with the real name:\n\n  kubectl get gateway -A\n\nThen set the Gateway that should serve %s.\n" $key $name $hostname) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

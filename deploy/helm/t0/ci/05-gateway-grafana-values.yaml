@@ -17,3 +17,7 @@ grafana:
   gateway:
     enabled: true
     hostname: t0.example.internal
+    parentRefs:
+      - name: example-gateway
+        namespace: gateway-system
+        sectionName: http

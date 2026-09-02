@@ -3,6 +3,7 @@
 {{- if not $hostname }}
 {{- fail "\n\nERROR: mcp.gateway.enabled = true but mcp.gateway.hostname is empty.\n\nAn HTTPRoute publishes the MCP under the hostname it declares: an implicit default\nwould silently expose it under a name nobody chose. Set the hostname explicitly:\n\n  mcp:\n    gateway:\n      enabled: true\n      hostname: t0-mcp.example.internal\n\nThe hostname must be covered by the wildcard DNS record pointing at the Gateway\naddress (e.g. *.example.internal -> <gateway-address>). The MCP stays behind its\nBearer token either way -- the hostname only decides WHERE it answers.\n" }}
 {{- end }}
+{{- include "t0.assertGatewayParentRefs" (dict "key" "mcp.gateway.parentRefs" "parentRefs" .Values.mcp.gateway.parentRefs "hostname" $hostname) }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

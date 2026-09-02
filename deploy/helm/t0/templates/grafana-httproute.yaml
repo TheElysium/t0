@@ -3,6 +3,7 @@
 {{- if not $hostname }}
 {{- fail "\n\nERROR: grafana.gateway.enabled = true but grafana.gateway.hostname is empty.\n\nAn HTTPRoute publishes Grafana under the hostname it declares: an implicit default\nwould silently expose it under a name nobody chose. Set the hostname explicitly:\n\n  grafana:\n    gateway:\n      enabled: true\n      hostname: t0.example.internal\n\nThe hostname must be covered by the wildcard DNS record pointing at the Gateway\naddress (e.g. *.example.internal -> <gateway-address>).\n" }}
 {{- end }}
+{{- include "t0.assertGatewayParentRefs" (dict "key" "grafana.gateway.parentRefs" "parentRefs" .Values.grafana.gateway.parentRefs "hostname" $hostname) }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
