@@ -183,6 +183,7 @@ EXPECTED_MIGRATION_FILES = [
     "018_baselines.sql",
     "019_signals.sql",
     "020_mcp_ro_grants.sql",
+    "021_mcp_core_grants.sql",
 ]
 
 

@@ -49,9 +49,8 @@ class McpSettings(BaseSettings):
         extra="ignore",
     )
 
-    # MCP server (src/t0/mcp). All optional: ingest and the scheduler share
-    # Settings below; the MCP entrypoint refuses to start when token or DSN
-    # are absent.
+    # All optional: ingest and the scheduler share Settings below; the MCP
+    # entrypoint refuses to start when token or DSN are absent.
     mcp_bearer_token: SecretStr | None = Field(
         default=None,
         description="Static Bearer token required by the MCP server (Authorization header).",
@@ -138,13 +137,14 @@ class Settings(McpSettings):
     )
 
 
-def _env_var_name(field_name: str) -> str:
-    """Environment variable name for a field."""
-    field = McpSettings.model_fields.get(field_name)
-    alias = getattr(field, "validation_alias", None) if field is not None else None
-    if isinstance(alias, str):
-        return alias
-    return f"{ENV_PREFIX}{field_name.upper()}"
+def _env_var_name(settings_cls: type[_SettingsT], loc: str) -> str:
+    """Environment variable name for a validation-error location.
+
+    Pydantic reports the validation alias as the location for aliased fields:
+    report it verbatim, never prefixed.
+    """
+    aliased = any(f.validation_alias == loc for f in settings_cls.model_fields.values())
+    return loc if aliased else f"{ENV_PREFIX}{loc.upper()}"
 
 
 def _load(settings_cls: type[_SettingsT]) -> _SettingsT:
@@ -156,7 +156,8 @@ def _load(settings_cls: type[_SettingsT]) -> _SettingsT:
         return settings_cls()  # required fields come from the environment
     except ValidationError as exc:
         causes = ", ".join(
-            f"{_env_var_name(str(error['loc'][0]) if error['loc'] else '?')} [{error['type']}]"
+            f"{_env_var_name(settings_cls, str(error['loc'][0]) if error['loc'] else '?')}"
+            f" [{error['type']}]"
             for error in exc.errors()
         )
         raise SettingsError(

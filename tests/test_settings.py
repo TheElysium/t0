@@ -8,13 +8,14 @@ message, as these three paths end up in container logs.
 
 from __future__ import annotations
 
+import re
 import traceback
 from pathlib import Path
 
 import pytest
 
 import t0
-from t0.settings import Settings, SettingsError, get_settings
+from t0.settings import Settings, SettingsError, get_mcp_settings, get_settings
 
 FAKE_TOKENS_DIR = "/opt/t0-test/garmin-tokens"
 FAKE_FIT_ARCHIVE_DIR = "/opt/t0-test/fit-archive"
@@ -22,8 +23,17 @@ FAKE_USERNAME = "athlete@example.invalid"
 FAKE_PASSWORD = "canari-mot-de-passe-factice"
 FAKE_DSN_PASSWORD = "canari-mot-de-passe-base"
 FAKE_DSN = f"postgresql://user:{FAKE_DSN_PASSWORD}@localhost:5432/db"
+MCP_TOKEN_CANARY = "canari-jeton-mcp"
+MCP_DSN_CANARY = "postgresql://t0_mcp_ro:canari-dsn-mcp@localhost:5432/db"
 
 CANARIES = (FAKE_PASSWORD, FAKE_DSN_PASSWORD, FAKE_USERNAME)
+INGEST_VARIABLES = (
+    "T0_POSTGRES_DSN",
+    "GARMINTOKENS",
+    "T0_FIT_ARCHIVE_PATH",
+    "T0_GARMIN_USERNAME",
+    "T0_GARMIN_PASSWORD",
+)
 
 
 def _set_full_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -78,7 +88,8 @@ def test_missing_variable_is_fatal(monkeypatch: pytest.MonkeyPatch, missing: str
     with pytest.raises(SettingsError) as excinfo:
         get_settings()
 
-    assert missing in str(excinfo.value)
+    # Word-boundary match: "GARMINTOKENS" must not pass via "T0_GARMINTOKENS".
+    assert re.search(rf"\b{re.escape(missing)} \[", str(excinfo.value))
 
 
 @pytest.mark.parametrize(
@@ -186,3 +197,52 @@ def test_mcp_secrets_never_appear_in_repr_or_serialization(
     for rendering in renderings:
         assert "canari-jeton-mcp" not in rendering
         assert "canari-dsn-mcp" not in rendering
+
+
+def test_get_mcp_settings_loads_without_ingest_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP pod carries no ingest credential: validation must not demand one."""
+    for variable in INGEST_VARIABLES:
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("T0_MCP_BEARER_TOKEN", MCP_TOKEN_CANARY)
+    monkeypatch.setenv("T0_MCP_POSTGRES_DSN", MCP_DSN_CANARY)
+
+    settings = get_mcp_settings()
+
+    assert settings.mcp_bearer_token is not None
+    assert settings.mcp_postgres_dsn is not None
+    assert settings.mcp_bearer_token.get_secret_value() == MCP_TOKEN_CANARY
+    assert settings.mcp_postgres_dsn.get_secret_value() == MCP_DSN_CANARY
+    assert settings.mcp_port == 8000
+
+
+def test_get_mcp_settings_ignores_ingest_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """extra="ignore": an MCP process run where ingest variables exist stays MCP-scoped."""
+    _set_full_environment(monkeypatch)
+
+    settings = get_mcp_settings()
+
+    assert settings.mcp_bearer_token is None
+    assert not hasattr(settings, "postgres_dsn")
+
+
+def test_mcp_validation_error_never_reveals_a_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same leak contract as get_settings, exercised on the MCP scope."""
+    monkeypatch.setenv("T0_MCP_BEARER_TOKEN", MCP_TOKEN_CANARY)
+    monkeypatch.setenv("T0_MCP_POSTGRES_DSN", MCP_DSN_CANARY)
+    monkeypatch.setenv("T0_MCP_PORT", "not-a-port")
+
+    with pytest.raises(SettingsError) as excinfo:
+        get_mcp_settings()
+
+    rendered = "".join(
+        traceback.format_exception(type(excinfo.value), excinfo.value, excinfo.value.__traceback__)
+    )
+    for canary in (MCP_TOKEN_CANARY, MCP_DSN_CANARY):
+        assert canary not in rendered
+        assert canary not in str(excinfo.value)

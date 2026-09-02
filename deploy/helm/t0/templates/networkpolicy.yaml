@@ -103,4 +103,29 @@ spec:
         - port: 443
           protocol: TCP
     {{- end }}
+---
+# MCP: outbound to PostgreSQL and DNS only -- the tools are curated reads,
+# the server never calls out. No Ingress rule, same posture as Grafana above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "t0.fullname" . }}-mcp
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "t0.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "t0.postgresqlEgressRule" . | nindent 4 }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
 {{- end }}

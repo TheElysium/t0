@@ -37,8 +37,6 @@ def _require_mcp_settings(settings: McpSettings) -> tuple[SecretStr, SecretStr]:
 def main() -> int:
     """Build and serve the MCP app. Returns a process exit code."""
     configure_logging()
-    # MCP scope, not the full Settings: this pod holds no ingest credentials
-    # by design, so only the T0_MCP_* variables are validated here.
     settings = get_mcp_settings()
     try:
         _token, dsn = _require_mcp_settings(settings)

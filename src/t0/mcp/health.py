@@ -29,7 +29,8 @@ def build_readyz(reader: Reader) -> Callable[[Request], Awaitable[JSONResponse]]
         try:
             await asyncio.to_thread(reader.check)
         except QueryError:
-            return JSONResponse({"status": "database unreachable"}, status_code=503)
+            # No dependency named: /readyz is unauthenticated (kubelet probes).
+            return JSONResponse({"status": "unavailable"}, status_code=503)
         return JSONResponse({"status": "ok"})
 
     return readyz
