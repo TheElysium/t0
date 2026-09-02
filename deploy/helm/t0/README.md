@@ -369,7 +369,21 @@ construction, that exposing the MCP never exposes the unauthenticated ingest
 upload endpoint.
 
 The MCP gives an LLM read-only access to the training marts through curated
-tools -- no raw SQL, no writes.
+tools -- no raw SQL, no writes:
+
+| Tool | Reads |
+| --- | --- |
+| `get_pmc` | `mart.pmc` (CTL/ATL/TSB) |
+| `list_activities` | `mart.activity_wide` |
+| `get_activity` | `mart.activity_wide` |
+| `get_power_curve` | `mart.power_curve_best` |
+| `get_wellness` | `mart.wellness_baseline` |
+| `get_ramp_risk` | `mart.ramp_risk` |
+| `get_coach_flags` | `mart.coach_flags` |
+| `get_thresholds` | `core.threshold` |
+
+Multi-row tools answer `{"rows": [...], "truncated": bool}`. Filters validate
+their vocabulary and fail loudly on an unknown value -- never a silent `[]`.
 
 ### Required secrets
 
