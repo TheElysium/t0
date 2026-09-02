@@ -52,6 +52,7 @@ def test_metrics_count_statuses_and_cap_path_labels(mcp_app: Any) -> None:
     )
 
 
+@pytest.mark.anyio
 async def test_metrics_middleware_passes_non_http_scopes_through() -> None:
     recorded: list[str] = []
 

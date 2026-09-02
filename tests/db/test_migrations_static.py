@@ -184,6 +184,7 @@ EXPECTED_MIGRATION_FILES = [
     "019_signals.sql",
     "020_mcp_ro_grants.sql",
     "021_mcp_core_grants.sql",
+    "022_mart_activity_wide_swim_time.sql",
 ]
 
 

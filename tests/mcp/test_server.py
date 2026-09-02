@@ -21,6 +21,7 @@ EXPECTED_TOOLS = (
     "get_activity",
     "get_power_curve",
     "get_wellness",
+    "get_ramp_risk",
     "get_coach_flags",
     "get_thresholds",
 )
@@ -59,7 +60,9 @@ def test_instructions_name_every_tool_and_every_flag() -> None:
         "has_estimated_load",
         "data_quality",
         "is_parent",
-        "tss_is_canonical",
+        "truncated",
+        "swim_time_s",
+        "efficiency_factor_unit",
         "css_estimated",
     ):
         assert flag in INSTRUCTIONS, f"instructions never mention {flag}"

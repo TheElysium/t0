@@ -1,4 +1,4 @@
-"""MCP server assembly: seven curated tools over the marts, streamable HTTP at /mcp."""
+"""MCP server assembly: eight curated tools over the marts, streamable HTTP at /mcp."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class McpConfigError(RuntimeError):
 
 
 def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
-    """Build the FastMCP server with exactly the seven curated tools."""
+    """Build the FastMCP server with exactly the eight curated tools."""
     mcp = FastMCP(
         "t0",
         instructions=INSTRUCTIONS,
@@ -52,7 +52,7 @@ def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
         start_date: str | None = None,
         end_date: str | None = None,
         athlete_id: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Performance Management Chart: daily CTL (42 d), ATL (7 d), TSB,
         with ctl_reliable and has_estimated_load flags. Dense calendar --
         rest days are rows, not absences. Chronological; with no date range,
@@ -71,10 +71,12 @@ def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
         start_date: str | None = None,
         end_date: str | None = None,
         sport_code: str | None = None,
-    ) -> list[dict[str, Any]]:
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         """Recent sessions, newest first, with tss, tss_method,
-        intensity_factor, data_quality and is_parent. Multisport parents are
-        never returned: count legs, never legs + parent."""
+        intensity_factor, data_quality and is_parent. An unknown sport_code
+        is an ERROR listing the valid values -- never a silent empty list.
+        Multisport parents are never returned: count legs, never legs + parent."""
         return await asyncio.to_thread(
             handlers.list_activities,
             reader,
@@ -82,6 +84,7 @@ def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
             start_date=start_date,
             end_date=end_date,
             sport_code=sport_code,
+            limit=limit,
         )
 
     @mcp.tool()
@@ -91,18 +94,28 @@ def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
         return await asyncio.to_thread(handlers.get_activity, reader, activity_id=activity_id)
 
     @mcp.tool()
-    async def get_power_curve(kind: str | None = None) -> list[dict[str, Any]]:
+    async def get_power_curve(
+        kind: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
         """All-time record curve (best value per duration), by curve type;
-        date = the day the record was set."""
+        date = the day the record was set. Dates narrow the contribution
+        window (progression tracking), not the record values themselves."""
         return await asyncio.to_thread(
-            handlers.get_power_curve, reader, max_rows=max_rows, kind=kind
+            handlers.get_power_curve,
+            reader,
+            max_rows=max_rows,
+            kind=kind,
+            start_date=start_date,
+            end_date=end_date,
         )
 
     @mcp.tool()
     async def get_wellness(
         start_date: str | None = None,
         end_date: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Nightly HRV and resting HR with their 28-day rolling median
         baselines and deviations -- deviations are the actionable quantity.
         Chronological; with no date range, the LATEST max_rows nights."""
@@ -118,12 +131,29 @@ def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
     async def get_coach_flags(
         start_date: str | None = None,
         end_date: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Fired amber/red coaching rules, one row per (day, rule), with the
         triggering numbers in detail. Chronological; with no date range, the
         LATEST max_rows days. Advisory only, never a decision."""
         return await asyncio.to_thread(
             handlers.get_coach_flags,
+            reader,
+            max_rows=max_rows,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    @mcp.tool()
+    async def get_ramp_risk(
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Per-day ramp risk over the dense PMC calendar: dCTL/week, Foster
+        monotony and strain, and the 7-day estimated-load share (a high share
+        discounts the CTL movement). Chronological; with no date range, the
+        LATEST max_rows days."""
+        return await asyncio.to_thread(
+            handlers.get_ramp_risk,
             reader,
             max_rows=max_rows,
             start_date=start_date,

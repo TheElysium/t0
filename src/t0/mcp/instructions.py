@@ -18,9 +18,10 @@ number without its caveat:
   progression.
 - tss_method (list_activities/get_activity): knowing that a TSS comes from HR
   not power changes its interpretation.
-- tss_is_canonical: the TSS value is the canonical one, resolved by the
-  declarative fallback matrix "power else HR else RPE"; non-canonical method
-  rows are never summed or displayed.
+- truncated (every multi-row tool): the response envelope is
+  {"rows": [...], "truncated": bool}. truncated=true means the window may
+  extend beyond the returned rows -- NEVER treat a capped window as the full
+  history; narrow the date range or raise list_activities' limit.
 - has_estimated_load (get_pmc): signals that at least one session of the day
   has estimated load (HR or RPE) not measured.
 - data_quality / needs_manual_rpe (list_activities/get_activity): surface data
@@ -58,4 +59,21 @@ Semantics to respect when interpreting:
   go/no-go, never decides it. Red prescription: aerobic-only or rest until two
   green mornings. dCTL/week bands: <=3 sustainable, 3-5 productive-but-watch,
   >5 caution, >8 red.
+- Ramp risk (get_ramp_risk): dctl_per_week, Foster monotony and strain, and
+  estimated_share_7d -- the share of the week's TSS from estimated load. A
+  share >30% discounts the CTL movement, per the PMC rule above.
+- Vocabulary: sport_code values (cycling, running, lap_swimming, ...) and
+  sport labels (Cycling, Run, Swim) are TWO disjoint vocabularies. Filters
+  take sport_code only; an invalid value is an explicit error -- never guess
+  a mapping or conclude "no data" from an empty result.
+
+Data semantics:
+
+- swim_time_s (list_activities/get_activity): ACTIVE swim time, rest-at-wall
+  excluded -- the denominator of swim sTSS and IF. duration_s is elapsed
+  time; deriving swim intensity from duration_s overstates load by 30-50% on
+  intervals. distance_m is null (not zero) for indoor rides.
+- efficiency_factor: 3 decimals, and NOT comparable across sports --
+  efficiency_factor_unit says which family: "m/s per bpm" (running,
+  speed-based) vs "W per bpm" (cycling, power-based).
 """

@@ -46,11 +46,12 @@ def _pmc_rows() -> list[dict[str, Any]]:
 def test_get_pmc_rounds_and_never_elides_flags(fake_runner: FakeRunner) -> None:
     fake_runner.queue("FROM MART.PMC", _pmc_rows())
 
-    rows = handlers.get_pmc(
+    result = handlers.get_pmc(
         fake_runner, max_rows=MAX_ROWS, start_date="2026-08-01", end_date="2026-08-31"
     )
 
     # The DESC LIMIT window is on the recent side; presentation stays chronological.
+    rows = result["rows"]
     assert [row["date"] for row in rows] == ["2026-08-30", "2026-08-31"]
     assert rows[1]["tss"] is None and rows[1]["ctl"] is None
     assert rows[0]["tss"] == 61.3
@@ -60,6 +61,7 @@ def test_get_pmc_rounds_and_never_elides_flags(fake_runner: FakeRunner) -> None:
     assert rows[0]["has_estimated_load"] is True
     assert rows[1]["ctl_reliable"] is True
     assert rows[1]["has_estimated_load"] is None
+    assert result["truncated"] is False
 
 
 def test_every_handler_binds_the_safety_limit(fake_runner: FakeRunner) -> None:
@@ -82,6 +84,10 @@ def test_every_handler_binds_the_safety_limit(fake_runner: FakeRunner) -> None:
             lambda: handlers.get_coach_flags(fake_runner, max_rows=MAX_ROWS),
         ),
         (
+            "FROM MART.RAMP_RISK",
+            lambda: handlers.get_ramp_risk(fake_runner, max_rows=MAX_ROWS),
+        ),
+        (
             "FROM CORE.THRESHOLD",
             lambda: handlers.get_thresholds(fake_runner, max_rows=MAX_ROWS),
         ),
@@ -94,48 +100,51 @@ def test_every_handler_binds_the_safety_limit(fake_runner: FakeRunner) -> None:
         assert params["limit"] == MAX_ROWS, f"{marker}: LIMIT not fed with max_rows"
 
 
+def _activity_row(sport_code: str = "cycling") -> dict[str, Any]:
+    return {
+        "activity_id": 12,
+        "local_date": date(2026, 8, 30),
+        "sport_code": sport_code,
+        "sport": sport_code.capitalize(),
+        "name": "Sortie seuil",
+        "duration_s": 5400,
+        "swim_time_s": None,
+        "distance_m": 42_195,
+        "avg_hr": 148.6,
+        "max_hr": 171,
+        "avg_power": 210.0,
+        "np_watts": 233.9887,
+        "np_reliable": True,
+        "ascent_m": 320,
+        "data_quality": "good",
+        "needs_manual_rpe": False,
+        "tss": 58.7,
+        "tss_method": "bike_power",
+        "tss_hr": 63.2,
+        "trimp": None,
+        "intensity_factor": 0.9400000001,
+        "intensity_factor_method": "bike_power",
+        "decoupling_pct": 3.45,
+        "efficiency_factor": 1.1234,
+        "is_parent": False,
+    }
+
+
 def test_list_activities_surfaces_method_flags_and_parent(
     fake_runner: FakeRunner,
 ) -> None:
-    fake_runner.queue(
-        "FROM MART.ACTIVITY_WIDE",
-        [
-            {
-                "activity_id": 12,
-                "local_date": date(2026, 8, 30),
-                "sport_code": "cycling",
-                "sport": "Cycling",
-                "name": "Sortie seuil",
-                "duration_s": 5400,
-                "distance_m": 42_195,
-                "avg_hr": 148.6,
-                "max_hr": 171,
-                "avg_power": 210.0,
-                "np_watts": 233.9887,
-                "np_reliable": True,
-                "ascent_m": 320,
-                "data_quality": "good",
-                "needs_manual_rpe": False,
-                "tss": 58.7,
-                "tss_method": "bike_power",
-                "tss_hr": 63.2,
-                "trimp": None,
-                "intensity_factor": 0.9400000001,
-                "intensity_factor_method": "bike_power",
-                "decoupling_pct": 3.45,
-                "efficiency_factor": 1.1234,
-                "is_parent": False,
-            }
-        ],
-    )
+    fake_runner.queue("FROM MART.ACTIVITY_WIDE", [_activity_row()])
 
-    rows = handlers.list_activities(fake_runner, max_rows=MAX_ROWS)
+    result = handlers.list_activities(fake_runner, max_rows=MAX_ROWS)
 
-    row = rows[0]
+    row = result["rows"][0]
+    assert result["truncated"] is False
     assert row["tss_method"] == "bike_power"
-    assert row["tss_is_canonical"] is True
     assert row["intensity_factor_method"] == "bike_power"
     assert row["intensity_factor"] == 0.94
+    assert row["efficiency_factor"] == 1.123
+    assert row["efficiency_factor_unit"] == "W per bpm"
+    assert row["swim_time_s"] is None
     assert row["np_reliable"] is True
     assert row["data_quality"] == "good"
     assert row["is_parent"] is False
@@ -145,44 +154,72 @@ def test_list_activities_surfaces_method_flags_and_parent(
     assert row["trimp"] is None
 
 
-def test_list_activities_null_tss_is_not_canonical(fake_runner: FakeRunner) -> None:
-    fake_runner.queue(
-        "FROM MART.ACTIVITY_WIDE",
-        [
-            {
-                "activity_id": 13,
-                "local_date": date(2026, 8, 29),
-                "sport_code": "hiking",
-                "sport": "Hiking",
-                "name": None,
-                "duration_s": 3600,
-                "distance_m": None,
-                "avg_hr": None,
-                "max_hr": None,
-                "avg_power": None,
-                "np_watts": None,
-                "np_reliable": None,
-                "ascent_m": None,
-                "data_quality": "unknown",
-                "needs_manual_rpe": True,
-                "tss": None,
-                "tss_method": None,
-                "tss_hr": None,
-                "trimp": None,
-                "intensity_factor": None,
-                "intensity_factor_method": None,
-                "decoupling_pct": None,
-                "efficiency_factor": None,
-                "is_parent": False,
-            }
-        ],
+def test_list_activities_client_limit_bounds_the_window(
+    fake_runner: FakeRunner,
+) -> None:
+    fake_runner.queue("FROM MART.ACTIVITY_WIDE", [_activity_row()])
+
+    handlers.list_activities(fake_runner, max_rows=MAX_ROWS, limit=3)
+
+    sql, params = fake_runner.calls[-1]
+    assert params["limit"] == 3
+
+
+def test_list_activities_unknown_sport_code_fails_loudly(
+    fake_runner: FakeRunner,
+) -> None:
+    fake_runner.queue("FROM MART.ACTIVITY_WIDE", [_activity_row()])
+
+    with pytest.raises(ValueError, match="swim.*cycling"):
+        handlers.list_activities(fake_runner, max_rows=MAX_ROWS, sport_code="swim")
+
+
+def test_list_activities_virtual_cycling_distance_zero_is_null(
+    fake_runner: FakeRunner,
+) -> None:
+    row = _activity_row(sport_code="virtual_cycling")
+    row["distance_m"] = 0
+
+    fake_runner.queue("FROM MART.ACTIVITY_WIDE", [row])
+
+    result = handlers.list_activities(fake_runner, max_rows=MAX_ROWS)
+    assert result["rows"][0]["distance_m"] is None
+
+
+def test_list_activities_null_tss_keeps_caveat_flags(fake_runner: FakeRunner) -> None:
+    row = _activity_row(sport_code="hiking")
+    row.update(
+        {
+            "activity_id": 13,
+            "local_date": date(2026, 8, 29),
+            "name": None,
+            "duration_s": 3600,
+            "distance_m": None,
+            "avg_hr": None,
+            "max_hr": None,
+            "avg_power": None,
+            "np_watts": None,
+            "np_reliable": None,
+            "ascent_m": None,
+            "data_quality": "unknown",
+            "needs_manual_rpe": True,
+            "tss": None,
+            "tss_method": None,
+            "tss_hr": None,
+            "trimp": None,
+            "intensity_factor": None,
+            "intensity_factor_method": None,
+            "decoupling_pct": None,
+            "efficiency_factor": None,
+        }
     )
+    fake_runner.queue("FROM MART.ACTIVITY_WIDE", [row])
 
-    (row,) = handlers.list_activities(fake_runner, max_rows=MAX_ROWS)
+    (row_out,) = handlers.list_activities(fake_runner, max_rows=MAX_ROWS)["rows"]
 
-    assert row["tss"] is None
-    assert row["tss_method"] is None
-    assert row["tss_is_canonical"] is False
+    assert row_out["tss"] is None
+    assert row_out["tss_method"] is None
+    assert row_out["efficiency_factor_unit"] is None
 
 
 def test_get_activity_unknown_id_returns_none(fake_runner: FakeRunner) -> None:
@@ -205,7 +242,7 @@ def test_get_power_curve_shapes_value_and_record_date(fake_runner: FakeRunner) -
         ],
     )
 
-    rows = handlers.get_power_curve(fake_runner, max_rows=MAX_ROWS, kind="power_pct_ftp")
+    rows = handlers.get_power_curve(fake_runner, max_rows=MAX_ROWS, kind="power_pct_ftp")["rows"]
 
     assert rows[0] == {
         "kind": "power_pct_ftp",
@@ -214,6 +251,21 @@ def test_get_power_curve_shapes_value_and_record_date(fake_runner: FakeRunner) -
         "activity_id": 7,
         "date": "2026-07-14",
     }
+
+
+def test_get_power_curve_dates_narrow_the_contribution_window(
+    fake_runner: FakeRunner,
+) -> None:
+    fake_runner.queue("FROM MART.POWER_CURVE_BEST", [])
+
+    handlers.get_power_curve(
+        fake_runner, max_rows=MAX_ROWS, start_date="2026-06-01", end_date="2026-07-01"
+    )
+
+    sql, params = fake_runner.calls[-1]
+    assert "local_date >= %(start)s" in sql
+    assert str(params["start"]) == "2026-06-01"
+    assert str(params["end"]) == "2026-07-01"
 
 
 def test_get_wellness_rounds_the_deviation_ratio_at_three_decimals(
@@ -234,7 +286,7 @@ def test_get_wellness_rounds_the_deviation_ratio_at_three_decimals(
         ],
     )
 
-    (row,) = handlers.get_wellness(fake_runner, max_rows=MAX_ROWS)
+    (row,) = handlers.get_wellness(fake_runner, max_rows=MAX_ROWS)["rows"]
 
     assert row["hrv_dev_ratio"] == -0.152
     assert row["hrv_value"] == 61.4
@@ -266,7 +318,7 @@ def test_get_wellness_preserves_chronological_order(fake_runner: FakeRunner) -> 
         ],
     )
 
-    rows = handlers.get_wellness(fake_runner, max_rows=MAX_ROWS)
+    rows = handlers.get_wellness(fake_runner, max_rows=MAX_ROWS)["rows"]
 
     assert [row["date"] for row in rows] == ["2026-08-30", "2026-08-31"]
 
@@ -284,10 +336,41 @@ def test_get_coach_flags_passes_the_detail_through(fake_runner: FakeRunner) -> N
         ],
     )
 
-    rows = handlers.get_coach_flags(fake_runner, max_rows=MAX_ROWS)
+    rows = handlers.get_coach_flags(fake_runner, max_rows=MAX_ROWS)["rows"]
 
     assert rows[0]["detail"] == "TSB -34 < -30"
     assert rows[0]["level"] == "amber"
+
+
+def test_get_ramp_risk_exposes_the_dctl_and_estimated_share(
+    fake_runner: FakeRunner,
+) -> None:
+    fake_runner.queue(
+        "FROM MART.RAMP_RISK",
+        [
+            {
+                "local_date": date(2026, 8, 30),
+                "tss": 58.7,
+                "trimp": 171.25,
+                "ctl": 42.005,
+                "atl": 55.0,
+                "tsb": -13.0,
+                "ctl_reliable": False,
+                "dctl_per_week": 6.2,
+                "monotony": 1.742,
+                "strain": 740.4,
+                "estimated_share_7d": 0.31,
+            }
+        ],
+    )
+
+    (row,) = handlers.get_ramp_risk(fake_runner, max_rows=MAX_ROWS)["rows"]
+
+    assert row["dctl_per_week"] == 6.2
+    assert row["monotony"] == 1.74
+    assert row["strain"] == 740.0
+    assert row["estimated_share_7d"] == 0.31
+    assert row["ctl_reliable"] is False
 
 
 def test_get_thresholds_keeps_validity_as_text_and_css_estimated(

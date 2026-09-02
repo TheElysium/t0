@@ -84,8 +84,8 @@ def test_read_only_connection_refuses_writes(reader: Reader) -> None:
         reader.fetch("CREATE TABLE public.mcp_should_not_write (id int)", {})
 
 
-def test_get_pmc_on_empty_marts_returns_empty_list(reader: Reader) -> None:
-    assert handlers.get_pmc(reader, max_rows=500) == []
+def test_get_pmc_on_empty_marts_returns_an_empty_page(reader: Reader) -> None:
+    assert handlers.get_pmc(reader, max_rows=500) == {"rows": [], "truncated": False}
 
 
 def test_get_thresholds_round_trips_a_real_row(reader: Reader, migrated_dsn: str) -> None:

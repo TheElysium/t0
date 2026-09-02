@@ -50,7 +50,7 @@ def main() -> int:
     )
     app = create_app(settings, reader)
     logger.info(
-        "MCP server starting on port %d (7 read-only tools), metrics on %d.",
+        "MCP server starting on port %d (8 read-only tools), metrics on %d.",
         settings.mcp_port,
         settings.mcp_metrics_port,
     )
