@@ -1,0 +1,105 @@
+{{- if .Values.mcp.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "t0.fullname" . }}-mcp
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  # Stateless HTTP server: replicas are safe here, unlike ingest.
+  replicas: {{ .Values.mcp.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "t0.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp
+  template:
+    metadata:
+      labels:
+        {{- include "t0.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp
+      {{- if and (not .Values.mcp.auth.bearerTokenExistingSecret) .Values.mcp.auth.bearerToken }}
+      annotations:
+        # env.valueFrom is read at container startup: without the checksum, a
+        # token rotation would leave the pod with the old token.
+        checksum/mcp-auth-secret: {{ include (print $.Template.BasePath "/mcp-secret.yaml") . | sha256sum }}
+      {{- end }}
+    spec:
+      # No <SERVICE>_HOST/_PORT env injection: a Service named t0-mcp would
+      # shadow T0_MCP_PORT (Settings env prefix) with a tcp:// URL.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      {{- if .Values.ingest.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.ingest.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      {{- include "t0.scheduling" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.mcp.securityContext | nindent 8 }}
+      containers:
+        - name: mcp
+          # The image CMD is the ingest API server.
+          image: "{{ .Values.mcp.image.repository }}:{{ include "t0.mcp.imageTag" . }}"
+          imagePullPolicy: {{ .Values.mcp.image.pullPolicy }}
+          command: ["python", "-m", "t0.mcp"]
+          securityContext:
+            {{- toYaml .Values.mcp.containerSecurityContext | nindent 12 }}
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: {{ .Values.mcp.service.port }}
+            - name: metrics
+              containerPort: {{ .Values.mcp.metrics.port }}
+          env:
+            - name: T0_MCP_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "t0.mcp.bearerSecretName" . }}
+                  key: {{ .Values.mcp.auth.bearerTokenKey }}
+            # Dedicated read-only role t0_mcp_ro -- never the application credentials.
+            - name: T0_MCP_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "t0.mcp.dsnSecretName" . }}
+                  key: {{ .Values.mcp.postgres.dsnKey }}
+            # Read-only connection guardrails (statement_timeout) and output
+            # safety LIMIT -- read by the app through t0.settings (T0_ prefix).
+            - name: T0_MCP_STATEMENT_TIMEOUT_MS
+              value: {{ .Values.mcp.config.statementTimeoutMs | quote }}
+            - name: T0_MCP_MAX_ROWS
+              value: {{ .Values.mcp.config.maxRows | quote }}
+            # Must match containerPort/Service port above: the app default
+            # (8000) would otherwise desynchronize the probes and the Service.
+            - name: T0_MCP_PORT
+              value: {{ .Values.mcp.service.port | quote }}
+            - name: T0_MCP_METRICS_PORT
+              value: {{ .Values.mcp.metrics.port | quote }}
+            - name: T0_LOG_LEVEL
+              value: {{ .Values.mcp.config.logLevel | quote }}
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/cache
+            - name: XDG_CONFIG_HOME
+              value: /tmp/config
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONPYCACHEPREFIX
+              value: /tmp/pycache
+          livenessProbe:
+            {{- toYaml .Values.mcp.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.mcp.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.mcp.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.mcp.tmpDirSizeLimit }}
+{{- end }}

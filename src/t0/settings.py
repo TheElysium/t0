@@ -16,11 +16,14 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path  # noqa: TC003 — pydantic must resolve type at runtime
+from typing import TypeVar
 
 from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_PREFIX = "T0_"
+
+_SettingsT = TypeVar("_SettingsT", bound="McpSettings")
 
 
 class SettingsError(RuntimeError):
@@ -30,11 +33,13 @@ class SettingsError(RuntimeError):
     """
 
 
-class Settings(BaseSettings):
-    """Application parameters, loaded from environment (or .env file).
+class McpSettings(BaseSettings):
+    """MCP-server parameters: the T0_MCP_* variables and nothing else.
 
-    Prefer construction via get_settings(), which suppresses value leaks in
-    pydantic error messages.
+    Distinct class rather than part of Settings: the MCP pod deliberately holds
+    no ingest credentials (T0_POSTGRES_DSN, T0_GARMIN_*) -- it must never be
+    able to read or to poll Garmin -- so its entrypoint validates this class
+    only, and the ingest-only required fields are absent from its environment.
     """
 
     model_config = SettingsConfigDict(
@@ -43,6 +48,56 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    # All optional: ingest and the scheduler share Settings below; the MCP
+    # entrypoint refuses to start when token or DSN are absent.
+    mcp_bearer_token: SecretStr | None = Field(
+        default=None,
+        description="Static Bearer token required by the MCP server (Authorization header).",
+    )
+    mcp_postgres_dsn: SecretStr | None = Field(
+        default=None,
+        description=(
+            "PostgreSQL DSN of the read-only role t0_mcp_ro, dedicated to the MCP server "
+            "(never the ingest role)."
+        ),
+    )
+    mcp_statement_timeout_ms: int = Field(
+        default=10_000,
+        ge=1,
+        description=(
+            "statement_timeout set on every MCP read-only connection: a curated query "
+            "cannot run away despite the unbounded tool output."
+        ),
+    )
+    mcp_max_rows: int = Field(
+        default=500,
+        ge=1,
+        description=(
+            "Safety LIMIT injected into every MCP tool query: unbounded output can make "
+            "the tool call itself fail (context overflow)."
+        ),
+    )
+    mcp_port: int = Field(
+        default=8000,
+        ge=1,
+        le=65535,
+        description="TCP port the MCP server (uvicorn) listens on.",
+    )
+    mcp_metrics_port: int = Field(
+        default=9090,
+        ge=1,
+        le=65535,
+        description="Dedicated /metrics port for Prometheus, outside the Bearer app.",
+    )
+
+
+class Settings(McpSettings):
+    """Application parameters, loaded from environment (or .env file).
+
+    Prefer construction via get_settings(), which suppresses value leaks in
+    pydantic error messages.
+    """
 
     # PostgreSQL. SecretStr because DSN contains database password in cleartext.
     # Callers use .get_secret_value().
@@ -88,32 +143,27 @@ class Settings(BaseSettings):
     )
 
 
-def _env_var_name(field_name: str) -> str:
-    """Environment variable name for a field."""
-    field = Settings.model_fields.get(field_name)
-    alias = getattr(field, "validation_alias", None) if field is not None else None
-    if isinstance(alias, str):
-        return alias
-    return f"{ENV_PREFIX}{field_name.upper()}"
+def _env_var_name(settings_cls: type[_SettingsT], loc: str) -> str:
+    """Environment variable name for a validation-error location.
+
+    Pydantic reports the validation alias as the location for aliased fields:
+    report it verbatim, never prefixed.
+    """
+    aliased = any(f.validation_alias == loc for f in settings_cls.model_fields.values())
+    return loc if aliased else f"{ENV_PREFIX}{loc.upper()}"
 
 
-def get_settings() -> Settings:
-    """Build settings from current environment.
+def _load(settings_cls: type[_SettingsT]) -> _SettingsT:
+    """Build a settings object, converting ValidationError to SettingsError.
 
-    Function, not global singleton: each caller (including tests) explicitly
-    controls when environment is read.
-
-    Raises:
-        SettingsError: if a variable is missing or invalid. Message cites only
-            variable names—never values—so a failed startup does not write a
-            Garmin password to container logs.
+    Retains only loc and type; msg and input may contain the bad value.
     """
     try:
-        return Settings()  # type: ignore[call-arg]  # required fields come from env
+        return settings_cls()  # required fields come from the environment
     except ValidationError as exc:
-        # Retain only loc and type; msg and input may contain the bad value.
         causes = ", ".join(
-            f"{_env_var_name(str(error['loc'][0]) if error['loc'] else '?')} [{error['type']}]"
+            f"{_env_var_name(settings_cls, str(error['loc'][0]) if error['loc'] else '?')}"
+            f" [{error['type']}]"
             for error in exc.errors()
         )
         raise SettingsError(
@@ -121,3 +171,30 @@ def get_settings() -> Settings:
             f"Offending variables: {causes}. "
             "Values intentionally omitted from this message."
         ) from None
+
+
+def get_settings() -> Settings:
+    """Build the full application settings from current environment.
+
+    Function, not global singleton: each caller (including tests) explicitly
+    controls when environment is read.
+
+    Raises:
+        SettingsError: if a variable is missing or invalid. Message cites only
+            variable names--never values--so a failed startup does not write a
+            Garmin password to container logs.
+    """
+    return _load(Settings)
+
+
+def get_mcp_settings() -> McpSettings:
+    """Build the MCP-server settings from current environment.
+
+    Validates only the T0_MCP_* variables: the MCP pod holds no ingest
+    credentials by design, so the ingest-only required fields must not be
+    demanded of it.
+
+    Raises:
+        SettingsError: same contract as get_settings().
+    """
+    return _load(McpSettings)

@@ -1,0 +1,25 @@
+# Value set 6 -- MCP server enabled, exposed through the Gateway API (HTTPRoute).
+#
+# Renders the mcp-* templates: chart-created nothing here except the
+# Deployment/Service/HTTPRoute -- the Bearer token and the read-only DSN come
+# from PRE-EXISTING Secrets (created server-side: token by the athlete, DSN by
+# CNPG managed.roles for the t0_mcp_ro role), so this value set also covers the
+# secretKeyRef path of the MCP Deployment. The ingest Service stays ClusterIP:
+# it gets NO HTTPRoute, ever. The TEST token/DSN names below reference Secrets
+# that exist only during `helm template` (rendering does not resolve
+# secretKeyRef contents) -- never deployed.
+postgresql:
+  auth:
+    password: "test-password-postgres"
+grafana:
+  admin:
+    password: "test-password-grafana"
+mcp:
+  enabled: true
+  auth:
+    bearerTokenExistingSecret: t0-mcp-auth
+  postgres:
+    dsnExistingSecret: t0-mcp-ro-dsn
+  gateway:
+    enabled: true
+    hostname: t0-mcp.example.internal

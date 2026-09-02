@@ -1,11 +1,16 @@
 # Chart t0
 
 Homelab deployment of the t0 pipeline: Garmin ingestion (`t0-ingest`),
-PostgreSQL, Grafana. **Strictly local access**: no Ingress, no TLS. Services are
-`ClusterIP`; access is via `kubectl port-forward`.
+PostgreSQL, Grafana, and an optional MCP server (`t0-mcp`, read-only data
+access for an LLM). **No TLS, no Ingress resource.** Default exposure is
+strictly local: Services are `ClusterIP`, access via `kubectl port-forward`.
+Optional LAN exposure of Grafana is possible either through a `LoadBalancer`
+Service or an HTTPRoute on a cluster Gateway (see "Service exposure" below) --
+the MCP has its own gated Gateway exposure (see "MCP server" below).
+The ingest Service stays `ClusterIP` in every case.
 
 This chart deploys nothing on its own -- the athlete runs `helm install`
-on their homelab cluster.
+on their cluster.
 
 ## Before installing: create the Garmin Secret
 
@@ -126,7 +131,7 @@ Parameters to review before a real first deployment (see `values.yaml`, commente
 
 - `ingest.image.repository` / `ingest.image.tag` -- image published by CI (batch L0) on GHCR.
 - `postgresql.persistence.storageClassName`, `fitArchive.persistence.storageClassName`,
-  `grafana.persistence.storageClassName` -- StorageClass of the homelab cluster (empty = cluster
+  `grafana.persistence.storageClassName` -- StorageClass of the cluster (empty = cluster
   default StorageClass).
 - Volume sizes (`*.persistence.size`), to adjust to the athlete's actual history
   (backfill from 2025-04-03, batch L10).
@@ -140,7 +145,7 @@ Parameters to review before a real first deployment (see `values.yaml`, commente
   ```yaml
   scheduling:
     nodeSelector:
-      kubernetes.io/hostname: homelab-node-1
+      kubernetes.io/hostname: <node-holding-the-volume>
   ```
 
   A `ReadWriteMany` StorageClass (NFS, Longhorn) declared in
@@ -300,13 +305,50 @@ grafana:
     type: LoadBalancer
     annotations:
       # Cilium LB-IPAM; MetalLB uses metallb.universe.tf/loadBalancerIPs
-      lbipam.cilium.io/ips: "192.168.1.211"
+      lbipam.cilium.io/ips: "<lan-address>"
 ```
 
-Grafana then answers on `http://192.168.1.211:3000`. A hostname is a separate,
+Grafana then answers on `http://<lan-address>:3000`. A hostname is a separate,
 optional layer: an entry in the `hosts` file of each machine, or a record on the
-local DNS resolver, pointing at that address. Dropping the `:3000` would require
-an ingress controller, which this chart does not ship and does not assume.
+local DNS resolver, pointing at that address. Dropping the `:3000` and the
+`hosts`-file edits requires routing through a Gateway -- see below.
+
+### Gateway exposure (HTTPRoute, optional)
+
+For clusters that run the Kubernetes Gateway API (e.g. Cilium's Envoy
+Gateway), Grafana can be published under a hostname instead of
+a LoadBalancer address. The route consumes no address from the LB-IPAM pool and
+is served by the Gateway the cluster already runs -- no extra component:
+
+```yaml
+grafana:
+  gateway:
+    enabled: true
+    hostname: t0.example.internal        # MANDATORY, chart refuses to render without it
+    parentRefs:                          # defaults below; override for another Gateway
+      - name: <gateway-name>
+        namespace: gateway-system
+        sectionName: http
+```
+
+The hostname must be covered by the DNS record pointing at the Gateway address
+(e.g. a wildcard `*.example.internal` -> `<gateway-address>`), and the Gateway
+listener must allow routes from the release namespace
+(`allowedRoutes.namespaces.from: All` on the shared Gateway).
+
+The Service type is independent of this switch. During a migration, keeping
+`service.type: LoadBalancer` while enabling the gateway makes Grafana reachable
+through **both** paths at once -- attach the route, verify
+`curl http://t0.example.internal/login`, then flip the Service back to
+`ClusterIP` and drop the address-claiming annotation once the hostname is the
+habit. The LoadBalancer path stays the fallback for clusters without a Gateway.
+
+Same trust model as the LoadBalancer mode: plain HTTP behind the admin
+password, LAN only, never routed in from outside.
+
+**The ingest Service gets no HTTPRoute, ever** -- the upload endpoint is
+unauthenticated; an HTTPRoute would be the same hole with a hostname on it. If
+a remotely reachable upload is ever wanted, it needs authentication first.
 
 The PostgreSQL application password (account `t0`, distinct from the
 Garmin account) is retrieved the same way:
@@ -315,6 +357,165 @@ Garmin account) is retrieved the same way:
 kubectl get secret -n t0 t0-postgresql \
   -o jsonpath='{.data.password}' | base64 -d; echo
 ```
+
+## MCP server (optional, read-only LLM access)
+
+`mcp.enabled: true` (default `false`) deploys the MCP server: a **new, separate
+process** -- never merged into `ingest`. It reuses the **same Docker image**
+(same artifact, another entry point: the container runs `python -m t0.mcp`
+instead of the ingest API server) but gets its own Deployment and Service
+(`<release>-mcp`, `ClusterIP` only). This separation is what guarantees, by
+construction, that exposing the MCP never exposes the unauthenticated ingest
+upload endpoint.
+
+The MCP gives an LLM read-only access to the training marts through curated
+tools -- no raw SQL, no writes:
+
+| Tool | Reads |
+| --- | --- |
+| `get_pmc` | `mart.pmc` (CTL/ATL/TSB) |
+| `list_activities` | `mart.activity_wide` |
+| `get_activity` | `mart.activity_wide` |
+| `get_power_curve` | `mart.power_curve_best` |
+| `get_wellness` | `mart.wellness_baseline` |
+| `get_ramp_risk` | `mart.ramp_risk` |
+| `get_coach_flags` | `mart.coach_flags` |
+| `get_thresholds` | `core.threshold` |
+
+Multi-row tools answer `{"rows": [...], "truncated": bool}`. Filters validate
+their vocabulary and fail loudly on an unknown value -- never a silent `[]`.
+
+### Required secrets
+
+**The chart never creates the read-only DSN Secret, and generates no token.**
+
+1. **Bearer token** (`mcp.auth.*`) -- static token verified by the MCP ASGI
+   middleware; the client sends it on every request. Create it once, then
+   reference the Secret (preferred form):
+
+   ```bash
+   openssl rand -base64 32 | tr -d '/+=' | cut -c1-32
+   kubectl create secret generic t0-mcp-auth \
+     --namespace t0 \
+     --from-literal=token='<the token>'
+   ```
+
+   ```yaml
+   mcp:
+     auth:
+       bearerTokenExistingSecret: t0-mcp-auth   # key: bearerTokenKey, default `token`
+   ```
+
+   For offline validation only, `mcp.auth.bearerToken` lets the chart create
+   the Secret from an explicit value -- never in a committed values file. With
+   neither set, `helm template`/`helm install` **fails** with an explicit
+   message: no token is randomly generated, because a token regenerated on
+   every `helm upgrade` would silently break the client configuration.
+
+2. **Read-only DSN** (`mcp.postgres.dsnExistingSecret`) -- the MCP connects to
+   PostgreSQL through the **dedicated read-only role `t0_mcp_ro`**, never the
+   application credentials. The role is created on the server side (CNPG
+   `managed.roles`, or any role-creation path) and its DSN Secret with it; the chart
+   only **references** it (same logic as `postgresql.auth.existingSecret`):
+
+   ```bash
+   kubectl create secret generic t0-mcp-ro-dsn \
+     --namespace t0 \
+     --from-literal=dsn='postgresql://t0_mcp_ro:<password>@<host>:5432/t0'
+   ```
+
+   ```yaml
+   mcp:
+     postgres:
+       dsnExistingSecret: t0-mcp-ro-dsn   # key: dsnKey, default `dsn`
+   ```
+
+   If `mcp.enabled` is true and this value is empty, rendering **fails** with
+   the Secret creation command in the message. Object grants for `t0_mcp_ro`
+   live in the t0 migrations `020_mcp_ro_grants.sql` + `021_mcp_core_grants.sql`
+   (USAGE/SELECT on `mart.*` and `core.threshold`/`core.activity`, default
+   privileges for future tables).
+
+### LAN exposure through the Gateway
+
+Same mechanism and same gating idiom as `grafana.gateway`: the HTTPRoute is
+rendered only when both `mcp.enabled` and `mcp.gateway.enabled` are true, and
+the chart **refuses to render without an explicit hostname**:
+
+```yaml
+mcp:
+  enabled: true
+  gateway:
+    enabled: true
+    hostname: t0-mcp.example.internal     # MANDATORY, chart refuses to render without it
+    parentRefs:                           # defaults below; override for another Gateway
+      - name: <gateway-name>
+        namespace: gateway-system
+        sectionName: http
+```
+
+The hostname must be covered by the wildcard DNS record pointing at the Gateway
+(e.g. a wildcard `*.example.internal` -> `<gateway-address>`). Plain HTTP on
+the LAN, like every exposure of this chart; real TLS is a separate task the
+MCP inherits unchanged. The MCP Service accepts `ClusterIP` only (`t0.assertServiceType`):
+its one exposure mode is this route, behind the Bearer token.
+
+Without the Gateway route, the Service stays reachable via port-forward only.
+
+### Client wiring (Claude Code CLI)
+
+```bash
+claude mcp add --transport http t0 \
+  http://t0-mcp.example.internal/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Set once -- no per-session `port-forward`. The token is readable from the
+Secret if needed:
+
+```bash
+kubectl get secret -n t0 t0-mcp-auth \
+  -o jsonpath='{.data.token}' | base64 -d; echo
+```
+
+### Prometheus metrics
+
+The MCP serves `/metrics` on a dedicated port (`mcp.metrics.port`, default
+`9090`) of the same Service: request counters (method/path/status — 401s
+included) and latency histogram. The HTTPRoute forwards ALL paths, so the
+metrics port is deliberately NOT routed through the Gateway — no LAN exposure.
+Scraping is opt-in:
+
+```yaml
+mcp:
+  metrics:
+    port: 9090
+    serviceMonitor:
+      enabled: true          # renders ServiceMonitor <release>-mcp
+      interval: 30s
+      additionalLabels: {}   # extra labels, e.g. the Prometheus release selector
+```
+
+### Guardrails
+
+- `mcp.config.statementTimeoutMs` (default `10000`) -- `statement_timeout` on
+  the read-only connection: a curated query cannot run away.
+- `mcp.config.maxRows` (default `500`) -- safety `LIMIT` ceiling applied to
+  every tool query: unbounded output can make the tool call itself fail
+  (context overflow / token cost).
+- Probes: `/healthz` (liveness) and `/readyz` (readiness -- tests the Postgres
+  connection), same pattern as the ingest Deployment.
+
+### NetworkPolicy caveat
+
+When `networkPolicy.enabled` is turned on, the chart renders an MCP stanza
+(egress PostgreSQL + DNS, no ingress — same posture as Grafana). After
+enabling, **re-test the Gateway path explicitly**: Envoy forwards traffic with
+a source identity that is not the client pod's, so a pod-to-pod policy can
+silently block the route.
+
+**The ingest Service gets no HTTPRoute and the MCP never shares its process:
+by design, not by configuration.**
 
 ## Persistent volumes
 
@@ -329,7 +530,7 @@ Three PVCs:
 **Beware `ReadWriteOnce`**: the `fit-archive` PVC is mounted both by the ingest
 pod and by the backup `CronJob` pod. With the default `ReadWriteOnce` access mode,
 both pods must run **on the same node**; on a multi-node cluster, the backup Job
-would remain indefinitely `Pending`. On a single-node homelab, there is no issue.
+would remain indefinitely `Pending`. On a single-node cluster, there is no issue.
 Otherwise, change `fitArchive.persistence.accessModes` to `ReadWriteMany`
 (compatible StorageClass required) or separate dumps to their own PVC.
 
@@ -403,7 +604,7 @@ batch L10.
 
 ## NetworkPolicy (optional)
 
-Disabled by default (`networkPolicy.enabled: false`): in a homelab, the cluster
+Disabled by default (`networkPolicy.enabled: false`): on a self-hosted cluster,
 network is generally already trusted, and a misconfigured NetworkPolicy can
 silently block Garmin polling (HTTPS outbound) without any Service signaling it.
 If enabled, it limits PostgreSQL to Release pods, Grafana to a single outbound
@@ -427,7 +628,7 @@ provisioning provider, not just the offending file.
 
 This chart is designed to be fully validated without touching a cluster:
 
-Three reference value sets are provided in `ci/` (test passwords, never deployed):
+Six reference value sets are provided in `ci/` (test passwords, never deployed):
 
 ```bash
 for v in deploy/helm/t0/ci/*.yaml; do
@@ -436,9 +637,12 @@ for v in deploy/helm/t0/ci/*.yaml; do
 done
 ```
 
-- `ci/01-defaut-values.yaml` - default configuration, secrets provided.
-- `ci/02-secrets-externes-values.yaml` - all pre-existing Secrets, NetworkPolicy enabled.
+- `ci/01-default-values.yaml` - default configuration, secrets provided.
+- `ci/02-external-secrets-values.yaml` - all pre-existing Secrets, NetworkPolicy enabled.
 - `ci/03-minimal-values.yaml` - without Grafana, without backup, without persistence.
+- `ci/04-lan-grafana-values.yaml` - Grafana on a LoadBalancer with a claimed address.
+- `ci/05-gateway-grafana-values.yaml` - Grafana behind an HTTPRoute on the shared Gateway.
+- `ci/06-mcp-gateway-values.yaml` - MCP enabled, secrets referenced, HTTPRoute on the shared Gateway.
 
 Without a values file, `helm template` **fails deliberately** (passwords not provided,
 see above).

@@ -26,6 +26,9 @@ spec:
             app.kubernetes.io/component: backup
         spec:
           restartPolicy: OnFailure
+          # No <SERVICE>_HOST/_PORT env injection: a Service named t0-mcp would
+          # shadow T0_MCP_PORT (Settings env prefix) with a tcp:// URL.
+          enableServiceLinks: false
           automountServiceAccountToken: false
           {{- include "t0.scheduling" . | nindent 10 }}
           securityContext:

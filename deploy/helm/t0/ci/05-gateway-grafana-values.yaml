@@ -1,0 +1,19 @@
+# Value set 5 -- Grafana exposed through the Gateway API (HTTPRoute) instead of
+# a LoadBalancer Service: one hostname, zero consumed LoadBalancer addresses.
+#
+# Renders the branch none of the other value sets reach: the gated
+# grafana-httproute.yaml template. The Service stays ClusterIP here (the chart
+# default); during the migration the LoadBalancer type can coexist with
+# gateway.enabled -- the two paths are independent on purpose. The ingestion
+# Service stays ClusterIP: it gets NO HTTPRoute, ever -- the upload endpoint is
+# unauthenticated, and a route would be the same hole with a hostname on it.
+# The passwords below are TEST values, never deployed.
+postgresql:
+  auth:
+    password: "test-password-postgres"
+grafana:
+  admin:
+    password: "test-password-grafana"
+  gateway:
+    enabled: true
+    hostname: t0.example.internal

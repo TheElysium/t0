@@ -2,10 +2,10 @@ apiVersion: v2
 name: t0
 description: >-
   Ingestion, storage and visualization of an athlete's Garmin data
-  (Python ingestion, PostgreSQL, Grafana) -- homelab deployment, local access only.
+  (Python ingestion, PostgreSQL, Grafana) -- self-hosted deployment, LAN access only.
 type: application
-version: 0.1.2
-appVersion: "0.1.2"
+version: 0.1.8
+appVersion: "0.1.8"
 keywords:
   - garmin
   - triathlon

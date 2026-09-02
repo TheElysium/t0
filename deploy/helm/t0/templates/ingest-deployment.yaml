@@ -31,6 +31,9 @@ spec:
     spec:
       # This pod never calls the Kubernetes API. It holds Garmin credentials:
       # no service account token is mounted.
+      # No <SERVICE>_HOST/_PORT env injection: a Service named t0-mcp would
+      # shadow T0_MCP_PORT (Settings env prefix) with a tcp:// URL.
+      enableServiceLinks: false
       automountServiceAccountToken: false
       {{- if .Values.ingest.imagePullSecrets }}
       imagePullSecrets:
