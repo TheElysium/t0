@@ -22,4 +22,4 @@ mcp:
     dsnExistingSecret: t0-mcp-ro-dsn
   gateway:
     enabled: true
-    hostname: t0-mcp.homelab.internal
+    hostname: t0-mcp.example.internal

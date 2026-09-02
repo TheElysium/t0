@@ -10,7 +10,7 @@ the MCP has its own gated Gateway exposure (see "MCP server" below).
 The ingest Service stays `ClusterIP` in every case.
 
 This chart deploys nothing on its own -- the athlete runs `helm install`
-on their homelab cluster.
+on their cluster.
 
 ## Before installing: create the Garmin Secret
 
@@ -131,7 +131,7 @@ Parameters to review before a real first deployment (see `values.yaml`, commente
 
 - `ingest.image.repository` / `ingest.image.tag` -- image published by CI (batch L0) on GHCR.
 - `postgresql.persistence.storageClassName`, `fitArchive.persistence.storageClassName`,
-  `grafana.persistence.storageClassName` -- StorageClass of the homelab cluster (empty = cluster
+  `grafana.persistence.storageClassName` -- StorageClass of the cluster (empty = cluster
   default StorageClass).
 - Volume sizes (`*.persistence.size`), to adjust to the athlete's actual history
   (backfill from 2025-04-03, batch L10).
@@ -145,7 +145,7 @@ Parameters to review before a real first deployment (see `values.yaml`, commente
   ```yaml
   scheduling:
     nodeSelector:
-      kubernetes.io/hostname: homelab-node-1
+      kubernetes.io/hostname: <node-holding-the-volume>
   ```
 
   A `ReadWriteMany` StorageClass (NFS, Longhorn) declared in
@@ -305,18 +305,18 @@ grafana:
     type: LoadBalancer
     annotations:
       # Cilium LB-IPAM; MetalLB uses metallb.universe.tf/loadBalancerIPs
-      lbipam.cilium.io/ips: "192.168.1.211"
+      lbipam.cilium.io/ips: "<lan-address>"
 ```
 
-Grafana then answers on `http://192.168.1.211:3000`. A hostname is a separate,
+Grafana then answers on `http://<lan-address>:3000`. A hostname is a separate,
 optional layer: an entry in the `hosts` file of each machine, or a record on the
 local DNS resolver, pointing at that address. Dropping the `:3000` and the
 `hosts`-file edits requires routing through a Gateway -- see below.
 
 ### Gateway exposure (HTTPRoute, optional)
 
-For clusters that run the Kubernetes Gateway API (e.g. the shared Cilium Envoy
-Gateway of this homelab), Grafana can be published under a hostname instead of
+For clusters that run the Kubernetes Gateway API (e.g. Cilium's Envoy
+Gateway), Grafana can be published under a hostname instead of
 a LoadBalancer address. The route consumes no address from the LB-IPAM pool and
 is served by the Gateway the cluster already runs -- no extra component:
 
@@ -324,22 +324,22 @@ is served by the Gateway the cluster already runs -- no extra component:
 grafana:
   gateway:
     enabled: true
-    hostname: t0.homelab.internal        # MANDATORY, chart refuses to render without it
+    hostname: t0.example.internal        # MANDATORY, chart refuses to render without it
     parentRefs:                          # defaults below; override for another Gateway
-      - name: homelab
+      - name: <gateway-name>
         namespace: gateway-system
         sectionName: http
 ```
 
 The hostname must be covered by the DNS record pointing at the Gateway address
-(here the wildcard `*.homelab.internal` -> `192.168.1.212`), and the Gateway
+(e.g. a wildcard `*.example.internal` -> `<gateway-address>`), and the Gateway
 listener must allow routes from the release namespace
-(`allowedRoutes.namespaces.from: All` on the shared homelab Gateway).
+(`allowedRoutes.namespaces.from: All` on the shared Gateway).
 
 The Service type is independent of this switch. During a migration, keeping
 `service.type: LoadBalancer` while enabling the gateway makes Grafana reachable
 through **both** paths at once -- attach the route, verify
-`curl http://t0.homelab.internal/login`, then flip the Service back to
+`curl http://t0.example.internal/login`, then flip the Service back to
 `ClusterIP` and drop the address-claiming annotation once the hostname is the
 habit. The LoadBalancer path stays the fallback for clusters without a Gateway.
 
@@ -401,7 +401,7 @@ tools -- no raw SQL, no writes.
 2. **Read-only DSN** (`mcp.postgres.dsnExistingSecret`) -- the MCP connects to
    PostgreSQL through the **dedicated read-only role `t0_mcp_ro`**, never the
    application credentials. The role is created on the server side (CNPG
-   `managed.roles`, homelab repository) and its DSN Secret with it; the chart
+   `managed.roles`, or any role-creation path) and its DSN Secret with it; the chart
    only **references** it (same logic as `postgresql.auth.existingSecret`):
 
    ```bash
@@ -433,17 +433,17 @@ mcp:
   enabled: true
   gateway:
     enabled: true
-    hostname: t0-mcp.homelab.internal     # MANDATORY, chart refuses to render without it
+    hostname: t0-mcp.example.internal     # MANDATORY, chart refuses to render without it
     parentRefs:                           # defaults below; override for another Gateway
-      - name: homelab
+      - name: <gateway-name>
         namespace: gateway-system
         sectionName: http
 ```
 
 The hostname must be covered by the wildcard DNS record pointing at the Gateway
-(`*.homelab.internal` -> `192.168.1.212`). Plain HTTP on the LAN, like every
-exposure of this chart; real TLS is a separate homelab task the MCP inherits
-unchanged. The MCP Service accepts `ClusterIP` only (`t0.assertServiceType`):
+(e.g. a wildcard `*.example.internal` -> `<gateway-address>`). Plain HTTP on
+the LAN, like every exposure of this chart; real TLS is a separate task the
+MCP inherits unchanged. The MCP Service accepts `ClusterIP` only (`t0.assertServiceType`):
 its one exposure mode is this route, behind the Bearer token.
 
 Without the Gateway route, the Service stays reachable via port-forward only.
@@ -452,7 +452,7 @@ Without the Gateway route, the Service stays reachable via port-forward only.
 
 ```bash
 claude mcp add --transport http t0 \
-  http://t0-mcp.homelab.internal/mcp \
+  http://t0-mcp.example.internal/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
@@ -516,7 +516,7 @@ Three PVCs:
 **Beware `ReadWriteOnce`**: the `fit-archive` PVC is mounted both by the ingest
 pod and by the backup `CronJob` pod. With the default `ReadWriteOnce` access mode,
 both pods must run **on the same node**; on a multi-node cluster, the backup Job
-would remain indefinitely `Pending`. On a single-node homelab, there is no issue.
+would remain indefinitely `Pending`. On a single-node cluster, there is no issue.
 Otherwise, change `fitArchive.persistence.accessModes` to `ReadWriteMany`
 (compatible StorageClass required) or separate dumps to their own PVC.
 
@@ -590,7 +590,7 @@ batch L10.
 
 ## NetworkPolicy (optional)
 
-Disabled by default (`networkPolicy.enabled: false`): in a homelab, the cluster
+Disabled by default (`networkPolicy.enabled: false`): on a self-hosted cluster,
 network is generally already trusted, and a misconfigured NetworkPolicy can
 silently block Garmin polling (HTTPS outbound) without any Service signaling it.
 If enabled, it limits PostgreSQL to Release pods, Grafana to a single outbound

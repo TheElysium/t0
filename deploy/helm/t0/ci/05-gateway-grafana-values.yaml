@@ -16,4 +16,4 @@ grafana:
     password: "test-password-grafana"
   gateway:
     enabled: true
-    hostname: t0.homelab.internal
+    hostname: t0.example.internal

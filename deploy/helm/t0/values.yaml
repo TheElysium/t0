@@ -333,14 +333,14 @@ mcp:
   # Exposure through the shared Gateway (HTTPRoute), same mechanism and same
   # gating idiom as grafana.gateway: the chart refuses to render an HTTPRoute
   # without an explicit hostname. Plain HTTP on the LAN, like every exposure of
-  # this chart; real TLS is a separate homelab task the MCP inherits unchanged.
+  # this chart; real TLS is a separate task the MCP inherits unchanged.
   gateway:
     enabled: false
     # MANDATORY when `enabled` is true. An implicit default would silently
     # publish the MCP under a name nobody chose.
     hostname: ""
     parentRefs:
-      - name: homelab
+      - name: <gateway-name>
         namespace: gateway-system
         sectionName: http
 
@@ -353,7 +353,7 @@ mcp:
 # (k3s local-path, hostPath...), a pod scheduled on another node stays Pending
 # forever: pin the release to the node holding the volume, for example
 #   nodeSelector:
-#     kubernetes.io/hostname: homelab-node-1
+#     kubernetes.io/hostname: <node-holding-the-volume>
 # The alternative is a ReadWriteMany StorageClass (NFS, Longhorn), declared in
 # fitArchive.persistence.storageClassName + accessModes.
 scheduling:
@@ -411,8 +411,8 @@ grafana:
     port: 3000
     # Annotations on the Service, typically to claim a fixed LoadBalancer address.
     # The key depends on the implementation, which is why nothing is assumed here:
-    #   Cilium LB-IPAM: lbipam.cilium.io/ips: "192.168.1.211"
-    #   MetalLB:        metallb.universe.tf/loadBalancerIPs: "192.168.1.211"
+    #   Cilium LB-IPAM: lbipam.cilium.io/ips: "<lan-address>"
+    #   MetalLB:        metallb.universe.tf/loadBalancerIPs: "<lan-address>"
     # Without one, the pool hands out the next free address, which moves between
     # reinstalls -- fine for a test, annoying for a bookmark.
     annotations: {}
@@ -437,7 +437,7 @@ grafana:
     # Grafana under a name nobody chose.
     hostname: ""
     parentRefs:
-      - name: homelab
+      - name: <gateway-name>
         namespace: gateway-system
         sectionName: http
 
@@ -681,7 +681,7 @@ opsBackfill:
       memory: 512Mi
 
 # -----------------------------------------------------------------------
-# NetworkPolicy -- disabled by default (homelab, network already trusted).
+# NetworkPolicy -- disabled by default (self-hosted, network already trusted).
 # When enabled: allows only traffic between chart components and outbound
 # DNS + HTTPS (necessary for Garmin API) for ingest.
 # -----------------------------------------------------------------------

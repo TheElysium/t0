@@ -1,7 +1,7 @@
 -- Migration 020: read-only grants for the MCP server (role t0_mcp_ro).
 -- Batch L1 (t0) -- do not modify the DDL manually outside migration.
 --
--- The role itself is created CNPG-side (homelab managed.roles) and must exist
+-- The role itself is created CNPG-side (managed.roles or equivalent) and must exist
 -- before this runs; a GRANT to a missing role fails loudly, by design. The
 -- statements are naturally re-runnable (re-GRANT is a no-op).
 --

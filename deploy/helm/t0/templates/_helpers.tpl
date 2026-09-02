@@ -290,7 +290,7 @@ Name of the pre-existing Secret carrying the DSN of the read-only PostgreSQL
 role `t0_mcp_ro`.
 
 No fallback, no chart-created Secret: the role itself is created on the server
-side (CloudNativePG `managed.roles`, homelab repository) because the
+side (CloudNativePG `managed.roles`, or any role-creation path) because the
 application user cannot create roles; the chart cannot invent credentials for
 a role it does not own, so it refuses to render rather than emit a manifest
 that fails on the first connection.
