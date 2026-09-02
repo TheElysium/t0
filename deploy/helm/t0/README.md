@@ -1,6 +1,6 @@
 # Chart t0
 
-Homelab deployment of the t0 pipeline: Garmin ingestion (`t0-ingest`),
+Self-hosted deployment of the t0 pipeline: Garmin ingestion (`t0-ingest`),
 PostgreSQL, Grafana, and an optional MCP server (`t0-mcp`, read-only data
 access for an LLM). **No TLS, no Ingress resource.** Default exposure is
 strictly local: Services are `ClusterIP`, access via `kubectl port-forward`.

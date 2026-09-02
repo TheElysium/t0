@@ -12,7 +12,7 @@ readme = "README.md"
 # promising untested support.
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
-authors = [{ name = "Lukas" }]
+authors = [{ name = "Lukas Signe-Morice" }]
 
 dependencies = [
     "garminconnect==0.3.2",
