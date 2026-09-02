@@ -68,9 +68,8 @@ def test_healthz_is_dependency_free() -> None:
     assert r.json() == {"status": "ok"}
 
 
-def test_readyz_ok_when_database_answers(
-    _settings_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("_settings_env")
+def test_readyz_ok_when_database_answers(monkeypatch: pytest.MonkeyPatch) -> None:
     conn = _StubConnection()
     monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: conn, raising=True)
     r = _client().get("/readyz")
@@ -79,9 +78,8 @@ def test_readyz_ok_when_database_answers(
     assert conn.closed, "readyz must not leak connections"
 
 
-def test_readyz_503_when_connect_fails(
-    _settings_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("_settings_env")
+def test_readyz_503_when_connect_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     def _refuse(*a: object, **kw: object) -> _StubConnection:
         raise RuntimeError("connection refused")
 
@@ -92,9 +90,8 @@ def test_readyz_503_when_connect_fails(
     assert r.json()["detail"] == "database unreachable"
 
 
-def test_readyz_503_and_closed_when_select_fails(
-    _settings_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("_settings_env")
+def test_readyz_503_and_closed_when_select_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     conn = _StubConnection(fail_execute=True)
     monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: conn, raising=True)
     r = _client().get("/readyz")

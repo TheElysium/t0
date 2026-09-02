@@ -290,6 +290,33 @@ _DAILY_COUNTERS: tuple[tuple[str, Callable[[DailyWellnessRow, Any], DailyWellnes
 )
 
 
+def _merge_sleep(
+    day: DayPayloads, *, athlete_id: int
+) -> tuple[SleepSessionRow | None, tuple[SleepStageRow, ...]]:
+    """Sleep session + stages, or ``(None, ())`` when the endpoint answered nothing."""
+    payload = _as_mapping(day.payloads.get("get_sleep_data"))
+    if payload is None:
+        return None, ()
+    sleep, extracted_stages = extract_sleep(
+        payload, athlete_id=athlete_id, source_sha256=day.hashes.get("get_sleep_data")
+    )
+    return sleep, tuple(extracted_stages)
+
+
+def _merge_vo2max(daily: DailyWellnessRow, day: DayPayloads) -> DailyWellnessRow:
+    """VO2max: get_training_status preferred, get_max_metrics fallback. Both carry the same
+    ``mostRecentVO2Max`` block; the first yielding a value wins, so an endpoint that happened
+    to answer empty that day never blanks a known estimate."""
+    for endpoint in ("get_training_status", "get_max_metrics"):
+        payload = _as_mapping(day.payloads.get(endpoint))
+        if payload is None:
+            continue
+        running, cycling = extract_vo2max(payload)
+        if running is not None or cycling is not None:
+            return replace(daily, vo2max_running=running, vo2max_cycling=cycling)
+    return daily
+
+
 def merge_day(day: DayPayloads, *, athlete_id: int) -> MergedDay:
     """Turn one day's payloads into the rows to write. PURE: no connection, no clock.
 
@@ -299,17 +326,8 @@ def merge_day(day: DayPayloads, *, athlete_id: int) -> MergedDay:
     """
     daily = DailyWellnessRow(athlete_id=athlete_id, local_date=day.local_date)
     samples: list[WellnessSampleRow] = []
-    sleep: SleepSessionRow | None = None
-    stages: tuple[SleepStageRow, ...] = ()
 
-    sleep_payload = _as_mapping(day.payloads.get("get_sleep_data"))
-    if sleep_payload is not None:
-        sleep, extracted_stages = extract_sleep(
-            sleep_payload,
-            athlete_id=athlete_id,
-            source_sha256=day.hashes.get("get_sleep_data"),
-        )
-        stages = tuple(extracted_stages)
+    sleep, stages = _merge_sleep(day, athlete_id=athlete_id)
 
     hrv_payload = _as_mapping(day.payloads.get("get_hrv_data"))
     if hrv_payload is not None:
@@ -345,17 +363,7 @@ def merge_day(day: DayPayloads, *, athlete_id: int) -> MergedDay:
         if counter_payload is not None:
             daily = apply_counter(daily, counter_payload)
 
-    # VO2max: get_training_status is preferred, get_max_metrics is the fallback. Both carry
-    # the same `mostRecentVO2Max` block; taking the first that yields a running value avoids
-    # blanking a known estimate with an endpoint that happened to answer empty that day.
-    for endpoint in ("get_training_status", "get_max_metrics"):
-        payload = _as_mapping(day.payloads.get(endpoint))
-        if payload is None:
-            continue
-        running, cycling = extract_vo2max(payload)
-        if running is not None or cycling is not None:
-            daily = replace(daily, vo2max_running=running, vo2max_cycling=cycling)
-            break
+    daily = _merge_vo2max(daily, day)
 
     composition_payload = _as_mapping(day.payloads.get("get_body_composition"))
     if composition_payload is not None:

@@ -231,8 +231,9 @@ def format_reconcile_report(report: ReconcileReport) -> str:
     lines.append(f"BENIGN -- orphan files on volume ({len(report.orphan_files)}):")
     if not report.orphan_files:
         lines.append("  (none)")
-    for of in report.orphan_files[:_MAX_LISTED_LINES]:
-        lines.append(f"  {of.path} ({of.size_bytes} bytes)")
+    lines.extend(
+        f"  {of.path} ({of.size_bytes} bytes)" for of in report.orphan_files[:_MAX_LISTED_LINES]
+    )
     if len(report.orphan_files) > _MAX_LISTED_LINES:
         lines.append(f"  ... and {len(report.orphan_files) - _MAX_LISTED_LINES} more.")
     if report.orphan_files:

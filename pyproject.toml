@@ -61,6 +61,7 @@ addopts = "--cov=t0 --cov-report=term-missing"
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+extend-exclude = [".pytest-cache-review", ".pytest-tmp-review"]
 
 [tool.ruff.lint]
 select = [
@@ -74,17 +75,41 @@ select = [
     "SIM",  # flake8-simplify
     "N",    # pep8-naming
     "RUF",  # ruff rules
-    "S",    # flake8-bandit
+    "S",    # flake8-bandit (SAST)
     "A",    # flake8-builtins
     "PL",   # pylint
     "TCH",  # flake8-type-checking
+    "C90",  # mccabe: cyclomatic complexity (limit below)
+    "DTZ",  # flake8-datetimez: no naive datetime (SAST)
+    "PERF", # perflint
+    "PT",   # flake8-pytest-style
+    "RET",  # flake8-return
+    "SLF",  # flake8-self: no private member access outside the class
 ]
 ignore = [
     "PLR0913", # too many arguments: ingestion signatures legitimately have many
+    # Not enabled: ARG (fixtures/fakes carry unused args by design), ISC
+    # (conflicts with ruff format).
 ]
 
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+# PLR0912/PLR0915 are already active via "PL"; pinned here to make the budget explicit.
+max-branches = 12
+max-statements = 50
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "PLR2004"]
+"tests/**" = [
+    "S101",   # asserts are the point of tests
+    "S105",   # hardcoded test tokens
+    "S106",   # hardcoded test passwords
+    "PLR2004", # magic values are fine in test expectations
+    "SLF001", # tests inspect internals of fakes and of the code under test
+    "DTZ",    # naive datetimes are fine to build test fixtures
+    "C901",   # fake SQL routers are legitimately branchy
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["t0"]

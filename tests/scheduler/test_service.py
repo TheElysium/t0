@@ -286,7 +286,7 @@ def test_multiple_endpoints_are_processed_independently() -> None:
 def test_history_start_after_today_raises_error() -> None:
     db = FakePollDB()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must be <="):
         run_scheduled_poll(
             db,
             endpoints=["get_activities"],

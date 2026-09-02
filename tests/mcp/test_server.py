@@ -74,7 +74,7 @@ def _normalized(text: str) -> str:
 
 
 @pytest.mark.parametrize(
-    "migration,fragment",
+    ("migration", "fragment"),
     [
         (
             "003_core_ref.sql",
