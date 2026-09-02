@@ -36,6 +36,7 @@ dependencies = [
     # whole public API (mcp.server.mcpserver) for too little gain here, and the
     # 1.x line is the one documented for streamable HTTP + stateless mode.
     "mcp==1.29.1",
+    "prometheus-client>=0.26.0",
 ]
 
 [project.optional-dependencies]

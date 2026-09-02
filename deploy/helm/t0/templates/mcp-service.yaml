@@ -20,4 +20,9 @@ spec:
     - name: http
       port: {{ .Values.mcp.service.port }}
       targetPort: http
+    # Prometheus scrape port: separate from http so the HTTPRoute (which
+    # forwards ALL paths) can never expose /metrics to the LAN.
+    - name: metrics
+      port: {{ .Values.mcp.metrics.port }}
+      targetPort: metrics
 {{- end }}

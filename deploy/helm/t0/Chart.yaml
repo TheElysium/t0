@@ -4,7 +4,7 @@ description: >-
   Ingestion, storage and visualization of an athlete's Garmin data
   (Python ingestion, PostgreSQL, Grafana) -- homelab deployment, local access only.
 type: application
-version: 0.1.5
+version: 0.1.6
 appVersion: "0.1.4"
 keywords:
   - garmin

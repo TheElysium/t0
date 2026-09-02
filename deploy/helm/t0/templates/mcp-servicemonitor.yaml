@@ -1,0 +1,20 @@
+{{- if and .Values.mcp.enabled .Values.mcp.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "t0.fullname" . }}-mcp
+  labels:
+    {{- include "t0.labels" . | nindent 4 }}
+    {{- with .Values.mcp.metrics.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "t0.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.mcp.metrics.serviceMonitor.interval }}
+{{- end }}

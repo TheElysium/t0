@@ -9,6 +9,7 @@ import uvicorn
 
 from t0.logging_setup import configure_logging
 from t0.mcp.db import Reader
+from t0.mcp.metrics import MetricsMiddleware, start_metrics_server
 from t0.mcp.server import BIND_HOST, create_app
 from t0.settings import get_mcp_settings
 
@@ -48,8 +49,14 @@ def main() -> int:
         statement_timeout_ms=settings.mcp_statement_timeout_ms,
     )
     app = create_app(settings, reader)
-    logger.info("MCP server starting on port %d (7 read-only tools).", settings.mcp_port)
-    uvicorn.run(app, host=BIND_HOST, port=settings.mcp_port, log_level="info")
+    logger.info(
+        "MCP server starting on port %d (7 read-only tools), metrics on %d.",
+        settings.mcp_port,
+        settings.mcp_metrics_port,
+    )
+    start_metrics_server(settings.mcp_metrics_port)
+    # Outermost layer: auth rejections are counted too.
+    uvicorn.run(MetricsMiddleware(app), host=BIND_HOST, port=settings.mcp_port, log_level="info")
     return 0
 
 

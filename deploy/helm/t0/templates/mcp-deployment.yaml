@@ -49,6 +49,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.mcp.service.port }}
+            - name: metrics
+              containerPort: {{ .Values.mcp.metrics.port }}
           env:
             - name: T0_MCP_BEARER_TOKEN
               valueFrom:
@@ -71,6 +73,8 @@ spec:
             # (8000) would otherwise desynchronize the probes and the Service.
             - name: T0_MCP_PORT
               value: {{ .Values.mcp.service.port | quote }}
+            - name: T0_MCP_METRICS_PORT
+              value: {{ .Values.mcp.metrics.port | quote }}
             - name: T0_LOG_LEVEL
               value: {{ .Values.mcp.config.logLevel | quote }}
             - name: HOME

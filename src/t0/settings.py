@@ -84,6 +84,12 @@ class McpSettings(BaseSettings):
         le=65535,
         description="TCP port the MCP server (uvicorn) listens on.",
     )
+    mcp_metrics_port: int = Field(
+        default=9090,
+        ge=1,
+        le=65535,
+        description="Dedicated /metrics port for Prometheus, outside the Bearer app.",
+    )
 
 
 class Settings(McpSettings):

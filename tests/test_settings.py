@@ -171,6 +171,7 @@ def test_mcp_fields_are_optional_with_safe_defaults(
     assert settings.mcp_statement_timeout_ms == 10_000
     assert settings.mcp_max_rows == 500
     assert settings.mcp_port == 8000
+    assert settings.mcp_metrics_port == 9090
 
 
 def test_mcp_secrets_never_appear_in_repr_or_serialization(
