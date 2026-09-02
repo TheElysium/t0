@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "t0"
-version = "0.1.4"
+version = "0.1.7"
 description = "Self-hosted Garmin Connect data ingestion and visualization pipeline."
 readme = "README.md"
 # Upper bound assumed: CI, mypy (`python_version`), ruff target, and Docker image
