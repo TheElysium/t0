@@ -418,8 +418,9 @@ tools -- no raw SQL, no writes.
 
    If `mcp.enabled` is true and this value is empty, rendering **fails** with
    the Secret creation command in the message. Object grants for `t0_mcp_ro`
-   live in the t0 migration `020_mcp_ro_grants.sql` (USAGE + SELECT on `mart.*`,
-   default privileges for future tables).
+   live in the t0 migrations `020_mcp_ro_grants.sql` + `021_mcp_core_grants.sql`
+   (USAGE/SELECT on `mart.*` and `core.threshold`/`core.activity`, default
+   privileges for future tables).
 
 ### LAN exposure through the Gateway
 
@@ -463,9 +464,27 @@ kubectl get secret -n t0 t0-mcp-auth \
   -o jsonpath='{.data.token}' | base64 -d; echo
 ```
 
+### Prometheus metrics
+
+The MCP serves `/metrics` on a dedicated port (`mcp.metrics.port`, default
+`9090`) of the same Service: request counters (method/path/status — 401s
+included) and latency histogram. The HTTPRoute forwards ALL paths, so the
+metrics port is deliberately NOT routed through the Gateway — no LAN exposure.
+Scraping is opt-in:
+
+```yaml
+mcp:
+  metrics:
+    port: 9090
+    serviceMonitor:
+      enabled: true          # renders ServiceMonitor <release>-mcp
+      interval: 30s
+      additionalLabels: {}   # extra labels, e.g. the Prometheus release selector
+```
+
 ### Guardrails
 
-- `mcp.config.statementTimeoutMs` (default `5000`) -- `statement_timeout` on
+- `mcp.config.statementTimeoutMs` (default `10000`) -- `statement_timeout` on
   the read-only connection: a curated query cannot run away.
 - `mcp.config.maxRows` (default `500`) -- safety `LIMIT` ceiling applied to
   every tool query: unbounded output can make the tool call itself fail
@@ -475,12 +494,11 @@ kubectl get secret -n t0 t0-mcp-auth \
 
 ### NetworkPolicy caveat
 
-The chart's NetworkPolicy stays **disabled by default** and is unchanged by
-`mcp.enabled`. If `networkPolicy.enabled` is ever turned on while the MCP is
-exposed through the Gateway, add an ingress rule Gateway→MCP and egress
-MCP→PostgreSQL:5432, then **re-test the Gateway path explicitly**: Envoy
-forwards traffic with a source identity that is not the client pod's, so a
-pod-to-pod policy can silently block the route.
+When `networkPolicy.enabled` is turned on, the chart renders an MCP stanza
+(egress PostgreSQL + DNS, no ingress — same posture as Grafana). After
+enabling, **re-test the Gateway path explicitly**: Envoy forwards traffic with
+a source identity that is not the client pod's, so a pod-to-pod policy can
+silently block the route.
 
 **The ingest Service gets no HTTPRoute and the MCP never shares its process:
 by design, not by configuration.**

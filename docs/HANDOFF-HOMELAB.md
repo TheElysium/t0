@@ -45,7 +45,7 @@ Notes:
 
 - **No `inRole`/membership of `t0` or `pg_read_all_data`**, no
   `CREATEROLE`/`CREATEDB`/`SUPERUSER`: read access comes ONLY from the t0
-  migrations (020/021), scoped to `mart.*`, `core.threshold` and
+  migrations (020/021/022), scoped to `mart.*`, `core.threshold` and
   `core.activity` — role inheritance would silently widen it to `raw.*`.
 - The default privileges are bound to `t0` by the migration itself (run as the
   app user), so future marts created by `t0` are automatically readable —
@@ -105,6 +105,11 @@ curl -s  http://t0-mcp.homelab.internal/healthz        # {"status":"ok"} — no 
 curl -si http://t0-mcp.homelab.internal/mcp | head -1  # HTTP/1.1 401 — no token
 ```
 
+Metrics: the MCP serves `:9090/metrics` on the same Service (never routed by
+the HTTPRoute). With `mcp.metrics.serviceMonitor.enabled=true` in the release
+values, a `ServiceMonitor` `t0-mcp` is rendered and the kube-prometheus-stack
+Prometheus scrapes it — target `t0-mcp`, health `up`.
+
 A `401` on `/mcp` without a token is the expected unauthenticated posture, not
 a fault. `/healthz` and `/readyz` are unauthenticated by necessity (kubelet
 probes); `/readyz` answers `{"status": "unavailable"}` on a database outage —
@@ -135,4 +140,5 @@ start, and the checksum annotation only covers the chart-created Secret path.
 - [ ] Gateway `homelab` still `PROGRAMMED` on `192.168.1.212`, `allowedRoutes: All`
 - [ ] `t0-mcp.homelab.internal` resolves via the wildcard record
 - [ ] After deploy: HTTPRoute `t0-mcp` attached; `/healthz` 200 unauthenticated; `/mcp` 401 unauthenticated; tool call OK with token
+- [ ] Prometheus target `t0-mcp` (port 9090) `up` in kube-prometheus-stack
 - [ ] TLS task: include `t0-mcp.homelab.internal` in the future `*.homelab.internal` certificate

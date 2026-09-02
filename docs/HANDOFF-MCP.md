@@ -72,7 +72,9 @@ The MCP never uses the `t0` app credentials. A dedicated role `t0_mcp_ro`:
   present). Until then, migration `020_mcp_ro_grants.sql` aborts on its GRANT
   to the missing role — by design.
 - **Object grants live in t0 migrations** (`020_mcp_ro_grants.sql` then
-  `021_mcp_core_grants.sql`, the fix of 020 which lacked the `core` schema):
+  `021_mcp_core_grants.sql`, the fix of 020 which lacked the `core` schema;
+  `022_mart_activity_wide_swim_time.sql` later rebuilds `mart.activity_wide`
+  to expose `swim_time_s`):
   - `GRANT USAGE ON SCHEMA mart TO t0_mcp_ro;`
   - `GRANT SELECT ON ALL TABLES IN SCHEMA mart TO t0_mcp_ro;`
   - `GRANT USAGE ON SCHEMA core TO t0_mcp_ro;`
@@ -95,24 +97,31 @@ The MCP never uses the `t0` app credentials. A dedicated role `t0_mcp_ro`:
 
 ## 4. Tools — fully curated, no raw SQL
 
-Seven curated tools. **No raw-SQL escape hatch** in v1.
+Eight curated tools. **No raw-SQL escape hatch** in v1.
 
 | Tool | Backing mart(s) |
 | --- | --- |
 | `get_pmc` | `mart.pmc` (CTL/ATL/TSB) |
-| `list_activities` | `mart.activity_load` / `mart.activity_wide` |
+| `list_activities` | `mart.activity_wide` (limit + sport_code/date filters) |
 | `get_activity` | `mart.activity_wide` |
-| `get_power_curve` | `mart.power_curve_best` |
+| `get_power_curve` | `mart.power_curve_best` (date-windowed) |
 | `get_wellness` | `mart.wellness_baseline` |
+| `get_ramp_risk` | `mart.ramp_risk` (dCTL/week, monotony, strain, estimated_share_7d) |
 | `get_coach_flags` | `mart.coach_flags` |
 | `get_thresholds` | `core.threshold` |
 
-Output policy (v1):
+Output policy:
 
-- **Unbounded raw output** — deliberate "for now" choice. But keep two
-  non-negotiable guards, because unbounded output can make the tool call itself
-  *fail* (context overflow / token cost): a safety `LIMIT` on every query and
-  **double rounding** on numeric fields.
+- **Envelope `{"rows": [...], "truncated": bool}`** on every multi-row tool.
+  `truncated=true` means the window may extend beyond the returned rows — the
+  server never lets a silently capped window read as the full history. The
+  safety `LIMIT` (server-side `max_rows`, client-side `limit` on
+  `list_activities`) still bounds every query, with double rounding.
+- **Filters validate their vocabulary dynamically and fail loudly**: an
+  unknown `sport_code` (mart-derived) or threshold `discipline`
+  (`core.threshold`-derived) is an explicit error naming the valid values —
+  never a silent empty list. The three vocabularies (sport_code, sport label,
+  threshold discipline) are disjoint; the instructions block says so.
 - The server ships an **`instructions` block** recycled from the load-bearing
   `COMMENT ON` text in the migrations (`migrations/007_mart.sql` and later).
 - **Interpretation flags are never elided** from tool output:
@@ -120,8 +129,12 @@ Output policy (v1):
     artifact, not real progression).
   - `tss_method` — HR-derived vs power-derived TSS changes interpretation.
   - `has_estimated_load`, `data_quality` — surface gaps honestly.
-  - `is_parent` / `is_canonical` semantics respected so multisport activities
-    are not double-counted.
+  - `swim_time_s` — ACTIVE swim time (rest-at-wall excluded, migration 022);
+    the denominator of swim sTSS/IF, never `duration_s` (elapsed time).
+  - `efficiency_factor_unit` — "m/s per bpm" (run family) vs "W per bpm"
+    (bike family); 4 decimals, the run-family values are ~0.02.
+  - `is_parent` semantics respected so multisport activities are not
+    double-counted.
 
 These flags are the whole point: the LLM must not read a number without its
 caveat.
@@ -152,8 +165,14 @@ caveat.
   HTTPRoute `t0-mcp` on the shared Gateway only — no route to the ingest.
 - **TLS**: nothing chart-side — the future internal `*.homelab.internal`
   certificate covers `t0-mcp.homelab.internal` with no chart change.
-- **NetworkPolicy**: the chart's policy is off by default. If ever enabled, add
-  ingress Gateway→MCP and egress MCP→namespace `postgres`:5432, and **re-test
+- **Metrics**: the process serves Prometheus metrics on a dedicated port
+  (`mcp.metrics.port`, 9090) — outermost middleware, so 401s are counted too.
+  The port lives on the same Service but is NEVER routed by the HTTPRoute
+  (which forwards all paths): no LAN exposure. Scraping is gated by
+  `mcp.metrics.serviceMonitor.enabled` (ServiceMonitor `t0-mcp`, target port
+  `metrics`); the deployed release enables it.
+- **NetworkPolicy**: an MCP stanza ships with the chart (egress PostgreSQL +
+  DNS, no ingress — same posture as Grafana). After enabling, **re-test
   the Gateway path** — Envoy forwards with a source identity that is not the
   client pod's, so a pod-to-pod policy can silently block it (same caveat as
   `HANDOFF-GATEWAY.md §4`).
@@ -162,7 +181,7 @@ caveat.
 
 - Tool handlers as **pure functions** (query → shape → round), tested against a
   DB fixture.
-- One **protocol smoke test**: the server lists exactly 7 tools and one tool
+- One **protocol smoke test**: the server lists exactly 8 tools and one tool
   round-trips over the transport.
 - Fits the existing discipline: `ruff` / `ruff format` / `mypy` / `pytest` in
   CI order.
@@ -172,7 +191,7 @@ caveat.
 - [ ] `homelab`: `t0_mcp_ro` role + password via `managed.roles`, DSN Secret
 - [ ] t0 migration `020_mcp_ro_grants.sql` (USAGE + SELECT + default privileges)
 - [ ] t0 migration `021_mcp_core_grants.sql` (USAGE on core, SELECT on core.threshold/core.activity)
-- [ ] `src/t0/mcp/`: server, ASGI Bearer middleware, 7 tool handlers,
+- [ ] `src/t0/mcp/`: server, ASGI Bearer middleware, 8 tool handlers,
       `instructions` block, never-elided flags, safety LIMIT + double rounding
 - [ ] `statement_timeout` on the RO connection
 - [ ] Helm: gated Deployment + Service + HTTPRoute (`mcp.enabled` /
