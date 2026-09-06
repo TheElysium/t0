@@ -7,13 +7,13 @@
     "session",
     "run"
   ],
-  "timezone": "browser",
+  "timezone": "utc",
   "editable": true,
   "schemaVersion": 39,
   "version": 1,
   "graphTooltip": 1,
   "time": {
-    "from": "now-90d",
+    "from": "1970-01-01 00:00:00",
     "to": "now"
   },
   "refresh": "",
@@ -460,7 +460,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -501,7 +501,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.power AS \"Power (W)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.power IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, s.power AS \"Power (W)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.power IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -570,13 +570,13 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, 1000.0 / NULLIF(s.speed_mps, 0) AS \"Pace (min/km)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps > 0.5 ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, 1000.0 / NULLIF(s.speed_mps, 0) AS \"Pace (min/km)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.speed_mps > 0.5 ORDER BY 1"
         },
         {
           "refId": "B",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, round((s.altitude_m - min(s.altitude_m) OVER ())::numeric, 1) AS \"Altitude (m, relative)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, round((s.altitude_m - min(s.altitude_m) OVER ())::numeric, 1) AS \"Altitude (m, relative)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -633,13 +633,13 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.cadence AS \"Cadence\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.cadence IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, s.cadence AS \"Cadence\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.cadence IS NOT NULL ORDER BY 1"
         },
         {
           "refId": "B",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.step_length AS \"Step length (m)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.step_length IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, s.step_length AS \"Step length (m)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.step_length IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -757,7 +757,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(l.start_time, 'HH24:MI:SS') AS \"Start\", l.duration_s / 60.0 AS \"Duration (min)\", l.distance_m / 1000.0 AS \"Distance (km)\", round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
+          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(extract(epoch from (l.start_time - a.start_time))::int * interval '1 second', 'MI:SS') AS \"Start\", l.duration_s / 60.0 AS \"Duration (min)\", l.distance_m / 1000.0 AS \"Distance (km)\", round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l JOIN core.activity a ON a.activity_id = l.activity_id WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
         }
       ]
     },
@@ -800,7 +800,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT l.start_time AS time, round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id AND l.distance_m > 0 ORDER BY 1",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (l.start_time - a.start_time)) * interval '1 second') AS time, round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\" FROM core.activity_lap l JOIN core.activity a ON a.activity_id = l.activity_id WHERE l.activity_id = $activity_id AND l.distance_m > 0 ORDER BY 1",
           "refId": "A"
         }
       ]
