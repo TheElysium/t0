@@ -92,9 +92,7 @@ def test_cumulative_distance_is_rebased_per_leg() -> None:
     re-basing, every leg after the first would claim the event's running total."""
     sessions = (
         make_session(START, sport="swimming", sub_sport="open_water", duration_s=600.0),
-        make_session(
-            START + timedelta(seconds=600), sport="running", duration_s=600.0
-        ),
+        make_session(START + timedelta(seconds=600), sport="running", duration_s=600.0),
     )
     samples = [
         make_sample(0, heart_rate=150, distance_m=0.0),

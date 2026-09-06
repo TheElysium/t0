@@ -183,9 +183,7 @@ def split_multisport_legs(
                 sample,
                 elapsed_s=round((sample.t - window.start).total_seconds()),
                 distance_m=(
-                    None
-                    if sample.distance_m is None
-                    else sample.distance_m - distance_baseline
+                    None if sample.distance_m is None else sample.distance_m - distance_baseline
                 ),
             )
             for sample in decoded.samples
