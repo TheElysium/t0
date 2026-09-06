@@ -877,7 +877,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", aw.name AS \"Name\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.avg_hr AS \"Avg HR\", aw.tss AS \"TSS\", aw.activity_id AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false ORDER BY aw.local_date DESC LIMIT 15"
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", aw.name AS \"Name\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.avg_hr AS \"Avg HR\", aw.tss AS \"TSS\", aw.activity_id::text AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false ORDER BY aw.local_date DESC LIMIT 15"
         }
       ]
     }
