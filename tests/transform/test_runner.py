@@ -35,7 +35,9 @@ from tests.transform.conftest import (
     ALL_THRESHOLD,
     ATHLETE_ID,
     RUN_THRESHOLD,
+    START,
     make_sample,
+    make_session,
     parsed_source,
 )
 
@@ -110,6 +112,11 @@ class FakeCursor:
             self._conn.manual_seq_calls += 1
             next_id = 9000000000000000000 + self._conn.manual_seq_calls
             return [(next_id,)]
+        if "NEXTVAL('CORE.LEG_ACTIVITY_ID_SEQ')" in upper:
+            self._conn.leg_seq_calls += 1
+            return [(9200000000000000000 + self._conn.leg_seq_calls,)]
+        if "LEG_ORDER, ACTIVITY_ID FROM CORE.ACTIVITY" in upper:
+            return sorted(self._conn.leg_rows.items())
         return None
 
     def _select_raw(self, upper: str, params: Any) -> list[Any]:
@@ -177,6 +184,9 @@ class FakeConnection:
     #: fit_file_id -> already-stored manual activity_id (migration 014 idempotence).
     manual_activities: dict[int, int] = field(default_factory=dict)
     manual_seq_calls: int = 0
+    #: leg_order -> activity_id, already-stored legs of the parent (migration 023).
+    leg_rows: dict[int, int] = field(default_factory=dict)
+    leg_seq_calls: int = 0
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
@@ -527,3 +537,173 @@ def test_manual_upload_isolation_one_bad_file_does_not_kill_the_pass(
     assert "curling" in conn.parse_errors[4]
     # The good file's activity_id must have been persisted despite the bad file's failure.
     assert 3 in conn.manual_activities
+
+
+# --- Multisport split (migration 023) ----------------------------------------------
+
+
+def _activity_inserts(conn: FakeConnection) -> list[tuple[Any, ...]]:
+    return [
+        params
+        for query, params in conn.executed
+        if query.upper().startswith("INSERT INTO CORE.ACTIVITY ")
+        and isinstance(params, tuple)
+        and len(params) == 41
+    ]
+
+
+def _decode_multisport_fit(
+    path: object, *, activity_id: int, second_sport: str = "running"
+) -> ParsedActivitySource:
+    """Double for a multisport FIT file: two contiguous sessions (swim then leg 2).
+
+    Contiguous HALF-OPEN windows by construction: the sample AT the second session's
+    start must belong to the second leg, mirroring the VERIFIED 2026-09-05 file where
+    the bike session starts at the exact second T1's timer ends.
+    """
+    samples = [
+        replace(s, activity_id=activity_id)
+        for s in (make_sample(i, heart_rate=150, speed_mps=4.2) for i in range(0, 2000, 30))
+    ]
+    sessions = (
+        make_session(START, sport="swimming", sub_sport="open_water", duration_s=1200.0),
+        make_session(START + timedelta(seconds=1200), sport=second_sport, duration_s=800.0),
+    )
+    return parsed_source(
+        samples,
+        sessions=sessions,
+    )
+
+
+MULTISPORT_SUMMARY = {
+    **SUMMARY,
+    "activityType": {"typeKey": "multi_sport"},
+    "duration": 4000.0,
+}
+
+
+def test_multisport_garmin_file_stores_parent_and_legs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 2026-09-05 defect, end to end: parent + one bundle per session, SAME
+    transaction, before ``parsed_at``."""
+    monkeypatch.setattr(
+        runner_module,
+        "decode_fit_file",
+        lambda p, *, activity_id: _decode_multisport_fit(p, activity_id=activity_id),
+    )
+    conn = _conn(tmp_path)
+    conn.summaries = {ACTIVITY_ID: dict(MULTISPORT_SUMMARY)}
+
+    report = transform_pending_files(conn, athlete_id=ATHLETE_ID)
+
+    assert report.stored == 1
+    inserts = _activity_inserts(conn)
+    assert len(inserts) == 3  # parent + swim leg + run leg
+    parent, swim, run = inserts
+    assert parent[0] == ACTIVITY_ID
+    assert parent[33] is True  # is_parent
+    assert swim[0] == 9200000000000000001  # first draw, leg seq
+    assert swim[2] == "open_water"
+    assert swim[34] == 1  # leg_order
+    assert run[0] == 9200000000000000002
+    assert run[2] == "running"
+    assert run[34] == 2
+    for leg in (swim, run):
+        assert leg[32] == ACTIVITY_ID  # parent_activity_id
+        assert leg[33] is False
+        assert leg[40] == "leg"
+        assert leg[36] == 1  # fit_file_id: same file as the parent
+    statements = conn.statements()
+    assert "DELETE FROM core.activity WHERE parent_activity_id = %s AND source = 'leg';" in (
+        statements
+    )
+    # One commit for parent + legs, BEFORE parsed_at: see module write-order docstring.
+    insert_indices = [
+        i for i, q in enumerate(statements) if q.upper().startswith("INSERT INTO CORE.ACTIVITY ")
+    ]
+    commit_index = next(i for i, q in enumerate(statements) if q == "COMMIT")
+    parsed_index = next(
+        i
+        for i, q in enumerate(statements)
+        if q.upper().startswith("UPDATE RAW.FIT_FILE SET PARSED_AT")
+    )
+    assert max(insert_indices) < commit_index < parsed_index
+
+
+def test_leg_split_failure_marks_file_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A triathlon stored MINUS one leg would corrupt every load average silently:
+    the split is all-or-nothing, one unknown session sport fails the whole file."""
+    monkeypatch.setattr(
+        runner_module,
+        "decode_fit_file",
+        lambda p, *, activity_id: _decode_multisport_fit(
+            p, activity_id=activity_id, second_sport="curling"
+        ),
+    )
+    conn = _conn(tmp_path)
+    conn.summaries = {ACTIVITY_ID: dict(MULTISPORT_SUMMARY)}
+
+    report = transform_pending_files(conn, athlete_id=ATHLETE_ID)
+
+    assert report.failed == 1
+    assert "curling" in conn.parse_errors[1]
+    assert _activity_inserts(conn) == []
+
+
+def test_leg_ids_are_reused_across_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second pass must re-attach to the SAME legs, never re-draw and orphan the
+    previous series (same reasoning as manual idempotence, migration 014)."""
+    monkeypatch.setattr(
+        runner_module,
+        "decode_fit_file",
+        lambda p, *, activity_id: _decode_multisport_fit(p, activity_id=activity_id),
+    )
+    conn = _conn(tmp_path)
+    conn.summaries = {ACTIVITY_ID: dict(MULTISPORT_SUMMARY)}
+    conn.leg_rows = {1: 9200000000000000099}
+
+    report = transform_pending_files(conn, athlete_id=ATHLETE_ID)
+
+    assert report.stored == 1
+    inserts = _activity_inserts(conn)
+    assert len(inserts) == 3
+    # Leg order 1 already stored: reused; order 2 (run) drawn fresh from the sequence.
+    assert inserts[1][0] == 9200000000000000099
+    assert inserts[2][0] == 9200000000000000001
+    assert conn.leg_seq_calls == 1
+
+
+def test_manual_multisport_upload_stores_parent_and_leg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manually uploaded triathlon FIT follows the SAME split (t0.transform.manual
+    detects >1 session), otherwise /uploads stays second-class for race files."""
+    monkeypatch.setattr(
+        runner_module,
+        "decode_fit_file",
+        lambda p, *, activity_id: _decode_multisport_fit(p, activity_id=activity_id),
+    )
+
+    file = tmp_path / "triathlon.fit"
+    file.write_bytes(b"")
+    conn = FakeConnection(pending=[PendingFile(5, None, str(file))])
+
+    report = transform_pending_files(conn, athlete_id=ATHLETE_ID)
+
+    assert report.stored == 1
+    inserts = _activity_inserts(conn)
+    assert len(inserts) == 3
+    parent, swim, run = inserts
+    # Parent is the manual activity: provenance tracked, id from the manual range.
+    assert parent[40] == "manual"
+    assert parent[33] is True
+    assert conn.manual_activities[5] == parent[0]
+    assert parent[0] >= 9000000000000000000
+    for leg in (swim, run):
+        assert leg[40] == "leg"
+        assert leg[32] == parent[0]
+    assert swim[34] == 1
+    assert run[34] == 2

@@ -128,6 +128,11 @@ class ParsedActivitySource:
     start_time: datetime | None
     """Earliest known absolute instant in activity (session.start_time for FIT,
     first sample timestamp for TCX). ``None`` only if file contains no usable samples."""
+    sessions: tuple[SessionSummary, ...] = ()
+    """Every FIT ``session`` message, in file order (TCX: always empty -- no session
+    message exists). ``session`` stays the FIRST session, so a single-sport file (the
+    overwhelmingly common case) is unchanged; a multisport file declares itself by
+    ``len(sessions) > 1`` and is split by the transform (see ``t0.transform.multisport``)."""
     tcx_sport: str | None = None
     """Root ``Activity`` element's ``Sport`` attribute, TCX only ("Running" | "Biking" |
     "Other" per the TCX schema). Added here rather than as a new dataclass because this

@@ -16,7 +16,7 @@ WRITE ORDER, AND WHY THAT ONE. The bundle is written and VALIDATED first, then
 reasoning as the atomicity rule "file on PVC BEFORE its row in database" from the
 ``raw.fit_file`` comment, applied one level deeper. A crash between the two leaves an
 activity written in ``core`` and a file still marked unparsed -- the next pass retakes
-it, and since :func:`~t0.transform.store.store_activity_bundle` is idempotent
+it, and since :func:`~t0.transform.store.store_activity_bundles` is idempotent
 (full replacement per activity), the final state is the same. The reverse order would
 produce a file marked parsed whose activity was never written: a session lost silently,
 never retaken by any pass.
@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -49,7 +50,8 @@ from t0.fit.reader import decode_fit_file
 from t0.tcx.reader import decode_tcx_file
 from t0.transform.activity import build_core_rows
 from t0.transform.manual import build_manual_activity_context
-from t0.transform.store import store_activity_bundle
+from t0.transform.multisport import build_leg_bundle, split_multisport_legs
+from t0.transform.store import resolve_leg_activity_ids, store_activity_bundles
 from t0.transform.summary import build_activity_context, load_thresholds, select_thresholds
 
 if TYPE_CHECKING:
@@ -64,7 +66,11 @@ logger = logging.getLogger(__name__)
 #: in the column comment: "lets us selectively replay files parsed by a buggy version".
 #: It only helps if it CHANGES when decode or transform behavior changes -- increment
 #: deliberately, never auto-derived from package version.
-PARSER_VERSION = "t0-transform/1"
+#: Version 2: multisport FIT files are split into per-session legs
+#: (``t0.transform.multisport``, migration 023). Files parsed by version 1 that carry
+#: more than one ``session`` message (the athlete's two multisport events) must be
+#: replayed to produce their legs -- see docs/RUNBOOK.md section 10.
+PARSER_VERSION = "t0-transform/2"
 
 #: Limit per pass. A nightly CronJob has no reason to process all 1,090 historical
 #: files on first start: better several short passes, each leaving the database in
@@ -92,7 +98,7 @@ class _Cursor(Protocol):
     """Minimal surface required of a cursor by THIS module.
 
     ``executemany`` appears here even though no function here calls it:
-    :func:`~t0.transform.store.store_activity_bundle`, to which the connection
+    :func:`~t0.transform.store.store_activity_bundles`, to which the connection
     is passed as-is, needs it. Without it, this protocol would not be a subtype of
     ``store``'s, and the handoff would not type-check -- yet it would work at runtime.
     Better to state it than work around it with a ``cast``.
@@ -459,7 +465,38 @@ def transform_one(
             all_threshold=all_threshold,
             sex=sex,
         )
-        store_activity_bundle(conn, bundle)
+        bundles = [bundle]
+        if context.is_parent:
+            # Multisport event (see t0.transform.multisport for why the split lives
+            # HERE and not on Garmin's side): one leg bundle per FIT session, stored
+            # with the parent in the SAME transaction. A leg that fails to build
+            # aborts the whole bundle write (parse_error): a triathlon visible minus
+            # its bike leg would corrupt every load average silently.
+            leg_plans = split_multisport_legs(decoded, context)
+            if leg_plans:
+                leg_ids = resolve_leg_activity_ids(
+                    conn,
+                    parent_activity_id=context.activity_id,
+                    leg_orders=[plan.leg_order for plan in leg_plans],
+                )
+                for plan, leg_id in zip(leg_plans, leg_ids, strict=True):
+                    leg_start_local = context.start_time_local + timedelta(seconds=plan.offset_s)
+                    leg_threshold, leg_all_threshold = select_thresholds(
+                        thresholds, plan.discipline, leg_start_local.date()
+                    )
+                    bundles.append(
+                        build_leg_bundle(
+                            plan,
+                            leg_activity_id=leg_id,
+                            parent_context=context,
+                            athlete_id=athlete_id,
+                            fit_file_id=pending.fit_file_id,
+                            threshold=leg_threshold,
+                            all_threshold=leg_all_threshold,
+                            sex=sex,
+                        )
+                    )
+        store_activity_bundles(conn, tuple(bundles))
         # After bundle commit, never before: see "write order" at module start.
         _mark_parsed(conn, pending.fit_file_id)
     except Exception as exc:  # isolate this file's error, cf. docstring.
@@ -468,7 +505,12 @@ def transform_one(
         _mark_failed(conn, pending.fit_file_id, message)
         return FileOutcome(pending.fit_file_id, activity_id, "failed", message)
 
-    logger.info("activity %s written to core (%s samples).", activity_id, len(bundle.samples))
+    logger.info(
+        "activity %s written to core (%s samples, %s leg(s)).",
+        activity_id,
+        len(bundle.samples),
+        len(bundles) - 1,
+    )
     return FileOutcome(pending.fit_file_id, activity_id, "stored")
 
 

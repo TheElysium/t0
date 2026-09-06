@@ -9,6 +9,7 @@ an average of 200 W, not a figure extracted from a real file)."""
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 from t0.fit.model import (
     LapRow,
@@ -108,18 +109,66 @@ def swim_context(*, duration_s: int = 1800, activity_id: int = ACTIVITY_ID) -> A
     )
 
 
+def multisport_context(
+    *, duration_s: int = 8000, activity_id: int = ACTIVITY_ID
+) -> ActivityContext:
+    """Multisport event parent (2026-09-05 triathlon shape): is_parent, no Garmin
+    type_key beyond the summary's -- cf. build_activity_context."""
+    return ActivityContext(
+        activity_id=activity_id,
+        sport_code="multisport",
+        discipline="other",
+        duration_s=duration_s,
+        start_time_local=START,
+        tz_offset_s=7200,
+        garmin_type_key="multi_sport",
+        is_parent=True,
+    )
+
+
+def make_session(
+    start: datetime,
+    *,
+    sport: str,
+    sub_sport: str | None = None,
+    duration_s: float,
+    distance_m: float | None = None,
+) -> SessionSummary:
+    """Hand-built FIT ``session`` message -- only the fields the split reads.
+
+    ``start_time`` is the decoded datetime the reader would carry (cf.
+    ``t0.fit.reader``: taken as-is from the session message)."""
+    raw: dict[str, Any] = {
+        "start_time": start,
+        "total_timer_time": duration_s,
+        "sport": sport,
+    }
+    if sub_sport is not None:
+        raw["sub_sport"] = sub_sport
+    if distance_m is not None:
+        raw["total_distance"] = distance_m
+    return SessionSummary(raw=raw)
+
+
 def parsed_source(
     samples: list[SampleRow],
     *,
     laps: list[LapRow] | None = None,
     swim_lengths: list[SwimLengthRow] | None = None,
     session: SessionSummary | None = None,
+    sessions: tuple[SessionSummary, ...] | None = None,
 ) -> ParsedActivitySource:
+    """``sessions`` overrides the per-file session list when given; by default it is
+    derived (``session`` alone, or ``(session,)`` when supplied): a single-sport file,
+    the shape every pre-multisport test exercises."""
+    if sessions is None:
+        sessions = () if session is None else (session,)
     return ParsedActivitySource(
         source_format="fit",
         samples=samples,
         laps=laps or [],
         swim_lengths=swim_lengths or [],
-        session=session,
+        session=sessions[0] if sessions else None,
         start_time=samples[0].t if samples else START,
+        sessions=sessions,
     )

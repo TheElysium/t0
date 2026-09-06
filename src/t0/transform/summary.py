@@ -112,6 +112,12 @@ DISCIPLINE_BY_SPORT_CODE: dict[str, str] = {
     "strength": "other",
 }
 
+#: Garmin ``activityType.typeKey`` of a multisport event parent. Lives here (next to
+#: the mapping that produces the ``multisport`` sport_code) so ``manual.py`` and
+#: ``multisport.py`` can reference it without importing each other.
+MULTISPORT_TYPE_KEY = "multi_sport"
+MULTISPORT_SPORT_CODE = "multisport"
+
 
 def _sport_code_for_type_key(type_key: str, activity_id: int) -> str:
     sport_code = SPORT_CODE_BY_TYPE_KEY.get(type_key)

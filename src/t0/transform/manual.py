@@ -15,11 +15,15 @@ naming the observed value, rather than folding to a default that would silently 
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from t0.transform.activity import ActivityContext
-from t0.transform.summary import DISCIPLINE_BY_SPORT_CODE
+from t0.transform.summary import (
+    DISCIPLINE_BY_SPORT_CODE,
+    MULTISPORT_SPORT_CODE,
+)
 
 if TYPE_CHECKING:
     from t0.fit.model import ParsedActivitySource
@@ -62,7 +66,7 @@ class UnknownManualSportError(ValueError):
     docstring for why this is never guessed around."""
 
 
-def _sport_code_for_fit(sport: str, sub_sport: str | None) -> str:
+def sport_code_for_fit(sport: str, sub_sport: str | None) -> str:
     sport_code = SPORT_CODE_BY_FIT_SPORT.get((sport, sub_sport))
     if sport_code is not None:
         return sport_code
@@ -124,6 +128,32 @@ def _fit_session_float(parsed: ParsedActivitySource, field: str) -> float | None
 _MIN_TCX_SAMPLES_FOR_DURATION = 2
 
 
+def _fit_event_span_s(parsed: ParsedActivitySource) -> int:
+    """Duration of a multisport manual upload: full event span, not session[0].
+
+    ``_fit_duration_s`` reads the FIRST session only (1341 s of swimming on the
+    VERIFIED triathlon shape) -- using it would store a 22-minute "triathlon". The
+    event spans first start to last start + last timer time; this matches what the
+    Garmin summary duration carries for the same file (8008 s, VERIFIED).
+    """
+    bounds: list[tuple[datetime, float]] = []
+    for session in parsed.sessions:
+        raw = session.raw
+        start = raw.get("start_time")
+        duration = raw.get("total_timer_time")
+        if not isinstance(start, datetime) or duration is None:
+            msg = (
+                "manual FIT upload: multisport session without usable 'start_time' or "
+                "'total_timer_time' -- event span not derivable."
+            )
+            raise ValueError(msg)
+        bounds.append((start, float(duration)))
+    bounds.sort()
+    first_start = bounds[0][0]
+    last_start, last_duration = bounds[-1]
+    return round((last_start - first_start).total_seconds() + last_duration)
+
+
 def _tcx_duration_s(parsed: ParsedActivitySource) -> int:
     samples = parsed.samples
     if len(samples) < _MIN_TCX_SAMPLES_FOR_DURATION:
@@ -161,25 +191,40 @@ def build_manual_activity_context(
         raise ValueError(msg)
 
     if parsed.source_format == "fit":
-        if parsed.session is None:
+        if len(parsed.sessions) > 1:
+            # Multisport event: session[0] is only the first leg (the VERIFIED
+            # triathlon file starts with 1341 s of open-water swimming) -- trusting it
+            # would store the whole race as 'open_water'. The parent keeps the
+            # 'multisport' sport_code (produces_records=false, cf. seed 003) and the
+            # event span; the legs are cut from the SAME file by the same split as the
+            # Garmin path (t0.transform.multisport). Per-leg distance fallbacks stay
+            # on the leg plans, never here.
+            sport_code = MULTISPORT_SPORT_CODE
+            duration_s = _fit_event_span_s(parsed)
+            distance_m = ascent_m = descent_m = None
+        elif parsed.session is None:
             msg = f"manual FIT upload (activity_id={activity_id}) has no 'session' message."
             raise ValueError(msg)
-        sport = parsed.session.raw.get("sport")
-        if sport is None:
-            msg = f"manual FIT upload (activity_id={activity_id}): 'session.sport' missing."
-            raise ValueError(msg)
-        sub_sport = parsed.session.raw.get("sub_sport")
-        sport_code = _sport_code_for_fit(str(sport), None if sub_sport is None else str(sub_sport))
-        duration_s = _fit_duration_s(parsed)
-        # POOL SWIMMING DEPENDS ON THIS. core.sample carries no distance for a pool swim
-        # (migrations/005_core_series.sql, core.swim_length comment), so distance_m can
-        # only come from the session summary -- which is precisely the fallback role
-        # ActivityContext.distance_m documents. Left unset, the activity lands with a NULL
-        # distance, swim_css cannot resolve for lack of a pace, and the swim silently falls
-        # back to hr_hrtss. Observed on the athlete's real swim file before this fix.
-        distance_m = _fit_session_float(parsed, "total_distance")
-        ascent_m = _fit_session_float(parsed, "total_ascent")
-        descent_m = _fit_session_float(parsed, "total_descent")
+        else:
+            sport = parsed.session.raw.get("sport")
+            if sport is None:
+                msg = f"manual FIT upload (activity_id={activity_id}): 'session.sport' missing."
+                raise ValueError(msg)
+            sub_sport = parsed.session.raw.get("sub_sport")
+            sport_code = sport_code_for_fit(
+                str(sport), None if sub_sport is None else str(sub_sport)
+            )
+            duration_s = _fit_duration_s(parsed)
+            # POOL SWIMMING DEPENDS ON THIS. core.sample carries no distance for a pool
+            # swim (migrations/005_core_series.sql, core.swim_length comment), so
+            # distance_m can only come from the session summary -- which is precisely
+            # the fallback role ActivityContext.distance_m documents. Left unset, the
+            # activity lands with a NULL distance, swim_css cannot resolve for lack of
+            # a pace, and the swim silently falls back to hr_hrtss. Observed on the
+            # athlete's real swim file before this fix.
+            distance_m = _fit_session_float(parsed, "total_distance")
+            ascent_m = _fit_session_float(parsed, "total_ascent")
+            descent_m = _fit_session_float(parsed, "total_descent")
     elif parsed.source_format == "tcx":
         sport_code = _sport_code_for_tcx(tcx_sport)
         duration_s = _tcx_duration_s(parsed)
@@ -226,7 +271,7 @@ def build_manual_activity_context(
         descent_m=descent_m,
         garmin_type_key=None,
         summary_sha256=None,
-        is_parent=False,
+        is_parent=sport_code == MULTISPORT_SPORT_CODE,
         source="manual",
     )
 
@@ -236,4 +281,5 @@ __all__ = [
     "SPORT_CODE_BY_TCX_SPORT",
     "UnknownManualSportError",
     "build_manual_activity_context",
+    "sport_code_for_fit",
 ]

@@ -39,12 +39,16 @@ class FakeCursor:
 
     def __init__(self, conn: FakeConnection) -> None:
         self._conn = conn
+        self._result: list[Any] = []
 
     def execute(self, query: str, params: Any = None) -> None:
         normalized = " ".join(query.split())
         self._conn.executed.append((normalized, params))
-        table = self._table_of(normalized)
         upper = normalized.upper()
+        if upper.startswith("SELECT"):
+            self._result = self._select(upper, params)
+            return
+        table = self._table_of(normalized)
         if upper.startswith("DELETE FROM"):
             activity_id = params[0]
             self._conn.tables.setdefault(table, [])
@@ -53,6 +57,24 @@ class FakeCursor:
             ]
         elif upper.startswith("INSERT INTO CORE.ACTIVITY "):
             self._conn.activity[params[0]] = params
+
+    def _select(self, upper: str, params: Any) -> list[Any]:
+        """Answers for the multisport writes (migration 023): the child guard and the
+        idempotent leg-id resolution. Everything else SELECTs empty."""
+        if "SOURCE = 'GARMIN'" in upper:
+            return [(self._conn.garmin_children,)]
+        if "LEG_ORDER, ACTIVITY_ID FROM CORE.ACTIVITY" in upper:
+            return sorted(self._conn.leg_rows.items())
+        if "NEXTVAL('CORE.LEG_ACTIVITY_ID_SEQ')" in upper:
+            self._conn.leg_seq_calls += 1
+            return [(9200000000000000000 + self._conn.leg_seq_calls,)]
+        return []
+
+    def fetchone(self) -> Any:
+        return self._result[0] if self._result else None
+
+    def fetchall(self) -> list[Any]:
+        return self._result
 
     def executemany(self, query: str, params_seq: Any) -> None:
         normalized = " ".join(query.split())
@@ -83,6 +105,11 @@ class FakeConnection:
     commit_count: int = 0
     activity: dict[int, tuple[Any, ...]] = field(default_factory=dict)
     tables: dict[str, list[tuple[Any, ...]]] = field(default_factory=dict)
+    #: Real Garmin children of a parent (multisport guard, migration 023).
+    garmin_children: int = 0
+    #: leg_order -> activity_id, already-stored legs (migration 023 idempotence).
+    leg_rows: dict[int, int] = field(default_factory=dict)
+    leg_seq_calls: int = 0
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)

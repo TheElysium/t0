@@ -107,6 +107,7 @@ def decode_fit(data: bytes, *, activity_id: int) -> ParsedActivitySource:
         swim_lengths=usable_lengths,
         session=session,
         start_time=start_time,
+        sessions=tuple(map_session(msg) for msg in session_msgs),
     )
 
 

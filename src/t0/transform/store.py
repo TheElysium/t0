@@ -79,6 +79,11 @@ if TYPE_CHECKING:
 class _Cursor(Protocol):
     def execute(self, query: str, params: Any = ...) -> object: ...
     def executemany(self, query: str, params_seq: Sequence[Any]) -> object: ...
+    # Read methods: the multisport guard (_count_garmin_children) and
+    # resolve_leg_activity_ids SELECT before writing -- same minimal surface as
+    # t0.transform.runner's cursor protocol.
+    def fetchone(self) -> Any: ...
+    def fetchall(self) -> list[Any]: ...
     def __enter__(self) -> _Cursor: ...
     def __exit__(self, *exc_info: object) -> None: ...
 
@@ -101,7 +106,7 @@ def _jsonb_or_none(extra: dict[str, Any]) -> Jsonb | None:
 
 @dataclass(frozen=True, slots=True)
 class StoreResult:
-    """Count of rows written by :func:`store_activity_bundle`, table by table."""
+    """Count of rows written by :func:`store_activity_bundles`, table by table."""
 
     activity_id: int
     samples: int
@@ -412,32 +417,67 @@ def _replace_metrics(cur: _Cursor, activity_id: int, rows: Sequence[ActivityMetr
 
 
 def store_activity_bundle(conn: DBConnection, bundle: CoreActivityBundle) -> StoreResult:
-    """Write the entire ``bundle`` (produced by ``t0.transform.activity.build_core_rows``)
-    to the seven ``core.*`` tables it covers, in ONE transaction (single ``commit()`` at
-    the end -- see module docstring for what an intermediate commit would break).
-    ``core.activity`` is written first: ``core.sample`` carries ``ON DELETE CASCADE`` to
-    ``core.activity``, so its rows cannot be inserted before the parent row exists.
+    """Write ONE bundle (see :func:`store_activity_bundles`)."""
+    return store_activity_bundles(conn, (bundle,))[0]
+
+
+def store_activity_bundles(
+    conn: DBConnection, bundles: Sequence[CoreActivityBundle]
+) -> tuple[StoreResult, ...]:
+    """Write every bundle (parent first for a multisport split, see
+    ``t0.transform.multisport``) to the seven ``core.*`` tables, in ONE transaction
+    (single ``commit()`` at the end -- see module docstring for what an intermediate
+    commit would break). ``core.activity`` is written first per bundle:
+    ``core.sample`` carries ``ON DELETE CASCADE`` to ``core.activity``, so its rows
+    cannot be inserted before the parent row exists.
+
+    FOR A MULTISPORT PARENT (``is_parent``), two extra statements run, both about
+    ``parent_activity_id``:
+
+    - a guard SELECT naming any ``source='garmin'`` child already in the database: if
+      Garmin someday starts publishing the legs it never published so far (VERIFIED,
+      migration 023), a real leg would coexist with the synthetic one and the event's
+      load would count TWICE. Raised rather than deduplicated: attribution of a real
+      Garmin identifier to the athlete's race is a data-shape decision a human makes.
+    - a DELETE of previously stored legs (``source='leg'``, ON DELETE CASCADE carries
+      the seven series tables with it): the split is idempotent by full replacement,
+      same strategy as every series table of one activity.
 
     ``core.device`` and ``core.sample_derived`` are not written: ``bundle`` carries no rows
     for them anyway (``bundle.sample_derived`` is always empty -- see ``t0.transform.rows``
     docstring), nothing to populate here.
     """
+    parent = bundles[0].activity
     with conn.cursor() as cur:
-        _upsert_activity(cur, bundle.activity)
-        n_samples = _replace_samples(cur, bundle.activity.activity_id, bundle.samples)
-        n_laps = _replace_laps(cur, bundle.activity.activity_id, bundle.laps)
-        n_swim_lengths = _replace_swim_lengths(
-            cur, bundle.activity.activity_id, bundle.swim_lengths
-        )
-        n_hr_histogram = _replace_hr_histogram(
-            cur, bundle.activity.activity_id, bundle.hr_histogram
-        )
-        n_power_curve = _replace_power_curve(cur, bundle.activity.activity_id, bundle.power_curve)
-        n_metrics = _replace_metrics(cur, bundle.activity.activity_id, bundle.metrics)
+        if parent.is_parent:
+            if _count_garmin_children(cur, parent.activity_id):
+                msg = (
+                    f"activity {parent.activity_id}: core.activity already carries "
+                    "source='garmin' children (parent_activity_id) -- Garmin publishes "
+                    "the legs; splitting would count the event twice."
+                )
+                raise ValueError(msg)
+            cur.execute(
+                "DELETE FROM core.activity WHERE parent_activity_id = %s AND source = 'leg';",
+                (parent.activity_id,),
+            )
+        results = tuple(_store_bundle(cur, bundle) for bundle in bundles)
     conn.commit()
+    return results
 
+
+def _store_bundle(cur: _Cursor, bundle: CoreActivityBundle) -> StoreResult:
+    """Write one bundle within the caller's transaction (no commit here)."""
+    _upsert_activity(cur, bundle.activity)
+    activity_id = bundle.activity.activity_id
+    n_samples = _replace_samples(cur, activity_id, bundle.samples)
+    n_laps = _replace_laps(cur, activity_id, bundle.laps)
+    n_swim_lengths = _replace_swim_lengths(cur, activity_id, bundle.swim_lengths)
+    n_hr_histogram = _replace_hr_histogram(cur, activity_id, bundle.hr_histogram)
+    n_power_curve = _replace_power_curve(cur, activity_id, bundle.power_curve)
+    n_metrics = _replace_metrics(cur, activity_id, bundle.metrics)
     return StoreResult(
-        activity_id=bundle.activity.activity_id,
+        activity_id=activity_id,
         samples=n_samples,
         laps=n_laps,
         swim_lengths=n_swim_lengths,
@@ -445,3 +485,45 @@ def store_activity_bundle(conn: DBConnection, bundle: CoreActivityBundle) -> Sto
         power_curve=n_power_curve,
         metrics=n_metrics,
     )
+
+
+def _count_garmin_children(cur: _Cursor, parent_activity_id: int) -> int:
+    cur.execute(
+        "SELECT count(*) FROM core.activity " "WHERE parent_activity_id = %s AND source = 'garmin'",
+        (parent_activity_id,),
+    )
+    row = cur.fetchone()
+    return 0 if row is None else int(row[0])
+
+
+def resolve_leg_activity_ids(
+    conn: DBConnection, *, parent_activity_id: int, leg_orders: Sequence[int]
+) -> tuple[int, ...]:
+    """One activity_id per leg order, idempotent across passes.
+
+    Existing ``source='leg'`` rows of this parent are REUSED by ``leg_order`` (same
+    idempotence reasoning as ``_resolve_manual_activity_id``, migration 014): a second
+    transformation pass must never re-draw identifiers and orphan the previous legs'
+    series. Missing orders draw from ``core.leg_activity_id_seq`` (migration 023) --
+    the sequence range is bound to ``source='leg'`` by ``activity_synthetic_id_range``,
+    so a drawn id can never collide with a Garmin identifier.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT leg_order, activity_id FROM core.activity "
+            "WHERE parent_activity_id = %s AND source = 'leg'",
+            (parent_activity_id,),
+        )
+        existing = {int(row[0]): int(row[1]) for row in (cur.fetchall() or [])}
+        identifiers = []
+        for order in leg_orders:
+            if order in existing:
+                identifiers.append(existing[order])
+                continue
+            cur.execute("SELECT nextval('core.leg_activity_id_seq')")
+            row = cur.fetchone()
+            if row is None:
+                msg = "core.leg_activity_id_seq: nextval() returned no row."
+                raise RuntimeError(msg)
+            identifiers.append(int(row[0]))
+    return tuple(identifiers)

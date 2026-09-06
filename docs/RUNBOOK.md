@@ -17,10 +17,11 @@ All commands below assume `T0_POSTGRES_DSN` is defined in the environment
 6. [Garmin returns 401](#6-garmin-returns-401)
 7. [Why not `--dsn`](#7-why-not---dsn)
 8. [Daily polling (CronJob `scheduler`)](#8-daily-polling-cronjob-scheduler)
-9. [Reconciling the PVC and `raw.fit_file`](#9-reconciling-the-pvc-and-rawfit_file)
-10. [Daily transformation (CronJob `transform`)](#10-daily-transformation-cronjob-transform)
-11. [Uploading a file manually](#11-uploading-a-file-manually)
-12. [Seeding the PMC](#12-seeding-the-pmc)
+ 9. [Reconciling the PVC and `raw.fit_file`](#9-reconciling-the-pvc-and-rawfit_file)
+ 10. [Daily transformation (CronJob `transform`)](#10-daily-transformation-cronjob-transform)
+ 11. [Uploading a file manually](#11-uploading-a-file-manually)
+ 12. [Seeding the PMC](#12-seeding-the-pmc)
+ 13. [Multisport events (triathlon)](#13-multisport-events-triathlon)
 
 ---
 
@@ -615,3 +616,42 @@ CTL is a 42-day exponential average, so it needs 42 days of history before it me
 anything and 180 before it is trustworthy -- `mart.pmc.ctl_reliable` is exactly that flag,
 and it reads `false` for the whole warm-up. A PMC seeded yesterday will show `ctl_reliable
 = false` everywhere; that is correct, not a failure.
+
+---
+
+## 13. Multisport events (triathlon)
+
+Garmin does NOT publish the legs of a multisport event as separate activities:
+`get_activities_by_date` carries only the parent (`isParent: true`, VERIFIED on the
+2026-09-05 triathlon, payload identical for 24 h). The legs exist ONLY inside the single
+FIT file (one `session` per leg: swim, T1, bike, T2, run).
+
+Since parser version `t0-transform/2` (migration 023), the transform splits that file:
+one `core.activity` leg per session (`source='leg'`, `parent_activity_id` set, own
+samples, own per-discipline TSS), parent stored unchanged. All load views already count
+legs and exclude the parent, so the marts needed no change. The event is then visible in
+PMC, daily load, the power curve (run leg) and the swim view (open-water leg).
+
+### Replaying a multisport file parsed by version 1
+
+Files parsed before the split carry no legs. Find and requeue them:
+
+```sql
+SELECT fit_file_id, garmin_activity_id FROM raw.fit_file f
+JOIN core.activity a ON a.fit_file_id = f.fit_file_id
+WHERE a.is_parent AND f.parser_version < 't0-transform/2';
+
+UPDATE raw.fit_file SET parsed_at = NULL, parser_version = NULL
+WHERE fit_file_id IN (/* ids above */);
+```
+
+The next transform pass rebuilds the parent (idempotent upsert, metrics kept) and
+appends the legs. Refresh the `mart` views afterwards, as in section 5.
+
+### Failure modes
+
+- An unrecognized session `(sport, sub_sport)` pair fails the WHOLE file
+  (`parse_error`): a triathlon stored minus one leg would corrupt every load average
+  silently. Fix the mapping (`SPORT_CODE_BY_FIT_SPORT`), then `--retry-failed`.
+- If Garmin starts publishing the legs someday, the store refuses the split (`garmin`
+  children already exist for the parent): the real legs win, no double count.
