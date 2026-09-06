@@ -111,7 +111,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               }
             ]
           }
@@ -452,7 +452,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "velocitym"
+                "value": "velocityms"
               },
               {
                 "id": "min",
@@ -468,7 +468,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               },
               {
                 "id": "custom.axisPlacement",
@@ -614,7 +614,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               },
               {
                 "id": "decimals",
@@ -646,7 +646,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               }
             ]
           }

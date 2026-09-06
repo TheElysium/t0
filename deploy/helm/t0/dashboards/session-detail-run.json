@@ -111,7 +111,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               }
             ]
           }
@@ -387,7 +387,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               },
               {
                 "id": "decimals",
@@ -510,8 +510,8 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Speed & altitude",
-      "description": "Per-second speed (m/s) and barometric altitude (m) from core.sample for the selected activity.",
+      "title": "Pace & altitude",
+      "description": "Pace (min/km, from per-second speed; samples under 0.5 m/s excluded -- auto-pause spikes) and altitude relative to the leg start (GPS-only altitude drifts with no barometer: the ramp is drift, not terrain).",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 16,
@@ -531,12 +531,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Speed (m/s)"
+              "options": "Pace (min/km)"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "velocitym"
+                "value": "clocks"
               },
               {
                 "id": "min",
@@ -547,12 +547,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Altitude (m)"
+              "options": "Altitude (m, relative)"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               },
               {
                 "id": "custom.axisPlacement",
@@ -576,13 +576,13 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.speed_mps AS \"Speed (m/s)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, 1000.0 / NULLIF(s.speed_mps, 0) AS \"Pace (min/km)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps > 0.5 ORDER BY 1"
         },
         {
           "refId": "B",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.altitude_m AS \"Altitude (m)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, round((s.altitude_m - min(s.altitude_m) OVER ()), 1) AS \"Altitude (m, relative)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -616,7 +616,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               },
               {
                 "id": "custom.axisPlacement",
@@ -720,7 +720,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               },
               {
                 "id": "decimals",
@@ -752,7 +752,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "m"
+                "value": "lengthm"
               }
             ]
           }
