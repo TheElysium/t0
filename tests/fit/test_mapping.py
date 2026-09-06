@@ -104,6 +104,29 @@ def test_map_record_without_timestamp_raises() -> None:
         map_record({"heart_rate": 100}, activity_id=1, start_time=T0)
 
 
+def test_map_record_converts_running_dynamics_wire_units() -> None:
+    """FIT wire units: step_length in mm, vertical_oscillation in mm.
+
+    VERIFIED on the athlete's 2026-09-05 run leg: raw step_length 1165-1619 for a
+    4:06/km pace (1.17-1.62 m per step, the only physically consistent pairing with
+    cadence ~87 rpm/foot), vertical_oscillation 85-108 with 206-255 ms contact --
+    8.5-10.8 cm is the physiological range. core.sample carries meters/centimeters
+    (cf. the dashboard axis "Step length (m)").
+    """
+    msg = {
+        "timestamp": datetime(2026, 9, 5, 8, 9, 0, tzinfo=UTC),
+        "step_length": 1400.0,
+        "vertical_oscillation": 95.0,
+        "stance_time": 230.0,
+    }
+    row = map_record(msg, activity_id=7, start_time=T0)
+
+    assert row.step_length == pytest.approx(1.4)
+    assert row.vertical_oscillation == pytest.approx(9.5)
+    # stance_time stays milliseconds (official profile unit, dashboard reads ms).
+    assert row.stance_time == 230.0
+
+
 def test_map_lap_maps_known_fields() -> None:
     msg = {
         "message_index": 2,

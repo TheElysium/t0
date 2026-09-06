@@ -70,7 +70,10 @@ logger = logging.getLogger(__name__)
 #: (``t0.transform.multisport``, migration 023). Files parsed by version 1 that carry
 #: more than one ``session`` message (the athlete's two multisport events) must be
 #: replayed to produce their legs -- see docs/RUNBOOK.md section 10.
-PARSER_VERSION = "t0-transform/2"
+#: Version 3: running-dynamics units converted from FIT wire units
+#: (step_length mm -> m, vertical_oscillation mm -> cm -- VERIFIED against the
+#: 2026-09-05 run leg); files parsed by version 2 must be replayed to store meters.
+PARSER_VERSION = "t0-transform/3"
 
 #: Limit per pass. A nightly CronJob has no reason to process all 1,090 historical
 #: files on first start: better several short passes, each leaving the database in

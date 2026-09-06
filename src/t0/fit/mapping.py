@@ -23,6 +23,17 @@ from t0.fit.model import LapRow, SampleRow, SessionSummary, SwimLengthRow
 #: Conversion factor from FIT "semicircles" (signed 32-bit int) to decimal degrees.
 _SEMICIRCLE_TO_DEG = 180.0 / (2**31)
 
+#: FIT ``step_length`` unit is MILLIMETERS (official profile, VERIFIED on the athlete's
+#: 2026-09-05 run leg: raw 1165-1619 for a 4:06/km pace -- 1.17-1.62 m per step, the
+#: only physically consistent pairing with cadence ~87 rpm/foot). ``core.sample``
+#: carries meters, cf. the dashboard reading "Step length (m)".
+_FIT_STEP_LENGTH_MM_TO_M = 1.0 / 1000.0
+
+#: Same profile fact for ``vertical_oscillation``: millimeters on the wire
+#: (VERIFIED: raw 85-108 for ground contact 206-255 ms -- 8.5-10.8 cm is the
+#: physiological range), displayed in centimeters.
+_FIT_VERTICAL_OSCILLATION_MM_TO_CM = 1.0 / 10.0
+
 
 def semicircles_to_degrees(value: Any) -> float | None:
     """Convert FIT semicircles coordinate to decimal degrees."""
@@ -36,6 +47,14 @@ def round_to_int(value: Any) -> int | None:
     if value is None:
         return None
     return round(float(value))
+
+
+def _mm_to_m(value: Any) -> float | None:
+    return None if value is None else float(value) * _FIT_STEP_LENGTH_MM_TO_M
+
+
+def _mm_to_cm(value: Any) -> float | None:
+    return None if value is None else float(value) * _FIT_VERTICAL_OSCILLATION_MM_TO_CM
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +82,9 @@ RECORD_FIELD_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("cadence", ("cadence",)),
     FieldSpec("power", ("power",)),
     FieldSpec("temperature", ("temperature",)),
-    FieldSpec("vertical_oscillation", ("vertical_oscillation",)),
+    FieldSpec("vertical_oscillation", ("vertical_oscillation",), _mm_to_cm),
     FieldSpec("stance_time", ("stance_time",)),
-    FieldSpec("step_length", ("step_length",)),
+    FieldSpec("step_length", ("step_length",), _mm_to_m),
     FieldSpec("vertical_ratio", ("vertical_ratio",)),
 )
 

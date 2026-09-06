@@ -705,7 +705,7 @@
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 16,
-        "y": 12,
+        "y": 20,
         "w": 8,
         "h": 8
       },
@@ -764,7 +764,52 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(l.start_time, 'HH24:MI:SS') AS \"Start\", l.duration_s / 60.0 AS \"Duration (min)\", l.distance_m / 1000.0 AS \"Distance (km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
+          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(l.start_time, 'HH24:MI:SS') AS \"Start\", l.duration_s / 60.0 AS \"Duration (min)\", l.distance_m / 1000.0 AS \"Distance (km)\", round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Pace per lap",
+      "description": "One bar per lap: pace = lap duration / lap distance (min/km), from core.activity_lap. The x axis is absolute time, so the bars line up with the Pace & altitude panel above when the range is shared.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 16,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "gradientMode": "opacity"
+          },
+          "unit": "clocks",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "PostgreSQL",
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT l.start_time AS time, round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id AND l.distance_m > 0 ORDER BY 1",
+          "refId": "A"
         }
       ]
     }
