@@ -438,7 +438,6 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "min": 0,
           "custom": {
             "drawStyle": "line",
             "spanNulls": true,
@@ -480,7 +479,6 @@
       "fieldConfig": {
         "defaults": {
           "unit": "watt",
-          "min": 0,
           "custom": {
             "drawStyle": "line",
             "spanNulls": true,
@@ -537,10 +535,6 @@
               {
                 "id": "unit",
                 "value": "clocks"
-              },
-              {
-                "id": "min",
-                "value": 0
               }
             ]
           },
@@ -600,7 +594,6 @@
       },
       "fieldConfig": {
         "defaults": {
-          "min": 0,
           "custom": {
             "drawStyle": "line",
             "spanNulls": true,
@@ -772,7 +765,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Pace per lap",
-      "description": "One bar per lap: pace = lap duration / lap distance (min/km), from core.activity_lap. The x axis is absolute time, so the bars line up with the Pace & altitude panel above when the range is shared.",
+      "description": "One bar per lap: pace = lap duration / lap distance (min/km), from core.activity_lap. The x axis is absolute time, so the bars line up with the Pace & altitude panel above when the range is shared. Axis scales to the visible data range (relative).",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 0,
@@ -788,8 +781,7 @@
             "fillOpacity": 80,
             "gradientMode": "opacity"
           },
-          "unit": "clocks",
-          "min": 0
+          "unit": "clocks"
         },
         "overrides": []
       },

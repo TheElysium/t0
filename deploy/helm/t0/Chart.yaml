@@ -4,8 +4,8 @@ description: >-
   Ingestion, storage and visualization of an athlete's Garmin data
   (Python ingestion, PostgreSQL, Grafana) -- self-hosted deployment, LAN access only.
 type: application
-version: 0.1.17
-appVersion: "0.1.17"
+version: 0.1.18
+appVersion: "0.1.18"
 keywords:
   - garmin
   - triathlon
