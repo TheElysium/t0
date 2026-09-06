@@ -171,15 +171,35 @@ def split_multisport_legs(
         )
         raise ValueError(msg)
     plans: list[LegPlan] = []
+    # FIT 'distance' is CUMULATIVE over the whole file (VERIFIED: the 2026-09-05 run
+    # leg's last sample carries ~50 km, the event's total). Without re-basing, every
+    # leg after the first would inherit the event's running total as its own distance.
+    # Baseline = the cumulative distance reached just BEFORE the session starts, from
+    # the last sample that carries a distance -- the swim leg (file head) has none.
+    distance_baseline = 0.0
     for order, (raw, window) in enumerate(windows, start=1):
         samples = tuple(
             replace(
                 sample,
                 elapsed_s=round((sample.t - window.start).total_seconds()),
+                distance_m=(
+                    None
+                    if sample.distance_m is None
+                    else sample.distance_m - distance_baseline
+                ),
             )
             for sample in decoded.samples
             if _in_window(sample.t, window)
         )
+        later_distances = [
+            sample.distance_m
+            for sample in decoded.samples
+            if sample.distance_m is not None and _in_window(sample.t, window)
+        ]
+        if later_distances:
+            # Cumulative is monotonic: the max over THIS window is its last value,
+            # i.e. the baseline the NEXT leg starts from.
+            distance_baseline = max(later_distances)
         laps = tuple(lap for lap in decoded.laps if _in_window(lap.start_time, window))
         lengths = tuple(
             length for length in decoded.swim_lengths if _in_window(length.start_time, window)

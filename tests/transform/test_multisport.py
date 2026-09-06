@@ -86,6 +86,34 @@ def test_every_sample_is_assigned_exactly_once_and_rebased() -> None:
     assert plans[-1].samples[0].elapsed_s == 1
 
 
+def test_cumulative_distance_is_rebased_per_leg() -> None:
+    """FIT 'distance' is cumulative over the whole FILE, not per session (VERIFIED:
+    the 2026-09-05 run leg's last sample carried ~50 km, the event total). Without
+    re-basing, every leg after the first would claim the event's running total."""
+    sessions = (
+        make_session(START, sport="swimming", sub_sport="open_water", duration_s=600.0),
+        make_session(
+            START + timedelta(seconds=600), sport="running", duration_s=600.0
+        ),
+    )
+    samples = [
+        make_sample(0, heart_rate=150, distance_m=0.0),
+        make_sample(300, heart_rate=150, distance_m=300.0),
+        make_sample(599, heart_rate=150, distance_m=590.0),
+        make_sample(600, heart_rate=150, distance_m=590.0),
+        make_sample(1199, heart_rate=150, distance_m=1100.0),
+    ]
+    decoded = parsed_source(samples, sessions=sessions)
+    plans = split_multisport_legs(decoded, multisport_context())
+
+    run = plans[1]
+    # Last run sample: 1100 - 590 (baseline at T1's end) = 510 m, not 1100.
+    assert run.samples[-1].distance_m == 510.0
+    assert run.samples[0].distance_m == 0.0
+    # First leg untouched (baseline 0).
+    assert plans[0].samples[-1].distance_m == 590.0
+
+
 def test_sample_at_a_boundary_goes_to_the_later_leg() -> None:
     """Half-open windows: the sample AT T1's start belongs to T1, not to the swim."""
     decoded = parsed_source(
