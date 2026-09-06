@@ -337,7 +337,7 @@
       "id": 10,
       "title": "Recent swims",
       "type": "table",
-      "description": "Every swim in the period, most recent first. Pace is computed from swim time, rest between sets excluded, and spelled the way the watch spells it -- minutes and seconds per 100 m. It is blank for a swim recorded without distance rather than shown as zero. Duration is the whole session including rest; the gap between the two columns is the recovery. Swim time source says whether swim time came from the length messages or from the session summary.",
+      "description": "Every swim in the period, most recent first. Pace is computed from swim time, rest between sets excluded, and spelled the way the watch spells it -- minutes and seconds per 100 m. It is blank for a swim recorded without distance rather than shown as zero. Duration is the whole session including rest; the gap between the two columns is the recovery. Swim time source says whether swim time came from the length messages or from the session summary. Clicking a row opens the Session detail dashboard for that activity.",
       "gridPos": {
         "h": 10,
         "w": 24,
@@ -345,8 +345,53 @@
         "y": 49
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "links": [
+            {
+              "title": "Swim detail",
+              "url": "/d/t0-session-swim/session-detail-swim?var-activity_id=${__data.fields.activity_id}&from=${__data.fields.start_ms}&to=${__data.fields.end_ms}",
+              "targetBlank": false,
+              "oneClick": true
+            }
+          ]
+        },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "activity_id"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "start_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "end_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -402,7 +447,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(a.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", a.name AS \"Name\", a.duration_s AS \"Duration\", a.swim_time_s AS \"Swim time\", a.distance_m AS \"Distance (m)\", CASE WHEN pace.s_per_100m IS NULL THEN NULL ELSE (pace.s_per_100m / 60)::text || ':' || lpad((pace.s_per_100m % 60)::text, 2, '0') END AS \"Pace (min/100 m)\", w.tss AS \"TSS\", w.tss_method AS \"TSS method\", a.swim_time_source AS \"Swim time source\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code LEFT JOIN mart.activity_wide w ON w.activity_id = a.activity_id CROSS JOIN LATERAL (SELECT round(a.swim_time_s * 100.0 / NULLIF(a.distance_m, 0))::int AS s_per_100m) pace WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) ORDER BY a.local_date DESC"
+          "rawSql": "SELECT to_char(a.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", a.name AS \"Name\", a.duration_s AS \"Duration\", a.swim_time_s AS \"Swim time\", a.distance_m AS \"Distance (m)\", CASE WHEN pace.s_per_100m IS NULL THEN NULL ELSE (pace.s_per_100m / 60)::text || ':' || lpad((pace.s_per_100m % 60)::text, 2, '0') END AS \"Pace (min/100 m)\", w.tss AS \"TSS\", w.tss_method AS \"TSS method\", a.swim_time_source AS \"Swim time source\", a.activity_id AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code LEFT JOIN mart.activity_wide w ON w.activity_id = a.activity_id CROSS JOIN LATERAL (SELECT round(a.swim_time_s * 100.0 / NULLIF(a.distance_m, 0))::int AS s_per_100m) pace WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) ORDER BY a.local_date DESC"
         }
       ]
     }

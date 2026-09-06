@@ -1,0 +1,666 @@
+{
+  "uid": "t0-session-bike",
+  "title": "Session detail -- Bike",
+  "description": "One cycling session, selected by clicking a row of a sessions table. The link passes the session's own time window, so the time picker starts exactly on the activity and stays usable to zoom in. Panels are keyed on $activity_id AND the time range.",
+  "tags": [
+    "t0",
+    "session",
+    "bike"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "refresh": "",
+  "links": [
+    {
+      "title": "Back to Weekly Cockpit",
+      "type": "link",
+      "url": "/d/t0-cockpit/weekly-cockpit",
+      "keepTime": false,
+      "includeVars": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "activity_id",
+        "type": "query",
+        "datasource": "PostgreSQL",
+        "query": "SELECT aw.activity_id AS __value, to_char(aw.start_time_local, 'YYYY-MM-DD HH24:MI') || '  ' || aw.name AS __text FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.is_parent = false AND s.discipline = 'bike' ORDER BY aw.local_date DESC LIMIT 200",
+        "definition": "SELECT aw.activity_id AS __value, to_char(aw.start_time_local, 'YYYY-MM-DD HH24:MI') || '  ' || aw.name AS __text FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.is_parent = false AND s.discipline = 'bike' ORDER BY aw.local_date DESC LIMIT 200",
+        "refresh": 1,
+        "sort": 0,
+        "current": {},
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Session",
+      "description": "Identity and totals from mart.activity_wide: date, sport, name, data quality, duration and distance. data_quality = unknown means summary-only import with no streams, so every sample panel below will be empty.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "km"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ascent"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "m"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.ascent_m AS \"Ascent\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Load & derived",
+      "description": "Training load and derived metrics from mart.activity_wide. On the bike, TSS and IF are power-based whenever a power meter was present: np_reliable says whether NP itself can be trusted. The _method columns stay visible on purpose.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TSS"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TRIMP"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT aw.tss AS \"TSS\", aw.tss_method AS \"TSS method\", aw.intensity_factor AS \"IF\", aw.efficiency_factor AS \"EF\", aw.decoupling_pct AS \"Decoupling (%)\", aw.trimp AS \"TRIMP\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Physiology & power",
+      "description": "Session averages and peaks from mart.activity_wide. NP is the 30 s normalised power and is only meaningful when np_reliable is true -- on the bike the sensor average and NP are the two numbers that matter.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg HR"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max HR"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg power"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "watt"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "NP"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "watt"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max power"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "watt"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT aw.avg_hr AS \"Avg HR\", aw.max_hr AS \"Max HR\", aw.avg_power AS \"Avg power\", aw.np_watts AS \"NP\", a.max_power AS \"Max power\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id WHERE aw.activity_id = $activity_id"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Heart rate",
+      "description": "Per-second heart rate from core.sample for the selected activity. Empty for summary-only imports.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Power",
+      "description": "Per-second power from core.sample, watts, for the selected activity. Populated on indoor rides (trainer) and outdoor rides with a power meter.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 8,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.t AS time, s.power AS \"Power (W)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.power IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Speed & altitude",
+      "description": "Per-second speed (m/s) and barometric altitude (m) from core.sample for the selected activity.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 16,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true,
+            "lineWidth": 1
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Speed (m/s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "velocitym"
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Altitude (m)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "m"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.t AS time, s.speed_mps AS \"Speed (m/s)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps IS NOT NULL ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.t AS time, s.altitude_m AS \"Altitude (m)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Cadence",
+      "description": "Per-second cadence from core.sample (crank revolutions per minute) for the selected activity.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.t AS time, s.cadence AS \"Cadence (rpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.cadence IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Time in HR zones",
+      "description": "Seconds per HR zone, bounds in PERCENT OF MAX HR as requested: Z1 <60%, Z2 60-70%, Z3 70-80%, Z4 80-90%, Z5 >=90%. Max HR comes from core.threshold (discipline 'all', valid at the session date) and falls back to the session's own recorded max HR when no threshold row exists. Note: hrTSS itself stays computed on %LTHR (Friel zones); this panel is a display bucket only. Empty when the session carries no HR data.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 8,
+        "y": 12,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "Zone",
+        "orientation": "auto",
+        "showValue": "never",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "fillOpacity": 90,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "WITH th AS (SELECT coalesce(t.hr_max_bpm, aw.max_hr) AS hrmax FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id LEFT JOIN LATERAL (SELECT t.hr_max_bpm FROM core.threshold t WHERE t.athlete_id = a.athlete_id AND t.discipline = 'all' AND t.validity @> a.local_date AND t.hr_max_bpm IS NOT NULL LIMIT 1) t ON true WHERE aw.activity_id = $activity_id), b AS (SELECT 1 AS ord, 'Z1 <60%' AS zone, 0.0::real AS lo, 0.60::real AS hi UNION ALL SELECT 2, 'Z2 60-70%', 0.60, 0.70 UNION ALL SELECT 3, 'Z3 70-80%', 0.70, 0.80 UNION ALL SELECT 4, 'Z4 80-90%', 0.80, 0.90 UNION ALL SELECT 5, 'Z5 >=90%', 0.90, 9.99) SELECT b.zone AS \\\"Zone\\\", coalesce(sum(h.seconds), 0) AS \\\"Seconds\\\" FROM b CROSS JOIN th LEFT JOIN core.activity_hr_histogram h ON h.activity_id = $activity_id AND h.hr_bpm >= (b.lo * th.hrmax) AND h.hr_bpm < (b.hi * th.hrmax) WHERE EXISTS (SELECT 1 FROM core.activity_hr_histogram x WHERE x.activity_id = $activity_id) GROUP BY b.ord, b.zone ORDER BY b.ord"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Laps",
+      "description": "core.activity_lap: the watch's own lap boundaries, i.e. the training intention. Empty when the session was recorded without laps.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 16,
+        "y": 12,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration (min)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "m"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance (km)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "km"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ascent (m)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "m"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(l.start_time, 'HH24:MI:SS') AS \"Start\", l.duration_s / 60.0 AS \"Duration (min)\", l.distance_m / 1000.0 AS \"Distance (km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.np_watts AS \"NP (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
+        }
+      ]
+    }
+  ]
+}

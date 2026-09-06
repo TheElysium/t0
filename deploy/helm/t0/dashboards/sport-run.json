@@ -503,7 +503,7 @@
     {
       "id": 12,
       "title": "Recent runs",
-      "description": "Every run in the period, most recent first. Pace is spelled the way the watch spells it, minutes and seconds per kilometre, and is blank for a run recorded without distance rather than shown as zero. Duration is timer time, not elapsed.",
+      "description": "Every run in the period, most recent first. Pace is spelled the way the watch spells it, minutes and seconds per kilometre, and is blank for a run recorded without distance rather than shown as zero. Duration is timer time, not elapsed. Clicking a row opens the Session detail dashboard for that activity.",
       "type": "table",
       "datasource": "PostgreSQL",
       "gridPos": {
@@ -513,8 +513,53 @@
         "h": 8
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "links": [
+            {
+              "title": "Run detail",
+              "url": "/d/t0-session-run/session-detail-run?var-activity_id=${__data.fields.activity_id}&from=${__data.fields.start_ms}&to=${__data.fields.end_ms}",
+              "targetBlank": false,
+              "oneClick": true
+            }
+          ]
+        },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "activity_id"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "start_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "end_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -562,7 +607,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT aw.local_date AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.duration_s AS \"Duration\", aw.distance_m/1000.0 AS \"Distance (km)\", CASE WHEN pace.s_per_km IS NULL THEN NULL ELSE (pace.s_per_km / 60)::text || ':' || lpad((pace.s_per_km % 60)::text, 2, '0') END AS \"Pace (min/km)\", aw.avg_hr AS \"Avg HR\", aw.avg_power AS \"Avg power (W)\", aw.tss AS \"TSS\", aw.tss_method AS \"TSS method\", aw.data_quality AS \"Data quality\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = a.sport_code CROSS JOIN LATERAL (SELECT round(aw.duration_s * 1000.0 / NULLIF(aw.distance_m, 0))::int AS s_per_km) pace WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(aw.local_date) ORDER BY aw.local_date DESC"
+          "rawSql": "SELECT aw.local_date AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.duration_s AS \"Duration\", aw.distance_m/1000.0 AS \"Distance (km)\", CASE WHEN pace.s_per_km IS NULL THEN NULL ELSE (pace.s_per_km / 60)::text || ':' || lpad((pace.s_per_km % 60)::text, 2, '0') END AS \"Pace (min/km)\", aw.avg_hr AS \"Avg HR\", aw.avg_power AS \"Avg power (W)\", aw.tss AS \"TSS\", aw.tss_method AS \"TSS method\", aw.data_quality AS \"Data quality\", aw.activity_id AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = a.sport_code CROSS JOIN LATERAL (SELECT round(aw.duration_s * 1000.0 / NULLIF(aw.distance_m, 0))::int AS s_per_km) pace WHERE a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND $__timeFilter(aw.local_date) ORDER BY aw.local_date DESC"
         }
       ]
     }

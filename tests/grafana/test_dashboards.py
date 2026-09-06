@@ -151,6 +151,8 @@ MART_VIEWS: dict[str, set[str]] = {
         "sport",
         "name",
         "duration_s",
+        # Added by 022: active swim time, the sTSS/IF denominator for swims.
+        "swim_time_s",
         "distance_m",
         "avg_hr",
         "max_hr",

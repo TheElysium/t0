@@ -12,7 +12,7 @@
   "version": 1,
   "graphTooltip": 1,
   "time": {
-    "from": "now-90d",
+    "from": "now-7d",
     "to": "now"
   },
   "refresh": "",
@@ -772,7 +772,7 @@
       "id": 10,
       "type": "table",
       "title": "Recent sessions",
-      "description": "The 15 most recent sessions, independent of the time picker so the panel is never empty.",
+      "description": "The 15 most recent sessions, independent of the time picker so the panel is never empty. Clicking a row opens a menu: the matching Session detail dashboard (Run, Bike or Swim) for that activity.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 8,
@@ -781,8 +781,62 @@
         "h": 9
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "links": [
+            {
+              "title": "Run detail",
+              "url": "/d/t0-session-run/session-detail-run?var-activity_id=${__data.fields.activity_id}&from=${__data.fields.start_ms}&to=${__data.fields.end_ms}",
+              "targetBlank": false
+            },
+            {
+              "title": "Bike detail",
+              "url": "/d/t0-session-bike/session-detail-bike?var-activity_id=${__data.fields.activity_id}&from=${__data.fields.start_ms}&to=${__data.fields.end_ms}",
+              "targetBlank": false
+            },
+            {
+              "title": "Swim detail",
+              "url": "/d/t0-session-swim/session-detail-swim?var-activity_id=${__data.fields.activity_id}&from=${__data.fields.start_ms}&to=${__data.fields.end_ms}",
+              "targetBlank": false
+            }
+          ]
+        },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "activity_id"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "start_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "end_ms"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -823,7 +877,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", aw.name AS \"Name\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.avg_hr AS \"Avg HR\", aw.tss AS \"TSS\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false ORDER BY aw.local_date DESC LIMIT 15"
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", aw.name AS \"Name\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.avg_hr AS \"Avg HR\", aw.tss AS \"TSS\", aw.activity_id AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false ORDER BY aw.local_date DESC LIMIT 15"
         }
       ]
     }
