@@ -555,11 +555,13 @@ for free had to be produced elsewhere:
    it, the case its own column comment sanctions (`migrations/003_core_ref.sql`).
 2. **The primary key.** `core.activity.activity_id` **is** the Garmin identifier -- bigint
    primary key, no sequence, no default. A manual upload draws instead from
-   `core.manual_activity_id_seq`, which starts at 9e18, eight orders of magnitude above any
-   identifier Garmin has emitted. `core.activity.source` records the provenance, and the
-   `activity_manual_id_range` CHECK forbids the column and the identifier range from ever
-   diverging. Re-running the transformation does not duplicate anything: the partial unique
-   index `activity_manual_file_uq` keys a manual activity on its `fit_file_id`.
+   `core.manual_activity_id_seq`, which starts at 1e15 (since migration 024; was 9e18),
+   five orders of magnitude above any identifier Garmin has emitted yet below the float64
+   exact-integer limit (2^53) so the id is not rounded when read through JSON. `core.activity.source`
+   records the provenance, and the `activity_synthetic_id_range` CHECK forbids the column
+   and the identifier range from ever diverging. Re-running the transformation does not
+   duplicate anything: the partial unique index `activity_manual_file_uq` keys a manual
+   activity on its `fit_file_id`.
 
 **The sport is never guessed.** A FIT `(sport, sub_sport)` pair or a TCX `Sport` value with
 no entry in the mapping tables raises `UnknownManualSportError`, naming the observed value,
@@ -647,6 +649,28 @@ WHERE fit_file_id IN (/* ids above */);
 
 The next transform pass rebuilds the parent (idempotent upsert, metrics kept) and
 appends the legs. Refresh the `mart` views afterwards, as in section 5.
+
+### Regenerating legs after migration 024 (shrink of the synthetic id range)
+
+Migration 024 lowered the synthetic id range below the float64 exact-integer limit
+(2^53 ~ 9.007e15) so ids survive a JSON round-trip unrounded (MCP, Grafana, browser). It
+DELETEs the existing legs (ids at 9.2e18) as part of the migration, because a re-transform
+alone would NOT renumber them: `resolve_leg_activity_ids` reuses existing
+`(parent_activity_id, leg_order)` rows BEFORE the store deletes them, so it would re-emit
+the same 9.2e18 ids. After applying 024, requeue the parent files so the legs come back in
+the new range (2e15+):
+
+```sql
+UPDATE raw.fit_file SET parsed_at = NULL
+WHERE fit_file_id IN (
+  SELECT DISTINCT fit_file_id FROM core.activity WHERE is_parent
+);
+```
+
+`parser_version` is left as-is (the parser is already version 2): only `parsed_at` needs
+clearing to requeue. Run `ops transform`, then refresh the `mart` views (section 5).
+Between the migration and this pass the two triathlons show no legs -- acceptable for a
+single-athlete homelab.
 
 ### Failure modes
 

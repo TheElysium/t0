@@ -32,9 +32,10 @@ and its ``activity_id`` is derived deterministically from the local start instan
 ``_MANUAL_CSV_BASE + int(start_time_local.timestamp())``. Deterministic rather than drawn
 from ``core.manual_activity_id_seq`` so that re-running the import UPDATES the same rows
 instead of duplicating the whole history. The base sits inside the manual range required
-by the CHECK ``activity_manual_id_range`` (>= 9e18) but offset well clear of the values
+by the CHECK ``activity_synthetic_id_range`` (>= 1e15) but offset well clear of the values
 the sequence itself hands out, so a real manual upload can never collide with an imported
-row.
+row. It also stays below the float64 exact-integer limit (2^53) so the id is not rounded
+when read through JSON -- see ``_MANUAL_CSV_BASE`` and migration 024.
 
 UNITS AND ENCODING TRAPS IN THE EXPORT (all verified against the real file)
 --------------------------------------------------------------------------
@@ -84,10 +85,15 @@ if TYPE_CHECKING:
     from t0.transform.summary import DBConnection as SummaryDBConnection
 
 #: Base identifier for rows imported from the bulk export. Inside the manual range
-#: (>= 9e18, CHECK ``activity_manual_id_range``) and offset by 1e17 from the start of
-#: ``core.manual_activity_id_seq``, which hands out 9e18, 9e18+1, ... : the sequence would
-#: need 1e17 manual uploads to reach this band.
-_MANUAL_CSV_BASE = 9_100_000_000_000_000_000
+#: (>= 1e15, CHECK ``activity_synthetic_id_range``) and sat at 1.5e15 -- the middle of
+#: the manual band [1e15, 2e15) -- offset by 5e14 from the start of
+#: ``core.manual_activity_id_seq``, which hands out 1e15, 1e15+1, ... : the sequence would
+#: need 5e14 manual uploads to reach this band, so an imported row can never collide with
+#: a real manual upload. The base MUST stay below the float64 exact-integer limit
+#: (2^53 ~ 9.007e15), even after adding a Unix timestamp (~1.7e9): 1.5e15 + 1.7e9 is far
+#: under 2e15, so the id survives a JSON round-trip unrounded (MCP, Grafana, browser).
+#: This is why the historical 9.1e18 base was abandoned -- see migration 024.
+_MANUAL_CSV_BASE = 1_500_000_000_000_000
 
 #: ``Type d'activite`` (localized export value) -> ``core.sport.sport_code``.
 #: An unlisted value is never guessed: it raises, naming the observed value. Same

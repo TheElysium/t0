@@ -41,11 +41,12 @@ SELECT activity_id, count(*)
   FROM core.activity
  GROUP BY activity_id HAVING count(*) > 1;
 
--- Must return zero rows: CHECK activity_manual_id_range enforces this, so a row here
--- would mean the constraint is not doing what its name claims.
+-- Must return zero rows: CHECK activity_synthetic_id_range enforces this, so a row here
+-- would mean the constraint is not doing what its name claims. Both synthetic sources
+-- (manual, leg) share the range; the boundary is 1e15 since migration 024 (was 9e18).
 SELECT activity_id, source
   FROM core.activity
- WHERE (source = 'manual') <> (activity_id >= 9000000000000000000);
+ WHERE (source IN ('manual', 'leg')) <> (activity_id >= 1000000000000000);
 
 \echo '== 3. Time zone handling across the DST boundary =='
 -- Both offsets must appear for a history spanning more than a year in Europe/Paris:

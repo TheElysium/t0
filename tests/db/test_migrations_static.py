@@ -186,6 +186,7 @@ EXPECTED_MIGRATION_FILES = [
     "021_mcp_core_grants.sql",
     "022_mart_activity_wide_swim_time.sql",
     "023_core_activity_leg_source.sql",
+    "024_shrink_synthetic_id_range.sql",
 ]
 
 

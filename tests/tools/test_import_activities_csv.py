@@ -184,7 +184,11 @@ def test_identifier_is_deterministic_and_inside_the_manual_range(cols: Any) -> N
     satisfy CHECK activity_manual_id_range without colliding with the upload sequence."""
     first, second = build(cols), build(cols)
     assert first.activity_id == second.activity_id
-    assert first.activity_id >= 9_000_000_000_000_000_000
+    # Since migration 024 the manual range is [1e15, 2e15): above real Garmin ids and
+    # below the leg range, but crucially under the float64 exact-integer limit (2^53 ~
+    # 9.007e15) so the id survives a JSON round-trip unrounded.
+    assert 1_000_000_000_000_000 <= first.activity_id < 2_000_000_000_000_000
+    assert first.activity_id < 2**53
     assert first.activity_id != build(cols, Date="2025-07-14 08:31:00").activity_id
 
 
