@@ -1,0 +1,628 @@
+{
+  "uid": "t0-session-tri",
+  "title": "Session detail -- Triathlon",
+  "description": "One multisport session (triathlon), selected from the Weekly Cockpit where it appears as a single Triathlon row. Global view of the whole race plus a segment breakdown drilling down to each leg's own Session detail dashboard (swim, bike, run). Panels are keyed on $activity_id, the parent activity.",
+  "tags": [
+    "t0",
+    "session",
+    "tri"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "graphTooltip": 1,
+  "time": {
+    "from": "1970-01-01 00:00:00",
+    "to": "now"
+  },
+  "refresh": "",
+  "links": [
+    {
+      "title": "Back to Weekly Cockpit",
+      "type": "link",
+      "url": "/d/t0-cockpit/weekly-cockpit",
+      "keepTime": false,
+      "includeVars": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "activity_id",
+        "type": "query",
+        "datasource": "PostgreSQL",
+        "query": "SELECT p.activity_id AS __value, to_char(p.start_time_local, 'YYYY-MM-DD HH24:MI') || '  ' || coalesce(p.name, 'Triathlon') AS __text FROM core.activity p WHERE p.is_parent = true ORDER BY p.local_date DESC LIMIT 200",
+        "definition": "SELECT p.activity_id AS __value, to_char(p.start_time_local, 'YYYY-MM-DD HH24:MI') || '  ' || coalesce(p.name, 'Triathlon') AS __text FROM core.activity p WHERE p.is_parent = true ORDER BY p.local_date DESC LIMIT 200",
+        "refresh": 1,
+        "sort": 0,
+        "current": {},
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Session",
+      "description": "Identity of the multisport parent from mart.triathlon_session: local date, name and number of legs resolved by the transform (swim, T1, bike, T2, run).",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Legs"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT to_char(ts.local_date, 'YYYY-MM-DD') AS \"Date\", ts.name AS \"Name\", ts.legs_count AS \"Legs\" FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Totals & load",
+      "description": "Whole-race totals from mart.triathlon_session: timer duration, summed distance, training load and HR averages across all legs.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "km"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TSS"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TRIMP"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg HR"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max HR"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT ts.duration_s / 3600.0 AS \"Duration\", ts.distance_m / 1000.0 AS \"Distance\", ts.tss AS \"TSS\", ts.trimp AS \"TRIMP\", ts.avg_hr AS \"Avg HR\", ts.max_hr AS \"Max HR\" FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Transitions",
+      "description": "Transition leg durations from mart.triathlon_session, in minutes. T1 is swim to bike, T2 is bike to run. Transitions carry no samples of their own: their cost shows up here and in the race composition pie.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "T1 (swim→bike) (min)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "T2 (bike→run) (min)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT ts.t1_duration_s / 60.0 AS \"T1 (swim→bike) (min)\", ts.t2_duration_s / 60.0 AS \"T2 (bike→run) (min)\" FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Segment breakdown",
+      "description": "One row per leg, from mart.triathlon_session: duration, distance, HR, power and TSS where the leg carries them. Clicking a swim, bike or run row opens that leg's own Session detail dashboard with its time window; T1 and T2 have no detail dashboard (their stats are shown above).",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 16,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Leg detail",
+              "url": "${__data.fields.detail_url}",
+              "targetBlank": false,
+              "oneClick": true
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "km"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg HR"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Power"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "watt"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TSS"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detail_url"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT seg.\"Segment\" AS \"Segment\", seg.duration_s / 3600.0 AS \"Duration\", seg.distance_m / 1000.0 AS \"Distance\", seg.avg_hr AS \"Avg HR\", seg.avg_power AS \"Power\", seg.tss AS \"TSS\", seg.detail_url AS \"detail_url\" FROM (SELECT 'Swim' AS \"Segment\", ts.swim_duration_s AS duration_s, ts.swim_distance_m AS distance_m, ts.swim_avg_hr AS avg_hr, NULL::real AS avg_power, NULL::real AS tss, CASE WHEN ts.swim_activity_id IS NOT NULL THEN '/d/t0-session-swim/session-detail-swim?var-activity_id=' || ts.swim_activity_id::text || '&from=' || ((extract(epoch from sw.start_time) * 1000)::bigint)::text || '&to=' || ((extract(epoch from sw.start_time + make_interval(secs => coalesce(sw.elapsed_s, sw.duration_s))) * 1000)::bigint)::text END AS detail_url FROM mart.triathlon_session ts LEFT JOIN core.activity sw ON sw.activity_id = ts.swim_activity_id WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T1', ts.t1_duration_s, NULL::real, NULL::smallint, NULL::real, NULL::real, NULL FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Bike', ts.bike_duration_s, ts.bike_distance_m, NULL::smallint, ts.bike_avg_power, ts.bike_tss, CASE WHEN ts.bike_activity_id IS NOT NULL THEN '/d/t0-session-bike/session-detail-bike?var-activity_id=' || ts.bike_activity_id::text || '&from=' || ((extract(epoch from bk.start_time) * 1000)::bigint)::text || '&to=' || ((extract(epoch from bk.start_time + make_interval(secs => coalesce(bk.elapsed_s, bk.duration_s))) * 1000)::bigint)::text END FROM mart.triathlon_session ts LEFT JOIN core.activity bk ON bk.activity_id = ts.bike_activity_id WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T2', ts.t2_duration_s, NULL::real, NULL::smallint, NULL::real, NULL::real, NULL FROM mart.triathlon_session ts LEFT JOIN core.activity rn_act ON rn_act.activity_id = ts.run_activity_id WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Run', ts.run_duration_s, ts.run_distance_m, ts.run_avg_hr, NULL::real, ts.run_tss, CASE WHEN ts.run_activity_id IS NOT NULL THEN '/d/t0-session-run/session-detail-run?var-activity_id=' || ts.run_activity_id::text || '&from=0&to=' || (coalesce(rn_act.elapsed_s, rn_act.duration_s) * 1000)::text END FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id) seg ORDER BY CASE seg.\"Segment\" WHEN 'Swim' THEN 1 WHEN 'T1' THEN 2 WHEN 'Bike' THEN 3 WHEN 'T2' THEN 4 ELSE 5 END"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "piechart",
+      "title": "Race composition",
+      "description": "Time share of each leg in seconds, from mart.triathlon_session. Transitions are visible as their own slices: an oversized transition slice is the first thing to optimize.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 16,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "pie",
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "reduceOptions": {
+          "values": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT 'Swim' AS \"Leg\", ts.swim_duration_s AS \"Seconds\" FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T1', ts.t1_duration_s FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Bike', ts.bike_duration_s FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T2', ts.t2_duration_s FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Run', ts.run_duration_s FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Race timeline -- heart rate",
+      "description": "Per-second heart rate across the whole race: samples of every leg joined through parent_activity_id and rebased onto the parent's start time. The transitions between legs are interpolated straight between the last sample of one leg and the first of the next (transitions are NOT drawn as gaps).",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Race timeline -- speed & altitude",
+      "description": "Per-second speed (m/s) and altitude (m) of every leg rebased onto the parent's start time. Speed drops to near zero at each transition and the profile changes character from pool to road to run.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "spanNulls": true,
+            "lineWidth": 1
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Speed (m/s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "velocityms"
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Altitude (m)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "lengthm"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.speed_mps AS \"Speed (m/s)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.speed_mps IS NOT NULL ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.altitude_m AS \"Altitude (m)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
+        }
+      ]
+    }
+  ]
+}

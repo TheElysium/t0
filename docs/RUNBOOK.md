@@ -634,6 +634,11 @@ samples, own per-discipline TSS), parent stored unchanged. All load views alread
 legs and exclude the parent, so the marts needed no change. The event is then visible in
 PMC, daily load, the power curve (run leg) and the swim view (open-water leg).
 
+Migration 025 adds `mart.triathlon_session` (one row per event, leg breakdown) consumed
+by the dashboard `Session detail -- Triathlon` (`t0-session-tri`); the weekly cockpit
+lists each event as a single "Triathlon" row linking to it. The leg rows remain visible
+in the per-sport lists and detail dashboards.
+
 ### Replaying a multisport file parsed by version 1
 
 Files parsed before the split carry no legs. Find and requeue them:

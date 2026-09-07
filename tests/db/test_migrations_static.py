@@ -187,6 +187,7 @@ EXPECTED_MIGRATION_FILES = [
     "022_mart_activity_wide_swim_time.sql",
     "023_core_activity_leg_source.sql",
     "024_shrink_synthetic_id_range.sql",
+    "025_mart_triathlon_session.sql",
 ]
 
 
@@ -241,7 +242,8 @@ def test_all_31_tables_and_views_are_commented_in_the_concatenated_migrations() 
     batch, migration 009) + 1 (core.sport_fit_map, L1 batch, migration 015)
     + 6 (coaching batch, migrations 016-019: core.note, core.plan_week, and the
     materialized views wellness_baseline, power_pace_zone_time, ramp_risk, coach_flags)
-    = 39.
+    + 1 (mart.triathlon_session, migration 025)
+    = 40.
     """
     full_text = "\n".join(
         (REPO_MIGRATIONS_DIR / name).read_text(encoding="utf-8")
@@ -252,7 +254,7 @@ def test_all_31_tables_and_views_are_commented_in_the_concatenated_migrations() 
         r"COMMENT ON (?:TABLE|MATERIALIZED VIEW)\s+([a-z_]+\.[a-z_]+)", full_text
     )
 
-    assert len(set(created)) == 39, f"expected 39 objects, found {len(set(created))}: {created}"
+    assert len(set(created)) == 40, f"expected 40 objects, found {len(set(created))}: {created}"
     missing = set(created) - set(commented)
     assert not missing, f"created objects without matching COMMENT ON: {missing}"
 

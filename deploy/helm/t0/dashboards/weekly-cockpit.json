@@ -772,7 +772,7 @@
       "id": 10,
       "type": "table",
       "title": "Recent sessions",
-      "description": "The 15 most recent sessions, independent of the time picker so the panel is never empty. Clicking a row opens a menu: the matching Session detail dashboard (Run, Bike or Swim) for that activity.",
+      "description": "The 15 most recent sessions, independent of the time picker so the panel is never empty. Multisport events appear as a single Triathlon row, not as one row per leg. Clicking a row opens a menu: the matching Session detail dashboard (Run, Bike, Swim or Triathlon) for that activity.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 8,
@@ -796,6 +796,11 @@
             {
               "title": "Swim detail",
               "url": "/d/t0-session-swim/session-detail-swim?var-activity_id=${__data.fields.activity_id}&from=${__data.fields.start_ms}&to=${__data.fields.end_ms}",
+              "targetBlank": false
+            },
+            {
+              "title": "Triathlon detail",
+              "url": "/d/t0-session-tri/session-detail-tri?var-activity_id=${__data.fields.activity_id}&from=0&to=${__data.fields.duration_ms}",
               "targetBlank": false
             }
           ]
@@ -877,7 +882,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", aw.name AS \"Name\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.avg_hr AS \"Avg HR\", aw.tss AS \"TSS\", aw.activity_id::text AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\", coalesce(a.elapsed_s, a.duration_s)::bigint * 1000 AS \"duration_ms\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false ORDER BY aw.local_date DESC LIMIT 15"
+          "rawSql": "SELECT comb.\"Date\" AS \"Date\", comb.\"Sport\" AS \"Sport\", comb.\"Name\" AS \"Name\", comb.\"Duration\" AS \"Duration\", comb.\"Distance\" AS \"Distance\", comb.\"Avg HR\" AS \"Avg HR\", comb.\"TSS\" AS \"TSS\", comb.\"activity_id\" AS \"activity_id\", comb.\"start_ms\" AS \"start_ms\", comb.\"end_ms\" AS \"end_ms\", comb.\"duration_ms\" AS \"duration_ms\" FROM (SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", s.label AS \"Sport\", aw.name AS \"Name\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.avg_hr AS \"Avg HR\", aw.tss AS \"TSS\", aw.activity_id::text AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\", coalesce(a.elapsed_s, a.duration_s)::bigint * 1000 AS \"duration_ms\" FROM mart.activity_wide aw JOIN core.activity a ON a.activity_id = aw.activity_id JOIN core.sport s ON s.sport_code = aw.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND a.parent_activity_id IS NULL UNION ALL SELECT to_char(ts.local_date, 'YYYY-MM-DD'), 'Triathlon', ts.name, ts.duration_s / 3600.0, ts.distance_m / 1000.0, ts.avg_hr, ts.tss, ts.activity_id::text, (extract(epoch from a.start_time) * 1000)::bigint, (extract(epoch from a.start_time + make_interval(secs => ts.duration_s)) * 1000)::bigint, ts.duration_s::bigint * 1000 FROM mart.triathlon_session ts JOIN core.activity a ON a.activity_id = ts.activity_id WHERE a.athlete_id = $athlete_id) comb ORDER BY comb.\"Date\" DESC LIMIT 15"
         }
       ]
     }

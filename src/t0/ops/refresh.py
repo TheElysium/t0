@@ -14,9 +14,10 @@ module:
    historical six first (daily_load before pmc), then
    wellness_baseline -> ramp_risk -> coach_flags, power_pace_zone_time anywhere after
    its own creation.
-2. **``CONCURRENTLY`` requires a UNIQUE index.** All ten views have one
+2. **``CONCURRENTLY`` requires a UNIQUE index.** All eleven views have one
    (``activity_load_pk``, ``daily_load_pk``, ``pmc_pk``, ``power_curve_best_pk``,
-   ``hr_zone_time_pk``, ``activity_wide_pk``, ``wellness_baseline_pk``,
+   ``hr_zone_time_pk``, ``activity_wide_pk``, ``triathlon_session_pk``,
+   ``wellness_baseline_pk``,
    ``power_pace_zone_time_pk``, ``ramp_risk_pk``, ``coach_flags_pk``) -- condition
    explicitly documented by
    the comment on ``mart.activity_load`` (migration 007): "The UNIQUE index is not
@@ -60,6 +61,8 @@ MART_VIEWS: tuple[str, ...] = (
     "mart.power_curve_best",
     "mart.hr_zone_time",
     "mart.activity_wide",
+    # Migration 025: reads core.* only, no ordering constraint.
+    "mart.triathlon_session",
     # Coaching views (018/019), dependency order: ramp_risk reads pmc/daily_load above;
     # coach_flags reads wellness_baseline and ramp_risk. power_pace_zone_time is
     # independent (core.* only) and closes the list.
