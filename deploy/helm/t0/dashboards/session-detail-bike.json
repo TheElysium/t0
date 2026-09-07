@@ -695,7 +695,7 @@
           "showZoom": true
         },
         "basemap": {
-          "type": "default"
+          "type": "osm-standard"
         },
         "layers": [
           {
