@@ -661,6 +661,82 @@
           "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(l.start_time, 'HH24:MI:SS') AS \"Start\", l.duration_s / 60.0 AS \"Duration (min)\", l.distance_m / 1000.0 AS \"Distance (km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.np_watts AS \"NP (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
         }
       ]
+    },
+    {
+      "id": 10,
+      "type": "geomap",
+      "title": "GPS track -- power",
+      "description": "GPS track colored by instantaneous power. Downsampled to 5 s. Empty for indoor sessions or when the watch recorded no GPS.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "view": {
+          "id": "fit",
+          "lat": 0,
+          "lon": 0,
+          "zoom": 3
+        },
+        "controls": {
+          "mouseWheelZoom": true,
+          "showAttribution": true,
+          "showZoom": true
+        },
+        "basemap": {
+          "type": "default"
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Track",
+            "location": {
+              "mode": "auto"
+            },
+            "config": {
+              "showLegend": true,
+              "style": {
+                "color": {
+                  "field": "Power (W)"
+                },
+                "opacity": 0.6,
+                "size": {
+                  "fixed": 4,
+                  "min": 2,
+                  "max": 15
+                },
+                "symbol": {
+                  "fixed": "circle",
+                  "mode": "fixed"
+                }
+              }
+            },
+            "tooltip": true
+          }
+        ],
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.latitude_deg AS \"lat\", s.longitude_deg AS \"lon\",\n       s.power AS \"Power (W)\", s.speed_mps AS \"Speed (m/s)\"\nFROM core.sample s\nWHERE s.activity_id = $activity_id\n  AND s.latitude_deg IS NOT NULL AND s.longitude_deg IS NOT NULL\n  AND NOT (s.latitude_deg = 0 AND s.longitude_deg = 0)\n  AND s.elapsed_s % 5 = 0\nORDER BY s.t"
+        }
+      ]
     }
   ]
 }

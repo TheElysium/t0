@@ -349,7 +349,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Pace & speed",
-      "description": "Pool: pace per active length, rebuilt from core.swim_length -- pool length is inferred as activity distance divided by the number of active lengths, so it holds for 25 m as well as 50 m pools. Pace is displayed as clock time per 100 m (00:01:50 = 1:50/100 m, the way Garmin spells it). The dashed line is the session average (swim time / distance), the number to compare against CSS. Open water: no length messages, so the bar chart is empty and the per-second speed on the right axis takes over.",
+      "description": "Pool: pace per active length, rebuilt from core.swim_length -- pool length is inferred as activity distance divided by the number of active lengths, so it holds for 25 m as well as 50 m pools. Pace is displayed as clock time per 100 m (00:01:50 = 1:50/100 m, the way Garmin spells it). The dashed line is the session average (swim time / distance), the number to compare against CSS. Open water: no length messages, so the bar chart is empty and the per-second pace on the right axis takes over (clock time per 100 m, converted from speed; samples under 0.2 m/s excluded -- auto-pause/drift spikes). Remember pace inverts: a lower point is a FASTER swim.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 12,
@@ -425,12 +425,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Speed (m/s)"
+              "options": "OW pace (/100 m)"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "velocityms"
+                "value": "clock"
               },
               {
                 "id": "min",
@@ -470,7 +470,7 @@
           "refId": "C",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.speed_mps AS \"Speed (m/s)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, 100.0 / NULLIF(s.speed_mps, 0) AS \"OW pace (/100 m)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps > 0.2 ORDER BY 1"
         }
       ]
     },
@@ -561,6 +561,82 @@
           "format": "table",
           "datasource": "PostgreSQL",
           "rawSql": "SELECT l.length_index AS \"Length\", l.length_type AS \"Type\", l.swim_stroke AS \"Stroke\", l.duration_s AS \"Time (s)\", l.total_strokes AS \"Strokes\", l.avg_cadence AS \"Strokes/min\" FROM core.swim_length l WHERE l.activity_id = $activity_id ORDER BY l.length_index"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "geomap",
+      "title": "GPS track -- speed",
+      "description": "GPS track colored by speed. Downsampled to 5 s. Empty for pool swims: pool swimming records no per-second samples. GPS points only for open water.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "view": {
+          "id": "fit",
+          "lat": 0,
+          "lon": 0,
+          "zoom": 3
+        },
+        "controls": {
+          "mouseWheelZoom": true,
+          "showAttribution": true,
+          "showZoom": true
+        },
+        "basemap": {
+          "type": "default"
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Track",
+            "location": {
+              "mode": "auto"
+            },
+            "config": {
+              "showLegend": true,
+              "style": {
+                "color": {
+                  "field": "Speed (m/s)"
+                },
+                "opacity": 0.6,
+                "size": {
+                  "fixed": 4,
+                  "min": 2,
+                  "max": 15
+                },
+                "symbol": {
+                  "fixed": "circle",
+                  "mode": "fixed"
+                }
+              }
+            },
+            "tooltip": true
+          }
+        ],
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.latitude_deg AS \"lat\", s.longitude_deg AS \"lon\", s.speed_mps AS \"Speed (m/s)\"\nFROM core.sample s\nWHERE s.activity_id = $activity_id\n  AND s.latitude_deg IS NOT NULL AND s.longitude_deg IS NOT NULL\n  AND NOT (s.latitude_deg = 0 AND s.longitude_deg = 0)\n  AND s.elapsed_s % 5 = 0\nORDER BY s.t"
         }
       ]
     }
