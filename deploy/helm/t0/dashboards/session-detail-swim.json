@@ -304,57 +304,15 @@
       ]
     },
     {
-      "id": 4,
+      "id": 5,
       "type": "timeseries",
-      "title": "Heart rate",
-      "description": "Per-second heart rate from core.sample for the selected activity. Fills in for open water and instrumented pool watches; some pool sessions only carry HR at length granularity, in which case this panel stays empty.",
+      "title": "Pace & heart rate",
+      "description": "Pool: pace per active length, rebuilt from core.swim_length -- pool length is inferred as activity distance divided by the number of active lengths, so it holds for 25 m as well as 50 m pools. Pace is displayed as clock time per 100 m (00:01:50 = 1:50/100 m, the way Garmin spells it). The dashed line is the session average (swim time / distance), the number to compare against CSS. Open water: no length messages, so the bar chart is empty and the per-second pace on the right axis takes over (clock time per 100 m, converted from speed; samples under 0.2 m/s excluded -- auto-pause/drift spikes). Remember pace inverts: a lower point is a FASTER swim. Heart rate shares the LEFT axis with the pool bars.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 0,
         "y": 4,
-        "w": 12,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "spanNulls": true,
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
-        }
-      ]
-    },
-    {
-      "id": 5,
-      "type": "timeseries",
-      "title": "Pace & speed",
-      "description": "Pool: pace per active length, rebuilt from core.swim_length -- pool length is inferred as activity distance divided by the number of active lengths, so it holds for 25 m as well as 50 m pools. Pace is displayed as clock time per 100 m (00:01:50 = 1:50/100 m, the way Garmin spells it). The dashed line is the session average (swim time / distance), the number to compare against CSS. Open water: no length messages, so the bar chart is empty and the per-second pace on the right axis takes over (clock time per 100 m, converted from speed; samples under 0.2 m/s excluded -- auto-pause/drift spikes). Remember pace inverts: a lower point is a FASTER swim.",
-      "datasource": "PostgreSQL",
-      "gridPos": {
-        "x": 12,
-        "y": 4,
-        "w": 12,
+        "w": 24,
         "h": 8
       },
       "fieldConfig": {
@@ -453,6 +411,22 @@
                 "value": "flip"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HR (bpm)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
           }
         ]
       },
@@ -483,6 +457,11 @@
           "format": "time_series",
           "datasource": "PostgreSQL",
           "rawSql": "SELECT s.t AS time, 100.0 / NULLIF(s.speed_mps, 0) AS \"OW pace (/100 m)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps > 0.2 ORDER BY 1"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
       ]
     },

@@ -356,55 +356,13 @@
       ]
     },
     {
-      "id": 4,
-      "type": "timeseries",
-      "title": "Heart rate",
-      "description": "Per-second heart rate from core.sample for the selected activity. Empty for summary-only imports.",
-      "datasource": "PostgreSQL",
-      "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 8,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "spanNulls": true,
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
-        }
-      ]
-    },
-    {
       "id": 5,
       "type": "timeseries",
       "title": "Power",
       "description": "Per-second power from core.sample, watts, for the selected activity. Populated on indoor rides (trainer) and outdoor rides with a power meter.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 8,
+        "x": 0,
         "y": 4,
         "w": 8,
         "h": 8
@@ -442,11 +400,11 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Speed & altitude",
-      "description": "Per-second speed (m/s) and barometric altitude (m) from core.sample for the selected activity.",
+      "title": "Speed, HR & altitude",
+      "description": "Per-second speed (m/s) and barometric altitude (m) from core.sample for the selected activity. Heart rate shares the LEFT axis with speed.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 16,
+        "x": 8,
         "y": 4,
         "w": 8,
         "h": 8
@@ -491,6 +449,22 @@
                 "value": "right"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HR (bpm)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
           }
         ]
       },
@@ -515,6 +489,11 @@
           "format": "time_series",
           "datasource": "PostgreSQL",
           "rawSql": "SELECT s.t AS time, s.altitude_m AS \"Altitude (m)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -525,8 +504,8 @@
       "description": "Per-second cadence from core.sample (crank revolutions per minute) for the selected activity.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 0,
-        "y": 12,
+        "x": 16,
+        "y": 4,
         "w": 8,
         "h": 8
       },
@@ -567,7 +546,7 @@
       "description": "Seconds per HR zone, bounds in PERCENT OF MAX HR as requested: Z1 <60%, Z2 60-70%, Z3 70-80%, Z4 80-90%, Z5 >=90%. Max HR comes from core.threshold (discipline 'all', valid at the session date) and falls back to the session's own recorded max HR when no threshold row exists. Note: hrTSS itself stays computed on %LTHR (Friel zones); this panel is a display bucket only. Empty when the session carries no HR data.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 8,
+        "x": 0,
         "y": 12,
         "w": 8,
         "h": 8
@@ -614,9 +593,9 @@
       "description": "core.activity_lap: the watch's own lap boundaries, i.e. the training intention. Empty when the session was recorded without laps.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 16,
+        "x": 8,
         "y": 12,
-        "w": 8,
+        "w": 16,
         "h": 8
       },
       "fieldConfig": {

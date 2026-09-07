@@ -436,54 +436,13 @@
       ]
     },
     {
-      "id": 5,
-      "type": "timeseries",
-      "title": "Heart rate",
-      "description": "Per-second heart rate from core.sample for the selected activity. Empty for summary-only imports.",
-      "datasource": "PostgreSQL",
-      "gridPos": {
-        "x": 0,
-        "y": 4,
-        "w": 8,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "spanNulls": true,
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "datasource": "PostgreSQL",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
-        }
-      ]
-    },
-    {
       "id": 6,
       "type": "timeseries",
       "title": "Power (Garmin Running Power)",
       "description": "Per-second running power from core.sample, watts, for the selected activity. Not comparable with bike power: do not read this panel against cycling thresholds.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 8,
+        "x": 0,
         "y": 4,
         "w": 8,
         "h": 8
@@ -520,11 +479,11 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Pace & altitude",
-      "description": "Pace (min/km, from per-second speed; samples under 0.5 m/s excluded -- auto-pause spikes) and altitude relative to the leg start (GPS-only altitude drifts with no barometer: the ramp is drift, not terrain).",
+      "title": "Pace, HR & altitude",
+      "description": "Pace (min/km, from per-second speed; samples under 0.5 m/s excluded -- auto-pause spikes) and altitude relative to the leg start (GPS-only altitude drifts with no barometer: the ramp is drift, not terrain). Heart rate overlays the LEFT axis (shares it with relative altitude); pace keeps its own flipped axis on the right.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 16,
+        "x": 8,
         "y": 4,
         "w": 8,
         "h": 8
@@ -551,6 +510,10 @@
               {
                 "id": "custom.transform",
                 "value": "flip"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
               }
             ]
           },
@@ -566,7 +529,23 @@
               },
               {
                 "id": "custom.axisPlacement",
-                "value": "right"
+                "value": "left"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HR (bpm)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "min",
+                "value": 0
               }
             ]
           }
@@ -593,6 +572,11 @@
           "format": "time_series",
           "datasource": "PostgreSQL",
           "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, round((s.altitude_m - min(s.altitude_m) OVER ())::numeric, 1) AS \"Altitude (m, relative)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - a.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity a ON a.activity_id = s.activity_id WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -603,8 +587,8 @@
       "description": "Per-second cadence and step length from core.sample for the selected activity. Cadence as recorded by the watch; step length in metres on the right axis.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 0,
-        "y": 12,
+        "x": 16,
+        "y": 4,
         "w": 8,
         "h": 8
       },
@@ -666,7 +650,7 @@
       "description": "Seconds per HR zone, bounds in PERCENT OF MAX HR as requested: Z1 <60%, Z2 60-70%, Z3 70-80%, Z4 80-90%, Z5 >=90%. Max HR comes from core.threshold (discipline 'all', valid at the session date) and falls back to the session's own recorded max HR when no threshold row exists. Note: hrTSS itself stays computed on %LTHR (Friel zones); this panel is a display bucket only. Empty when the session carries no HR data.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 8,
+        "x": 0,
         "y": 12,
         "w": 8,
         "h": 8
@@ -713,10 +697,10 @@
       "description": "core.activity_lap: the watch's own lap boundaries, i.e. the training intention. Empty when the session was recorded without laps.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 16,
+        "x": 0,
         "y": 20,
         "w": 8,
-        "h": 8
+        "h": 10
       },
       "fieldConfig": {
         "defaults": {},
@@ -784,8 +768,8 @@
       "description": "One bar per lap: pace = lap duration / lap distance (min/km), from core.activity_lap. The x axis is absolute time, so the bars line up with the Pace & altitude panel above when the range is shared. Axis scales to the visible data range (relative).",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 0,
-        "y": 20,
+        "x": 8,
+        "y": 12,
         "w": 16,
         "h": 8
       },
@@ -829,9 +813,9 @@
       "description": "GPS track colored by pace. Downsampled to 5 s. Empty for treadmill sessions or when the watch recorded no GPS.",
       "datasource": "PostgreSQL",
       "gridPos": {
-        "x": 0,
-        "y": 28,
-        "w": 24,
+        "x": 8,
+        "y": 20,
+        "w": 16,
         "h": 10
       },
       "fieldConfig": {
