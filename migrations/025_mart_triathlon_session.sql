@@ -107,7 +107,8 @@ SELECT p.activity_id, p.local_date, p.start_time_local, p.name, p.sport_code,
        LIMIT 1
   ) bk ON true
   LEFT JOIN LATERAL (
-      SELECT l.activity_id, l.duration_s, l.distance_m, l.avg_hr,
+       -- leg_order is projected for the T1/T2 laterals below, never exposed by the view.
+       SELECT l.activity_id, l.duration_s, l.distance_m, l.avg_hr, l.leg_order,
              (SELECT sum(m.value) FROM core.activity_metric m
                WHERE m.activity_id = l.activity_id
                  AND m.metric = 'tss' AND m.is_canonical) AS tss
