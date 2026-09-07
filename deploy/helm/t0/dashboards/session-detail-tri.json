@@ -547,6 +547,10 @@
               {
                 "id": "min",
                 "value": 0
+              },
+              {
+                "id": "custom.transform",
+                "value": "flip"
               }
             ]
           }
