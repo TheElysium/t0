@@ -856,13 +856,12 @@
         },
         "layers": [
           {
-            "type": "markers",
+            "type": "route",
             "name": "Track",
             "location": {
               "mode": "auto"
             },
             "config": {
-              "showLegend": true,
               "style": {
                 "color": {
                   "field": "Pace (min/km)"
@@ -872,10 +871,6 @@
                   "fixed": 4,
                   "min": 2,
                   "max": 15
-                },
-                "symbol": {
-                  "fixed": "circle",
-                  "mode": "fixed"
                 }
               }
             },
