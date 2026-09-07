@@ -843,7 +843,7 @@
           "id": "fit",
           "lat": 0,
           "lon": 0,
-          "zoom": 3
+          "zoom": 15
         },
         "controls": {
           "mouseWheelZoom": true,
