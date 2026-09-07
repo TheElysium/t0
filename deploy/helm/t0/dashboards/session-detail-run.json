@@ -114,6 +114,18 @@
                 "value": "lengthm"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg pace"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "clocks"
+              }
+            ]
           }
         ]
       },
@@ -139,7 +151,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.ascent_m AS \"Ascent\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", round(aw.duration_s::numeric / NULLIF(aw.distance_m, 0) * 1000.0, 0) AS \"Avg pace\", aw.ascent_m AS \"Ascent\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
         }
       ]
     },
