@@ -155,7 +155,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", round(aw.distance_m * 3.6 / NULLIF(aw.duration_s, 0), 1) AS \"Avg speed\", aw.ascent_m AS \"Ascent\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", round((aw.distance_m * 3.6 / NULLIF(aw.duration_s, 0))::numeric, 1) AS \"Avg speed\", aw.ascent_m AS \"Ascent\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
         }
       ]
     },

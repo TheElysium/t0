@@ -459,7 +459,7 @@
           "rawSql": "SELECT s.t AS time, 100.0 / NULLIF(s.speed_mps, 0) AS \"OW pace (/100 m)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps > 0.2 ORDER BY 1"
         },
         {
-          "refId": "C",
+          "refId": "D",
           "format": "time_series",
           "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
