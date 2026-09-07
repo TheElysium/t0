@@ -800,7 +800,7 @@
             },
             {
               "title": "Triathlon detail",
-              "url": "/d/t0-session-tri/session-detail-tri?var-activity_id=${__data.fields.activity_id}&from=0&to=${__data.fields.duration_ms}",
+              "url": "/d/t0-session-tri/session-detail-tri?var-activity_id=${__data.fields.activity_id}&from=${__data.fields.start_ms}&to=${__data.fields.end_ms}",
               "targetBlank": false
             }
           ]

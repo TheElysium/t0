@@ -13,7 +13,7 @@
   "version": 1,
   "graphTooltip": 1,
   "time": {
-    "from": "1970-01-01 00:00:00",
+    "from": "now-1y",
     "to": "now"
   },
   "refresh": "",
@@ -499,7 +499,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Race timeline -- heart rate",
-      "description": "Per-second heart rate across the whole race: samples of every leg joined through parent_activity_id and rebased onto the parent's start time. The pace breakdown per sport lives in the three panels below (swim /100 m, bike km/h, run min/km), aligned on the same time axis.",
+      "description": "Per-second heart rate of every leg (joined through parent_activity_id). Absolute time: the dashboard works with the normal time picker and the drill-down links pass each race's exact window.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 0,
@@ -533,7 +533,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id WHERE l.parent_activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
       ]
     },
@@ -541,7 +541,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "Swim pace (/100 m)",
-      "description": "Per-second swim pace (seconds per 100 m) from the swim legs' samples, rebased onto the race timeline. Clock time per 100 m: a lower point is a FASTER swim (axis inverted).",
+      "description": "Per-second swim pace (seconds per 100 m) from the swim legs' samples (absolute time). Clock time per 100 m: a lower point is a FASTER swim (axis inverted).",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 0,
@@ -565,7 +565,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, 100.0 / NULLIF(s.speed_mps, 0) AS \"Pace (/100 m)\"FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND l.sport_code IN ('lap_swimming','open_water') AND s.speed_mps > 0.2 ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, 100.0 / NULLIF(s.speed_mps, 0) AS \"Pace (/100 m)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id WHERE l.parent_activity_id = $activity_id AND l.sport_code IN ('lap_swimming', 'open_water') AND s.speed_mps > 0.2 ORDER BY 1"
         }
       ],
       "options": {
@@ -584,7 +584,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Bike speed (km/h)",
-      "description": "Per-second bike speed from the bike legs' samples, rebased onto the race timeline.",
+      "description": "Per-second bike speed from the bike legs' samples (absolute time).",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 8,
@@ -607,7 +607,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.speed_mps * 3.6 AS \"Speed (km/h)\"FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND l.sport_code IN ('cycling','virtual_cycling') AND s.speed_mps > 0.5 ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, s.speed_mps * 3.6 AS \"Speed (km/h)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id WHERE l.parent_activity_id = $activity_id AND l.sport_code IN ('cycling', 'virtual_cycling') AND s.speed_mps > 0.5 ORDER BY 1"
         }
       ],
       "options": {
@@ -626,7 +626,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "Run pace (min/km)",
-      "description": "Per-second run pace (seconds per km) from the run legs' samples, rebased onto the race timeline. A lower point is a FASTER run (axis inverted); samples under 0.5 m/s excluded (auto-pause).",
+      "description": "Per-second run pace (seconds per km) from the run legs' samples (absolute time). A lower point is a FASTER run (axis inverted); samples under 0.5 m/s excluded (auto-pause).",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 16,
@@ -650,7 +650,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, 1000.0 / NULLIF(s.speed_mps, 0) AS \"Pace (min/km)\"FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND l.sport_code IN ('running','trail_running','treadmill') AND s.speed_mps > 0.5 ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, 1000.0 / NULLIF(s.speed_mps, 0) AS \"Pace (min/km)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id WHERE l.parent_activity_id = $activity_id AND l.sport_code IN ('running', 'trail_running', 'treadmill') AND s.speed_mps > 0.5 ORDER BY 1"
         }
       ],
       "options": {
