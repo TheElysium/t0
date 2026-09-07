@@ -684,10 +684,11 @@
       },
       "options": {
         "view": {
-          "id": "coords",
-          "lat": 43.6047,
-          "lon": 1.4442,
-          "zoom": 12
+          "id": "fit",
+          "allLayers": true,
+          "lat": 0,
+          "lon": 0,
+          "zoom": 15
         },
         "controls": {
           "mouseWheelZoom": true,
