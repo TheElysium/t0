@@ -498,14 +498,14 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Race timeline -- heart rate",
-      "description": "Per-second heart rate across the whole race: samples of every leg joined through parent_activity_id and rebased onto the parent's start time. The transitions between legs are interpolated straight between the last sample of one leg and the first of the next (transitions are NOT drawn as gaps).",
+      "title": "Race timeline -- HR, pace & altitude",
+      "description": "Per-second heart rate, altitude and pace (min/km) across the whole race: samples of every leg joined through parent_activity_id and rebased onto the parent's start time. Pace hides below 1.5 m/s (auto-pause, walk in transitions): the gaps mark the sport changes, the piechart above gives the time share per sport.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 0,
         "y": 12,
-        "w": 12,
-        "h": 8
+        "w": 24,
+        "h": 9
       },
       "fieldConfig": {
         "defaults": {
@@ -513,11 +513,44 @@
           "min": 0,
           "custom": {
             "drawStyle": "line",
-            "spanNulls": true,
+            "spanNulls": false,
             "lineWidth": 1
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Altitude (m)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "lengthm"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace (min/km)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "clocks"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -533,86 +566,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
-        }
-      ]
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Race timeline -- speed & altitude",
-      "description": "Per-second speed (m/s) and altitude (m) of every leg rebased onto the parent's start time. Speed drops to near zero at each transition and the profile changes character from pool to road to run.",
-      "datasource": "PostgreSQL",
-      "gridPos": {
-        "x": 12,
-        "y": 12,
-        "w": 12,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "spanNulls": true,
-            "lineWidth": 1
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Speed (m/s)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "velocityms"
-              },
-              {
-                "id": "min",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Altitude (m)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "lengthm"
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "time_series",
-          "datasource": "PostgreSQL",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.speed_mps AS \"Speed (m/s)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.speed_mps IS NOT NULL ORDER BY 1"
-        },
-        {
-          "refId": "B",
-          "format": "time_series",
-          "datasource": "PostgreSQL",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.altitude_m AS \"Altitude (m)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.altitude_m IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\", s.altitude_m AS \"Altitude (m)\", CASE WHEN s.speed_mps >= 1.5 THEN 1000.0 / NULLIF(s.speed_mps, 0) END AS \"Pace (min/km)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
       ]
     }
