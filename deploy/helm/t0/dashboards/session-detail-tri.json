@@ -147,11 +147,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "h"
-              },
-              {
-                "id": "decimals",
-                "value": 2
+                "value": "none"
               }
             ]
           },
@@ -243,7 +239,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT ts.duration_s / 3600.0 AS \"Duration\", ts.distance_m / 1000.0 AS \"Distance\", ts.tss AS \"TSS\", ts.trimp AS \"TRIMP\", ts.avg_hr AS \"Avg HR\", ts.max_hr AS \"Max HR\" FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id"
+          "rawSql": "SELECT CASE WHEN ts.duration_s IS NULL THEN NULL ELSE (ts.duration_s::int / 3600)::text || ':' || lpad((((ts.duration_s::int) % 3600) / 60)::text, 2, '0') || ':' || lpad(((ts.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", ts.distance_m / 1000.0 AS \"Distance\", ts.tss AS \"TSS\", ts.trimp AS \"TRIMP\", ts.avg_hr AS \"Avg HR\", ts.max_hr AS \"Max HR\" FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id"
         }
       ]
     },
@@ -367,11 +363,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "h"
-              },
-              {
-                "id": "decimals",
-                "value": 2
+                "value": "none"
               }
             ]
           },
@@ -447,7 +439,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT seg.\"Segment\" AS \"Segment\", seg.duration_s / 3600.0 AS \"Duration\", seg.distance_m / 1000.0 AS \"Distance\", seg.avg_hr AS \"Avg HR\", seg.avg_power AS \"Power\", seg.tss AS \"TSS\", seg.detail_url AS \"detail_url\" FROM (SELECT 'Swim' AS \"Segment\", ts.swim_duration_s AS duration_s, ts.swim_distance_m AS distance_m, ts.swim_avg_hr AS avg_hr, NULL::real AS avg_power, NULL::real AS tss, CASE WHEN ts.swim_activity_id IS NOT NULL THEN '/d/t0-session-swim/session-detail-swim?var-activity_id=' || ts.swim_activity_id::text || '&from=' || ((extract(epoch from sw.start_time) * 1000)::bigint)::text || '&to=' || ((extract(epoch from sw.start_time + make_interval(secs => coalesce(sw.elapsed_s, sw.duration_s))) * 1000)::bigint)::text END AS detail_url FROM mart.triathlon_session ts LEFT JOIN core.activity sw ON sw.activity_id = ts.swim_activity_id WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T1', ts.t1_duration_s, NULL::real, NULL::smallint, NULL::real, NULL::real, NULL FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Bike', ts.bike_duration_s, ts.bike_distance_m, NULL::smallint, ts.bike_avg_power, ts.bike_tss, CASE WHEN ts.bike_activity_id IS NOT NULL THEN '/d/t0-session-bike/session-detail-bike?var-activity_id=' || ts.bike_activity_id::text || '&from=' || ((extract(epoch from bk.start_time) * 1000)::bigint)::text || '&to=' || ((extract(epoch from bk.start_time + make_interval(secs => coalesce(bk.elapsed_s, bk.duration_s))) * 1000)::bigint)::text END FROM mart.triathlon_session ts LEFT JOIN core.activity bk ON bk.activity_id = ts.bike_activity_id WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T2', ts.t2_duration_s, NULL::real, NULL::smallint, NULL::real, NULL::real, NULL FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Run', ts.run_duration_s, ts.run_distance_m, ts.run_avg_hr, NULL::real, ts.run_tss, CASE WHEN ts.run_activity_id IS NOT NULL THEN '/d/t0-session-run/session-detail-run?var-activity_id=' || ts.run_activity_id::text || '&from=0&to=' || (coalesce(rn_act.elapsed_s, rn_act.duration_s) * 1000)::text END FROM mart.triathlon_session ts LEFT JOIN core.activity rn_act ON rn_act.activity_id = ts.run_activity_id WHERE ts.activity_id = $activity_id) seg ORDER BY CASE seg.\"Segment\" WHEN 'Swim' THEN 1 WHEN 'T1' THEN 2 WHEN 'Bike' THEN 3 WHEN 'T2' THEN 4 ELSE 5 END"
+          "rawSql": "SELECT seg.\"Segment\" AS \"Segment\", CASE WHEN seg.duration_s IS NULL THEN NULL ELSE (seg.duration_s::int / 3600)::text || ':' || lpad((((seg.duration_s::int) % 3600) / 60)::text, 2, '0') || ':' || lpad(((seg.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", seg.distance_m / 1000.0 AS \"Distance\", seg.avg_hr AS \"Avg HR\", seg.avg_power AS \"Power\", seg.tss AS \"TSS\", seg.detail_url AS \"detail_url\" FROM (SELECT 'Swim' AS \"Segment\", ts.swim_duration_s AS duration_s, ts.swim_distance_m AS distance_m, ts.swim_avg_hr AS avg_hr, NULL::real AS avg_power, NULL::real AS tss, CASE WHEN ts.swim_activity_id IS NOT NULL THEN '/d/t0-session-swim/session-detail-swim?var-activity_id=' || ts.swim_activity_id::text || '&from=' || ((extract(epoch from sw.start_time) * 1000)::bigint)::text || '&to=' || ((extract(epoch from sw.start_time + make_interval(secs => coalesce(sw.elapsed_s, sw.duration_s))) * 1000)::bigint)::text END AS detail_url FROM mart.triathlon_session ts LEFT JOIN core.activity sw ON sw.activity_id = ts.swim_activity_id WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T1', ts.t1_duration_s, NULL::real, NULL::smallint, NULL::real, NULL::real, NULL FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Bike', ts.bike_duration_s, ts.bike_distance_m, NULL::smallint, ts.bike_avg_power, ts.bike_tss, CASE WHEN ts.bike_activity_id IS NOT NULL THEN '/d/t0-session-bike/session-detail-bike?var-activity_id=' || ts.bike_activity_id::text || '&from=' || ((extract(epoch from bk.start_time) * 1000)::bigint)::text || '&to=' || ((extract(epoch from bk.start_time + make_interval(secs => coalesce(bk.elapsed_s, bk.duration_s))) * 1000)::bigint)::text END FROM mart.triathlon_session ts LEFT JOIN core.activity bk ON bk.activity_id = ts.bike_activity_id WHERE ts.activity_id = $activity_id UNION ALL SELECT 'T2', ts.t2_duration_s, NULL::real, NULL::smallint, NULL::real, NULL::real, NULL FROM mart.triathlon_session ts WHERE ts.activity_id = $activity_id UNION ALL SELECT 'Run', ts.run_duration_s, ts.run_distance_m, ts.run_avg_hr, NULL::real, ts.run_tss, CASE WHEN ts.run_activity_id IS NOT NULL THEN '/d/t0-session-run/session-detail-run?var-activity_id=' || ts.run_activity_id::text || '&from=0&to=' || (coalesce(rn_act.elapsed_s, rn_act.duration_s) * 1000)::text END FROM mart.triathlon_session ts LEFT JOIN core.activity rn_act ON rn_act.activity_id = ts.run_activity_id WHERE ts.activity_id = $activity_id) seg ORDER BY CASE seg.\"Segment\" WHEN 'Swim' THEN 1 WHEN 'T1' THEN 2 WHEN 'Bike' THEN 3 WHEN 'T2' THEN 4 ELSE 5 END"
         }
       ]
     },
