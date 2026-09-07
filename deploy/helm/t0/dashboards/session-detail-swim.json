@@ -374,7 +374,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "clock"
+                "value": "clocks"
               },
               {
                 "id": "min",
@@ -402,7 +402,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "clock"
+                "value": "clocks"
               },
               {
                 "id": "color",
@@ -430,7 +430,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "clock"
+                "value": "clocks"
               },
               {
                 "id": "min",
@@ -458,13 +458,13 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT l.start_time AS time, (l.duration_s * 100000.0 * len.n / NULLIF(a.distance_m, 0))::bigint AS \"Pace (/100 m)\" FROM core.swim_length l JOIN core.activity a ON a.activity_id = l.activity_id CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE s.length_type = 'active') AS n FROM core.swim_length s WHERE s.activity_id = $activity_id) len WHERE l.activity_id = $activity_id AND l.length_type = 'active' ORDER BY 1"
+          "rawSql": "SELECT l.start_time AS time, (l.duration_s * 100.0 * len.n / NULLIF(a.distance_m, 0)) AS \"Pace (/100 m)\" FROM core.swim_length l JOIN core.activity a ON a.activity_id = l.activity_id CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE s.length_type = 'active') AS n FROM core.swim_length s WHERE s.activity_id = $activity_id) len WHERE l.activity_id = $activity_id AND l.length_type = 'active' ORDER BY 1"
         },
         {
           "refId": "B",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "WITH b AS (SELECT min(l.start_time) AS t0, max(l.start_time) AS t1 FROM core.swim_length l WHERE l.activity_id = $activity_id AND l.length_type = 'active') SELECT b.t0 AS time, (a.swim_time_s * 100000.0 / NULLIF(a.distance_m, 0))::bigint AS \"Session avg\" FROM b JOIN core.activity a ON true UNION ALL SELECT b.t1, (a.swim_time_s * 100000.0 / NULLIF(a.distance_m, 0))::bigint FROM b JOIN core.activity a ON true"
+          "rawSql": "WITH b AS (SELECT min(l.start_time) AS t0, max(l.start_time) AS t1 FROM core.swim_length l WHERE l.activity_id = $activity_id AND l.length_type = 'active') SELECT b.t0 AS time, (a.swim_time_s * 100.0 / NULLIF(a.distance_m, 0)) AS \"Session avg\" FROM b JOIN core.activity a ON true UNION ALL SELECT b.t1, (a.swim_time_s * 100.0 / NULLIF(a.distance_m, 0)) FROM b JOIN core.activity a ON true"
         },
         {
           "refId": "C",
