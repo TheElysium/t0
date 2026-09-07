@@ -1,7 +1,7 @@
 {
   "uid": "t0-bike",
   "title": "Cycling",
-  "description": "Cycling training view (core.sport.discipline = 'bike': cycling / virtual_cycling). Only 29 bike sessions exist; power is present only on home-trainer (virtual_cycling) rides because the athlete has no power meter on the road bike.",
+  "description": "Cycling training view (core.sport.discipline = 'bike': cycling / virtual_cycling). NP and IF are shown only for rides carrying power and only when NP is reliable; rides without power are still covered through hrTSS/RPE load, power-duration curve, power zones and heart-rate zones.",
   "tags": ["t0", "sport"],
   "timezone": "browser",
   "editable": true,
@@ -38,7 +38,7 @@
           "refId": "Anno",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT n.local_date::timestamp AS time, n.kind AS text, n.kind AS tags FROM core.note n WHERE n.athlete_id = $athlete_id ORDER BY 1"
+          "rawSql": "SELECT n.local_date::timestamp AS time, n.note AS text, n.kind AS tags FROM core.note n WHERE n.athlete_id = $athlete_id ORDER BY 1"
         }
       }
     ]
@@ -94,7 +94,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Weekly TSS",
-      "description": "mart.activity_wide.tss for bike sessions, summed per ISO week (bars, left axis). The 'Missing RPE' series (right axis) counts sessions with needs_manual_rpe = true that week, so a low TSS week caused by an unentered RPE is visible instead of silently understated. Scoped via JOIN to core.activity (mart.activity_wide has no athlete_id) and is_parent = false.",
+      "description": "mart.activity_wide.tss for bike sessions, summed per ISO week (bars, left axis). The 'Missing RPE' series (right axis) counts sessions with needs_manual_rpe = true that week, so a low TSS week caused by an unentered RPE is visible instead of silently understated. Power-derived TSS (tss_method = 'bike_power') is zeroed for sessions with np_reliable = false -- same gating as NP/IF. hrTSS and RPE sessions are always kept. Scoped via JOIN to core.activity (mart.activity_wide has no athlete_id) and is_parent = false.",
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
       "fieldConfig": {
         "defaults": {
@@ -117,7 +117,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT date_trunc('week', w.local_date)::timestamp AS time, sum(w.tss) AS \"TSS\" FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = w.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND s.discipline = 'bike' AND $__timeFilter(w.local_date) GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT date_trunc('week', w.local_date)::timestamp AS time, sum(CASE WHEN w.tss_method = 'bike_power' AND w.np_reliable = false THEN 0 ELSE w.tss END) AS \"TSS\" FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = w.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND s.discipline = 'bike' AND $__timeFilter(w.local_date) GROUP BY 1 ORDER BY 1"
         },
         {
           "refId": "B",
@@ -131,7 +131,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Normalised power and intensity factor per session",
-      "description": "mart.activity_wide, one point per bike session with np_watts IS NOT NULL. NP (left axis, watts) is restricted to np_reliable = true -- unreliable NP values (too few power samples) are excluded rather than plotted. Intensity Factor (right axis, unitless) uses the same session set. FTP is overlaid as a flat reference line read live from core.threshold (discipline = 'bike', currently-valid row); it is never hardcoded. Because only home-trainer rides carry power, every point here is an indoor session.",
+      "description": "mart.activity_wide, one point per bike session with np_watts IS NOT NULL. NP (left axis, watts) is restricted to np_reliable = true -- unreliable NP values (too few power samples) are excluded rather than plotted. Intensity Factor (right axis, unitless) uses the same session set. FTP is overlaid as a DATE-EFFECTIVE reference line: for each session, the core.threshold row (discipline = 'bike') whose validity contains the session date, i.e. the FTP in effect at the time; it is never hardcoded. Because only home-trainer rides carry power, every point here is an indoor session.",
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
       "fieldConfig": {
         "defaults": {
@@ -168,13 +168,13 @@
           "refId": "B",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT a.start_time_local::timestamp AS time, w.intensity_factor AS \"Intensity Factor\" FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = w.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND s.discipline = 'bike' AND w.np_watts IS NOT NULL AND $__timeFilter(a.local_date) ORDER BY 1"
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, w.intensity_factor AS \"Intensity Factor\" FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = w.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND s.discipline = 'bike' AND w.np_watts IS NOT NULL AND w.np_reliable = true AND $__timeFilter(a.local_date) ORDER BY 1"
         },
         {
           "refId": "C",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT $__timeFrom()::timestamp AS time, t.ftp_watts AS \"FTP (W)\" FROM core.threshold t WHERE t.athlete_id = $athlete_id AND t.discipline = 'bike' AND upper_inf(t.validity) UNION ALL SELECT $__timeTo()::timestamp AS time, t.ftp_watts AS \"FTP (W)\" FROM core.threshold t WHERE t.athlete_id = $athlete_id AND t.discipline = 'bike' AND upper_inf(t.validity) ORDER BY 1"
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, t.ftp_watts AS \"FTP (W)\" FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = w.sport_code JOIN core.threshold t ON t.athlete_id = a.athlete_id AND t.discipline = 'bike' AND t.validity @> a.local_date WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND s.discipline = 'bike' AND w.np_watts IS NOT NULL AND w.np_reliable = true AND t.ftp_watts IS NOT NULL AND $__timeFilter(a.local_date) ORDER BY 1"
         }
       ]
     },

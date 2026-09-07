@@ -713,7 +713,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "lengthm"
+                "value": "none"
               },
               {
                 "id": "decimals",

@@ -146,7 +146,7 @@
       "id": 4,
       "title": "Pace per 100 m vs CSS (rest excluded)",
       "type": "timeseries",
-      "description": "Average pace per 100 m of every swim in the period, against critical swim speed read from core.threshold. Computed from swim time, so the rest between sets does not inflate it -- that is what makes the number comparable to CSS, which is a speed while swimming. Values are seconds per 100 m so the series stays a number the chart can scale, formatted as hh:mm:ss for reading -- 00:01:40 is 1:40 /100 m. A lower point is a FASTER swim, so a dip is a good session.",
+      "description": "Average pace per 100 m of every swim in the period, against the critical swim speed in effect on the session date -- core.threshold is historized and joined per session via validity @> local_date, so a CSS update shows as a step in the reference line instead of rewriting the whole history. Computed from swim time, so the rest between sets does not inflate it -- that is what makes the number comparable to CSS, which is a speed while swimming. Values are seconds per 100 m so the series stays a number the chart can scale, formatted as hh:mm:ss for reading -- 00:01:40 is 1:40 /100 m. A lower point is a FASTER swim, so a dip is a good session.",
       "gridPos": {
         "h": 9,
         "w": 24,
@@ -175,7 +175,7 @@
           "refId": "B",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT a.start_time_local::timestamp AS time, 100.0 / NULLIF(t.css_m_s, 0) AS \"CSS pace (min/100 m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code CROSS JOIN core.threshold t WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) AND t.athlete_id = $athlete_id AND t.discipline = 'swim' AND upper_inf(t.validity) ORDER BY 1"
+          "rawSql": "SELECT a.start_time_local::timestamp AS time, 100.0 / NULLIF(t.css_m_s, 0) AS \"CSS pace (min/100 m)\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code JOIN core.threshold t ON t.athlete_id = a.athlete_id AND t.discipline = 'swim' AND t.validity @> a.local_date WHERE s.discipline = 'swim' AND a.is_parent = false AND a.athlete_id = $athlete_id AND $__timeFilter(a.local_date) ORDER BY 1"
         }
       ]
     },

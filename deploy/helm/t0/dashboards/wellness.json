@@ -47,7 +47,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Sleep duration and stages",
-      "description": "core.sleep_session, one row per night keyed on wake_date (not the bedtime date). deep_s/light_s/rem_s/awake_s converted to hours and stacked. 25 nights of data exist (2026-07-26 to 2026-08-22), all stage columns populated.",
+      "description": "core.sleep_session, one row per night keyed on wake_date (not the bedtime date). deep_s/light_s/rem_s/awake_s converted to hours and stacked, with all stage columns expected to be populated.",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": {
@@ -69,7 +69,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Sleep score and respiration",
-      "description": "core.sleep_session.sleep_score (0-100, left axis) and avg_respiration (breaths/min, right axis), per night by wake_date. Both fully populated on all 25 nights.",
+      "description": "core.sleep_session.sleep_score (0-100, left axis) and avg_respiration (breaths/min, right axis), per night by wake_date. Both columns are expected to be populated on every night.",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 } },
@@ -104,7 +104,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "SpO2 overnight",
-      "description": "core.sleep_session.avg_spo2, percent, per night by wake_date. Present on 20 of the 25 nights in the current window; the missing 5 nights are a Garmin collection gap, not a real drop -- gaps in the line are expected and are not a health signal.",
+      "description": "core.sleep_session.avg_spo2, percent, per night by wake_date. Missing nights are a Garmin collection gap, not a real drop -- gaps in the line are expected and are not a health signal.",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "unit": "percent", "min": 80, "max": 100 },
@@ -197,7 +197,7 @@
       "id": 7,
       "type": "table",
       "title": "HRV status (recent days)",
-      "description": "core.daily_wellness.hrv_status, Garmin's own text classification (e.g. balanced, unbalanced, low), populated on 30 of the last 31 days. Rendered as a table rather than a state-timeline: a state-timeline needs explicit value-color mappings for every text label Garmin may emit, which is fragile in schemaVersion 39 without a live database to enumerate the label set -- a table shows the raw text reliably regardless of which labels appear.",
+      "description": "core.daily_wellness.hrv_status, Garmin's own text classification (e.g. balanced, unbalanced, low). Rendered as a table rather than a state-timeline: a state-timeline needs explicit value-color mappings for every text label Garmin may emit, which is fragile in schemaVersion 39 without a live database to enumerate the label set -- a table shows the raw text reliably regardless of which labels appear.",
       "gridPos": { "h": 7, "w": 24, "x": 0, "y": 32 },
       "fieldConfig": { "defaults": {}, "overrides": [] },
       "targets": [
@@ -213,7 +213,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Body battery",
-      "description": "core.daily_wellness.body_battery_high and body_battery_low, per day, 0-100 scale. Populated on 29 of 31 days. The gap between the two lines each day is the day's drain -- a wide gap means the day consumed most of the overnight charge.",
+      "description": "core.daily_wellness.body_battery_high and body_battery_low, per day, 0-100 scale. The gap between the two lines each day is the day's drain -- a wide gap means the day consumed most of the overnight charge.",
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 39 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 2 }, "unit": "none", "min": 0, "max": 100 },
@@ -232,7 +232,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "Average stress",
-      "description": "core.daily_wellness.avg_stress, Garmin's 0-100 daily stress score, per day. Populated on 29 of 31 days.",
+      "description": "core.daily_wellness.avg_stress, Garmin's 0-100 daily stress score, per day.",
       "gridPos": { "h": 7, "w": 12, "x": 12, "y": 39 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 0 }, "unit": "none", "min": 0, "max": 100 },
@@ -251,7 +251,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "VO2max (running)",
-      "description": "core.daily_wellness.vo2max_running, per day. Populated on 30 of 31 days. Garmin's estimate updates in slow, infrequent steps rather than continuously -- read this as a coarse trend over weeks, not a precise daily measurement. vo2max_cycling has ZERO non-null rows in this data set, so no cycling VO2max panel is built here.",
+      "description": "core.daily_wellness.vo2max_running, per day. Garmin's estimate updates in slow, infrequent steps rather than continuously -- read this as a coarse trend over weeks, not a precise daily measurement. No cycling VO2max panel is built here.",
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 46 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "stepAfter": true }, "unit": "none" },
@@ -270,7 +270,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Daily steps, floors and intensity minutes",
-      "description": "core.daily_wellness.steps, floors, intensity_minutes, per day. Empty until the daily activity endpoints are added to the poller: all three columns currently have ZERO non-null rows in the whole table. The empty chart is a known collection gap, not a broken panel.",
+      "description": "core.daily_wellness.steps, floors, intensity_minutes, per day. Empty until the daily activity endpoints are added to the poller. The empty chart is a known collection gap, not a broken panel.",
       "gridPos": { "h": 7, "w": 12, "x": 12, "y": 46 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "unit": "none" },
@@ -289,7 +289,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Weight",
-      "description": "core.daily_wellness.weight_kg, per day, read directly from the column (never hardcoded). Empty until the daily activity endpoints are added to the poller: weight_kg currently has ZERO non-null rows in the whole table -- a previous version of this dashboard dropped this panel for exactly that reason. Kept here (empty) as requested, so the gap is visible and explained rather than hidden.",
+      "description": "core.daily_wellness.weight_kg, per day, read directly from the column (never hardcoded). Empty until the daily activity endpoints are added to the poller. Kept here (empty) so the gap is visible and explained rather than hidden.",
       "gridPos": { "h": 6, "w": 24, "x": 0, "y": 53 },
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "unit": "kg" },
