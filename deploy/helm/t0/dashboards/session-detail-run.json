@@ -547,6 +547,10 @@
               {
                 "id": "unit",
                 "value": "clocks"
+              },
+              {
+                "id": "custom.transform",
+                "value": "flip"
               }
             ]
           },
@@ -791,7 +795,8 @@
             "drawStyle": "bars",
             "lineWidth": 1,
             "fillOpacity": 80,
-            "gradientMode": "opacity"
+            "gradientMode": "opacity",
+            "transform": "flip"
           },
           "unit": "clocks"
         },

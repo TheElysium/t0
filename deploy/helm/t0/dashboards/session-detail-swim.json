@@ -391,6 +391,10 @@
               {
                 "id": "custom.lineWidth",
                 "value": 0
+              },
+              {
+                "id": "custom.transform",
+                "value": "flip"
               }
             ]
           },
@@ -419,6 +423,10 @@
                     10
                   ]
                 }
+              },
+              {
+                "id": "custom.transform",
+                "value": "flip"
               }
             ]
           },
@@ -439,6 +447,10 @@
               {
                 "id": "custom.axisPlacement",
                 "value": "right"
+              },
+              {
+                "id": "custom.transform",
+                "value": "flip"
               }
             ]
           }

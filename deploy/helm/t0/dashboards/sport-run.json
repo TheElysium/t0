@@ -134,7 +134,8 @@
           "unit": "dthms",
           "custom": {
             "drawStyle": "points",
-            "pointSize": 5
+            "pointSize": 5,
+            "transform": "flip"
           },
           "decimals": 0
         },
