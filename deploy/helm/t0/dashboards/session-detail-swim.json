@@ -587,6 +587,7 @@
       "options": {
         "view": {
           "id": "fit",
+          "allLayers": true,
           "lat": 0,
           "lon": 0,
           "zoom": 15
