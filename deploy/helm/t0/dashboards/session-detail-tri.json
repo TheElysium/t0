@@ -498,14 +498,14 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Race timeline -- HR, pace & altitude",
-      "description": "Per-second heart rate, altitude and pace (min/km) across the whole race: samples of every leg joined through parent_activity_id and rebased onto the parent's start time. Pace hides below 1.5 m/s (auto-pause, walk in transitions): the gaps mark the sport changes, the piechart above gives the time share per sport.",
+      "title": "Race timeline -- heart rate",
+      "description": "Per-second heart rate across the whole race: samples of every leg joined through parent_activity_id and rebased onto the parent's start time. The pace breakdown per sport lives in the three panels below (swim /100 m, bike km/h, run min/km), aligned on the same time axis.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 0,
         "y": 12,
         "w": 24,
-        "h": 9
+        "h": 8
       },
       "fieldConfig": {
         "defaults": {
@@ -513,48 +513,11 @@
           "min": 0,
           "custom": {
             "drawStyle": "line",
-            "spanNulls": false,
-            "lineWidth": 1
+            "lineWidth": 1,
+            "spanNulls": true
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Altitude (m)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "lengthm"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Pace (min/km)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "clocks"
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "min",
-                "value": 0
-              },
-              {
-                "id": "custom.transform",
-                "value": "flip"
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
         "legend": {
@@ -570,9 +533,137 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\", s.altitude_m AS \"Altitude (m)\", CASE WHEN s.speed_mps >= 1.5 THEN 1000.0 / NULLIF(s.speed_mps, 0) END AS \"Pace (min/km)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.heart_rate AS \"HR (bpm)\" FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND s.heart_rate IS NOT NULL ORDER BY 1"
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Swim pace (/100 m)",
+      "description": "Per-second swim pace (seconds per 100 m) from the swim legs' samples, rebased onto the race timeline. Clock time per 100 m: a lower point is a FASTER swim (axis inverted).",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "clocks",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "spanNulls": true,
+            "transform": "flip"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, 100.0 / NULLIF(s.speed_mps, 0) AS \"Pace (/100 m)\"FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND l.sport_code IN ('lap_swimming','open_water') AND s.speed_mps > 0.2 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Bike speed (km/h)",
+      "description": "Per-second bike speed from the bike legs' samples, rebased onto the race timeline.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 8,
+        "y": 20,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "velocitykmh",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, s.speed_mps * 3.6 AS \"Speed (km/h)\"FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND l.sport_code IN ('cycling','virtual_cycling') AND s.speed_mps > 0.5 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Run pace (min/km)",
+      "description": "Per-second run pace (seconds per km) from the run legs' samples, rebased onto the race timeline. A lower point is a FASTER run (axis inverted); samples under 0.5 m/s excluded (auto-pause).",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 16,
+        "y": 20,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "clocks",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "spanNulls": true,
+            "transform": "flip"
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT TIMESTAMP '1970-01-01 00:00:00' + (extract(epoch from (s.t - p.start_time)) * interval '1 second') AS time, 1000.0 / NULLIF(s.speed_mps, 0) AS \"Pace (min/km)\"FROM core.sample s JOIN core.activity l ON l.activity_id = s.activity_id JOIN core.activity p ON p.activity_id = l.parent_activity_id WHERE p.activity_id = $activity_id AND l.sport_code IN ('running','trail_running','treadmill') AND s.speed_mps > 0.5 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
     }
   ]
 }
