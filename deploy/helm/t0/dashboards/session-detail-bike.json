@@ -421,12 +421,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Speed (m/s)"
+              "options": "Speed (km/h)"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "velocityms"
+                "value": "velocitykmh"
               },
               {
                 "id": "min",
@@ -482,7 +482,7 @@
           "refId": "A",
           "format": "time_series",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.t AS time, s.speed_mps AS \"Speed (m/s)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps IS NOT NULL ORDER BY 1"
+          "rawSql": "SELECT s.t AS time, (s.speed_mps * 3.6) AS \"Speed (km/h)\" FROM core.sample s WHERE s.activity_id = $activity_id AND s.speed_mps IS NOT NULL ORDER BY 1"
         },
         {
           "refId": "B",
@@ -725,7 +725,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT s.latitude_deg AS \"lat\", s.longitude_deg AS \"lon\",\n       s.power AS \"Power (W)\", s.speed_mps AS \"Speed (m/s)\"\nFROM core.sample s\nWHERE s.activity_id = $activity_id\n  AND s.latitude_deg IS NOT NULL AND s.longitude_deg IS NOT NULL\n  AND NOT (s.latitude_deg = 0 AND s.longitude_deg = 0)\n  AND s.elapsed_s % 5 = 0\nORDER BY s.t"
+          "rawSql": "SELECT s.latitude_deg AS \"lat\", s.longitude_deg AS \"lon\",\n       s.power AS \"Power (W)\", (s.speed_mps * 3.6) AS \"Speed (km/h)\"\nFROM core.sample s\nWHERE s.activity_id = $activity_id\n  AND s.latitude_deg IS NOT NULL AND s.longitude_deg IS NOT NULL\n  AND NOT (s.latitude_deg = 0 AND s.longitude_deg = 0)\n  AND s.elapsed_s % 5 = 0\nORDER BY s.t"
         }
       ]
     }
