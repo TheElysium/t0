@@ -76,16 +76,7 @@
               "id": "byName",
               "options": "Duration"
             },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "h"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
+            "properties": []
           },
           {
             "matcher": {
@@ -151,7 +142,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", round((aw.duration_s * 1000.0 / NULLIF(aw.distance_m, 0))::numeric, 0) AS \"Avg pace\", aw.ascent_m AS \"Ascent\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", CASE WHEN aw.duration_s IS NULL THEN NULL ELSE (aw.duration_s::int / 3600)::text || ':' || lpad(((((aw.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((aw.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", round((aw.duration_s * 1000.0 / NULLIF(aw.distance_m, 0))::numeric, 0) AS \"Avg pace\", aw.ascent_m AS \"Ascent\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
         }
       ]
     },
@@ -708,18 +699,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Duration (min)"
+              "options": "Duration"
             },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
+            "properties": []
           },
           {
             "matcher": {
@@ -757,7 +739,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(extract(epoch from (l.start_time - a.start_time))::int * interval '1 second', 'MI:SS') AS \"Start\", l.duration_s / 60.0 AS \"Duration (min)\", l.distance_m / 1000.0 AS \"Distance (km)\", round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l JOIN core.activity a ON a.activity_id = l.activity_id WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
+          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(extract(epoch from (l.start_time - a.start_time))::int * interval '1 second', 'MI:SS') AS \"Start\", CASE WHEN l.duration_s IS NULL THEN NULL ELSE (l.duration_s::int / 3600)::text || ':' || lpad(((((l.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((l.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", l.distance_m / 1000.0 AS \"Distance (km)\", round((1000.0 * l.duration_s / NULLIF(l.distance_m, 0))::numeric, 0) AS \"Pace (min/km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l JOIN core.activity a ON a.activity_id = l.activity_id WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
         }
       ]
     },

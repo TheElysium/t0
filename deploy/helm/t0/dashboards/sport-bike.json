@@ -2,13 +2,19 @@
   "uid": "t0-bike",
   "title": "Cycling",
   "description": "Cycling training view (core.sport.discipline = 'bike': cycling / virtual_cycling). NP and IF are shown only for rides carrying power and only when NP is reliable; rides without power are still covered through hrTSS/RPE load, power-duration curve, power zones and heart-rate zones.",
-  "tags": ["t0", "sport"],
+  "tags": [
+    "t0",
+    "sport"
+  ],
   "timezone": "browser",
   "editable": true,
   "schemaVersion": 39,
   "version": 1,
   "graphTooltip": 1,
-  "time": {"from": "now-1y", "to": "now"},
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
   "refresh": "",
   "templating": {
     "list": [
@@ -49,15 +55,35 @@
       "type": "timeseries",
       "title": "Weekly volume",
       "description": "core.activity, duration_s summed per ISO week (hours), split by core.sport.is_indoor into Indoor (virtual_cycling, home trainer) and Outdoor (cycling, road). is_parent = false to avoid double-counting triathlon legs. This is the primary view of the discipline since most bike work happens on the trainer.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "h",
-          "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "none"}, "axisPlacement": "auto"}
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "stacking": {
+              "mode": "none"
+            },
+            "axisPlacement": "auto"
+          }
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -72,15 +98,35 @@
       "type": "timeseries",
       "title": "Weekly distance",
       "description": "core.activity.distance_m summed per ISO week (km), split Indoor/Outdoor on core.sport.is_indoor. Virtual-cycling distance is simulated by the trainer software, not GPS-measured -- treat the Indoor series as an estimate.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "km",
-          "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "none"}, "axisPlacement": "auto"}
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "stacking": {
+              "mode": "none"
+            },
+            "axisPlacement": "auto"
+          }
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -95,23 +141,52 @@
       "type": "timeseries",
       "title": "Weekly TSS",
       "description": "mart.activity_wide.tss for bike sessions, summed per ISO week (bars, left axis). The 'Missing RPE' series (right axis) counts sessions with needs_manual_rpe = true that week, so a low TSS week caused by an unentered RPE is visible instead of silently understated. Power-derived TSS (tss_method = 'bike_power') is zeroed for sessions with np_reliable = false -- same gating as NP/IF. hrTSS and RPE sessions are always kept. Scoped via JOIN to core.activity (mart.activity_wide has no athlete_id) and is_parent = false.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "none",
-          "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "none"}, "axisPlacement": "auto"}
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "stacking": {
+              "mode": "none"
+            },
+            "axisPlacement": "auto"
+          }
         },
         "overrides": [
           {
-            "matcher": {"id": "byName", "options": "Missing RPE"},
+            "matcher": {
+              "id": "byName",
+              "options": "Missing RPE"
+            },
             "properties": [
-              {"id": "custom.axisPlacement", "value": "right"},
-              {"id": "unit", "value": "none"}
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              }
             ]
           }
         ]
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -132,31 +207,69 @@
       "type": "timeseries",
       "title": "Normalised power and intensity factor per session",
       "description": "mart.activity_wide, one point per bike session with np_watts IS NOT NULL. NP (left axis, watts) is restricted to np_reliable = true -- unreliable NP values (too few power samples) are excluded rather than plotted. Intensity Factor (right axis, unitless) uses the same session set. FTP is overlaid as a DATE-EFFECTIVE reference line: for each session, the core.threshold row (discipline = 'bike') whose validity contains the session date, i.e. the FTP in effect at the time; it is never hardcoded. Because only home-trainer rides carry power, every point here is an indoor session.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "watt",
-          "custom": {"drawStyle": "points", "pointSize": 6, "axisPlacement": "auto"}
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 6,
+            "axisPlacement": "auto"
+          }
         },
         "overrides": [
           {
-            "matcher": {"id": "byName", "options": "Intensity Factor"},
+            "matcher": {
+              "id": "byName",
+              "options": "Intensity Factor"
+            },
             "properties": [
-              {"id": "custom.axisPlacement", "value": "right"},
-              {"id": "unit", "value": "none"}
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              }
             ]
           },
           {
-            "matcher": {"id": "byName", "options": "FTP (W)"},
+            "matcher": {
+              "id": "byName",
+              "options": "FTP (W)"
+            },
             "properties": [
-              {"id": "custom.drawStyle", "value": "line"},
-              {"id": "custom.lineWidth", "value": 2},
-              {"id": "custom.fillOpacity", "value": 0}
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
             ]
           }
         ]
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -183,18 +296,41 @@
       "type": "xychart",
       "title": "Power duration curve",
       "description": "mart.power_curve_best, kind = 'bike_power': best average power per duration, one curve per lookback window (last 28 / 90 / 365 days, all time), computed from current date regardless of the dashboard time picker. This view has no athlete_id and no sport_code, so scope comes entirely from JOIN core.activity ON activity_id (is_parent = false). All curves are necessarily built from indoor sessions since outdoor rides carry no power.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
       "fieldConfig": {
-        "defaults": {"unit": "watt"},
+        "defaults": {
+          "unit": "watt"
+        },
         "overrides": []
       },
       "options": {
         "seriesMapping": "manual",
         "series": [
-          {"frame": 0, "x": "Duration (s)", "y": "Last 28 days (W)"},
-          {"frame": 1, "x": "Duration (s)", "y": "Last 90 days (W)"},
-          {"frame": 2, "x": "Duration (s)", "y": "Last 365 days (W)"},
-          {"frame": 3, "x": "Duration (s)", "y": "All time (W)"}
+          {
+            "frame": 0,
+            "x": "Duration (s)",
+            "y": "Last 28 days (W)"
+          },
+          {
+            "frame": 1,
+            "x": "Duration (s)",
+            "y": "Last 90 days (W)"
+          },
+          {
+            "frame": 2,
+            "x": "Duration (s)",
+            "y": "Last 365 days (W)"
+          },
+          {
+            "frame": 3,
+            "x": "Duration (s)",
+            "y": "All time (W)"
+          }
         ]
       },
       "targets": [
@@ -229,15 +365,36 @@
       "type": "timeseries",
       "title": "Time in power zones, weekly",
       "description": "mart.power_pace_zone_time, zone_system = 'power_pct_ftp', seconds summed per ISO week and zone (Z1-Z5, stacked bars, hours). No athlete_id on this view: scoped via JOIN core.activity (is_parent = false) and core.sport (discipline = 'bike'). Power zones only exist for sessions with power, i.e. essentially the indoor home-trainer rides -- this panel is near-empty for outdoor weeks.",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "h",
-          "custom": {"drawStyle": "bars", "fillOpacity": 90, "stacking": {"mode": "normal", "group": "A"}, "axisPlacement": "auto"}
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 90,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisPlacement": "auto"
+          }
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -252,15 +409,36 @@
       "type": "timeseries",
       "title": "Time in HR zones, weekly",
       "description": "mart.hr_zone_time, seconds summed per ISO week and zone (Z1-Z5, %LTHR based, stacked bars, hours). No athlete_id on this view: scoped via JOIN core.activity (is_parent = false) and core.sport on sport_code, filtered to discipline = 'bike' (never sport_code = 'bike', that value does not exist). Unlike the power-zone panel, this one also covers outdoor rides that have no power.",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "h",
-          "custom": {"drawStyle": "bars", "fillOpacity": 90, "stacking": {"mode": "normal", "group": "A"}, "axisPlacement": "auto"}
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 90,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisPlacement": "auto"
+          }
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -275,15 +453,34 @@
       "type": "timeseries",
       "title": "Weekly ascent",
       "description": "core.activity.ascent_m summed per ISO week (metres), outdoor rides only (core.sport.is_indoor = false, discipline = 'bike'). Indoor ascent is trainer-simulated (e.g. simulated climbs in structured workouts) and not comparable to real elevation gain, so it is excluded.",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 48},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "lengthm",
-          "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "none"}}
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "stacking": {
+              "mode": "none"
+            }
+          }
         },
         "overrides": []
       },
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
         {
           "refId": "A",
@@ -298,7 +495,12 @@
       "type": "table",
       "title": "Recent rides",
       "description": "core.activity joined to core.sport (discipline = 'bike', label shows Cycling vs Virtual cycling so indoor/outdoor is obvious) and left-joined to mart.activity_wide for tss/tss_method/np/intensity factor, most recent first, time-range filtered on local_date. data_quality and tss_method are shown deliberately so the athlete can judge how much to trust each row (data_quality = unknown means summary-only CSV import, no streams). Clicking a row opens the Session detail dashboard for that activity.",
-      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 56},
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
       "fieldConfig": {
         "defaults": {
           "links": [
@@ -349,13 +551,15 @@
           }
         ]
       },
-      "options": {"showHeader": true},
+      "options": {
+        "showHeader": true
+      },
       "targets": [
         {
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT a.local_date AS \"Date\", s.label AS \"Sport\", a.name AS \"Name\", round(a.duration_s/60.0, 1) AS \"Duration (min)\", round((a.distance_m/1000.0)::numeric, 2) AS \"Distance (km)\", a.avg_hr AS \"Avg HR\", a.avg_power AS \"Avg Power (W)\", w.np_watts AS \"NP (W)\", w.intensity_factor AS \"IF\", w.tss AS \"TSS\", w.tss_method AS \"TSS Method\", a.data_quality AS \"Data Quality\", w.activity_id::text AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code LEFT JOIN mart.activity_wide w ON w.activity_id = a.activity_id WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND s.discipline = 'bike' AND $__timeFilter(a.local_date) ORDER BY a.local_date DESC"
+          "rawSql": "SELECT a.local_date AS \"Date\", s.label AS \"Sport\", a.name AS \"Name\", CASE WHEN a.duration_s IS NULL THEN NULL ELSE (a.duration_s::int / 3600)::text || ':' || lpad(((((a.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((a.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", round((a.distance_m/1000.0)::numeric, 2) AS \"Distance (km)\", a.avg_hr AS \"Avg HR\", a.avg_power AS \"Avg Power (W)\", w.np_watts AS \"NP (W)\", w.intensity_factor AS \"IF\", w.tss AS \"TSS\", w.tss_method AS \"TSS Method\", a.data_quality AS \"Data Quality\", w.activity_id::text AS \"activity_id\", (extract(epoch from a.start_time) * 1000)::bigint AS \"start_ms\", (extract(epoch from a.start_time + make_interval(secs => coalesce(a.elapsed_s, a.duration_s))) * 1000)::bigint AS \"end_ms\" FROM core.activity a JOIN core.sport s ON s.sport_code = a.sport_code LEFT JOIN mart.activity_wide w ON w.activity_id = a.activity_id WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND s.discipline = 'bike' AND $__timeFilter(a.local_date) ORDER BY a.local_date DESC"
         }
       ]
     }

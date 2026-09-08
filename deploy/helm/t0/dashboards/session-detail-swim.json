@@ -76,16 +76,7 @@
               "id": "byName",
               "options": "Duration"
             },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "h"
-              },
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
+            "properties": []
           },
           {
             "matcher": {
@@ -127,7 +118,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", aw.duration_s / 3600.0 AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", aw.swim_time_s / 60.0 AS \"Active swim (min)\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
+          "rawSql": "SELECT to_char(aw.local_date, 'YYYY-MM-DD') AS \"Date\", aw.sport AS \"Sport\", aw.name AS \"Name\", aw.data_quality AS \"Data quality\", CASE WHEN aw.duration_s IS NULL THEN NULL ELSE (aw.duration_s::int / 3600)::text || ':' || lpad(((((aw.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((aw.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", aw.distance_m / 1000.0 AS \"Distance\", CASE WHEN aw.swim_time_s IS NULL THEN NULL ELSE (aw.swim_time_s::int / 3600)::text || ':' || lpad(((((aw.swim_time_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((aw.swim_time_s::int) % 60)::text, 2, '0') END AS \"Active swim\" FROM mart.activity_wide aw WHERE aw.activity_id = $activity_id"
         }
       ]
     },
