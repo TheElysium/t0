@@ -197,6 +197,7 @@ MART_VIEWS: dict[str, set[str]] = {
         "bike_activity_id",
         "bike_duration_s",
         "bike_distance_m",
+        "bike_avg_hr",
         "bike_avg_speed_mps",
         "bike_avg_power",
         "bike_tss",
