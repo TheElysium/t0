@@ -21,7 +21,6 @@ dependencies = [
     # Connection pooling for the MCP read-only role (t0.mcp.db): the official
     # companion package, kept explicit rather than letting the mcp pin drag it in.
     "psycopg-pool==3.2.6",
-    "apscheduler==3.10.4",
     "fastapi==0.115.5",
     # Required AT RUNTIME by File()/UploadFile parameters of the upload endpoint
     # (t0.api.upload): FastAPI does not pull it itself, and its absence only
@@ -129,5 +128,5 @@ disallow_any_generics = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = ["garminconnect.*", "garmin_fit_sdk.*", "apscheduler.*"]
+module = ["garminconnect.*", "garmin_fit_sdk.*"]
 ignore_missing_imports = true

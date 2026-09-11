@@ -393,7 +393,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT (current_date - max(wb.local_date))::int AS \"Data age\" FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND wb.hrv_value IS NOT NULL"
+          "rawSql": "SELECT ((now() AT TIME ZONE 'Europe/Paris')::date - max(wb.local_date))::int AS \"Data age\" FROM mart.wellness_baseline wb WHERE wb.athlete_id = $athlete_id AND wb.hrv_value IS NOT NULL"
         }
       ]
     },

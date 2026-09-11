@@ -39,6 +39,9 @@ deploy/seed/*.sql
 # IDE
 .idea/
 
+# Local opencode agent config
+.opencode/
+
 # Coach review correspondence -- working documents, not project docs
 /docs/COACH_REVIEW.md
 /docs/COACH_FEEDBACK.md
