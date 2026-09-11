@@ -111,6 +111,65 @@ def test_decode_rejects_entity_expansion_bomb() -> None:
         decode_tcx(bomb, activity_id=1)
 
 
+_TCX_WITH_DUPLICATE_TS = (
+    b'<?xml version="1.0"?>'
+    b'<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">'
+    b'<Activities><Activity Sport="Biking"><Lap>'
+    b"<Track>"
+    b'<Trackpoint><Time>2026-08-01T06:00:00Z</Time><Extensions><TPX xmlns="'
+    b"http://www.garmin.com/xmlschemas/ActivityExtension/v2"
+    b'"><Watts>100</Watts></TPX></Extensions></Trackpoint>'
+    b'<Trackpoint><Time>2026-08-01T06:00:00.400Z</Time><Extensions><TPX xmlns="'
+    b"http://www.garmin.com/xmlschemas/ActivityExtension/v2"
+    b'"><Watts>101</Watts></TPX></Extensions></Trackpoint>'
+    b'<Trackpoint><Time>2026-08-01T06:00:01Z</Time><Extensions><TPX xmlns="'
+    b"http://www.garmin.com/xmlschemas/ActivityExtension/v2"
+    b'"><Watts>102</Watts></TPX></Extensions></Trackpoint>'
+    b"</Track>"
+    b"</Lap></Activity></Activities></TrainingCenterDatabase>"
+)
+
+
+def test_decode_tcx_drops_trackpoint_with_duplicate_elapsed_s() -> None:
+    # Trackpoints at t=0.0s and t=0.4s both round to elapsed_s=0 (map_trackpoint
+    # rounds to whole seconds; real Garmin TCX files carry sub-second precision,
+    # cf. activity 24313351581). Downstream regularization treats a duplicate as
+    # caller error, not a gap: the second trackpoint must be dropped, not raise.
+    result = decode_tcx(_TCX_WITH_DUPLICATE_TS, activity_id=1)
+
+    assert [s.elapsed_s for s in result.samples] == [0, 1]
+    # The kept sample at elapsed_s=0 is the first one seen, not a merge.
+    assert result.samples[0].power == 100
+
+
+_TCX_WITH_BACKWARD_TS = (
+    b'<?xml version="1.0"?>'
+    b'<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">'
+    b'<Activities><Activity Sport="Biking"><Lap>'
+    b"<Track>"
+    b"<Trackpoint><Time>2026-08-01T06:00:00Z</Time></Trackpoint>"
+    b"<Trackpoint><Time>2026-08-01T06:00:02Z</Time></Trackpoint>"
+    b"<Trackpoint><Time>2026-08-01T06:00:01.400Z</Time></Trackpoint>"
+    b"<Trackpoint><Time>2026-08-01T06:00:03Z</Time></Trackpoint>"
+    b"</Track>"
+    b"</Lap></Activity></Activities></TrainingCenterDatabase>"
+)
+
+
+def test_decode_tcx_drops_trackpoint_with_backward_elapsed_s() -> None:
+    # A trackpoint whose rounded elapsed_s goes backward relative to the previous
+    # kept sample must also be dropped.
+    result = decode_tcx(_TCX_WITH_BACKWARD_TS, activity_id=1)
+
+    assert [s.elapsed_s for s in result.samples] == [0, 2, 3]
+
+
+def test_decode_tcx_keeps_all_trackpoints_when_strictly_increasing() -> None:
+    result = decode_tcx(_MINIMAL_TCX, activity_id=1)
+
+    assert [s.elapsed_s for s in result.samples] == [0]
+
+
 def test_decode_tcx_without_any_trackpoint_yields_empty_samples() -> None:
     empty = (
         b'<?xml version="1.0"?>'

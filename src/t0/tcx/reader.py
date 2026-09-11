@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from t0.fit.errors import TcxParseError
 from t0.fit.model import ParsedActivitySource
+from t0.fit.reader import drop_non_monotonic_samples
 from t0.tcx.mapping import TCD_NAMESPACE, TPX_NAMESPACE, map_trackpoint
 
 if TYPE_CHECKING:
@@ -159,7 +160,9 @@ def decode_tcx(data: bytes, *, activity_id: int) -> ParsedActivitySource:
 
     TCX has no ``session`` message (addendum §2.2): ``session`` always ``None``
     on output, and laps/lengths stay empty lists—nothing invented to fill native
-    summary absence.
+    summary absence. Trackpoints whose rounded ``elapsed_s`` duplicates or goes
+    backward are dropped (same guard as ``decode_fit``): downstream regularization
+    treats non-monotonic time as caller error, not a gap.
 
     Raises:
         TcxParseError: Malformed XML, DOCTYPE/entity rejected, or no usable
@@ -181,10 +184,10 @@ def decode_tcx(data: bytes, *, activity_id: int) -> ParsedActivitySource:
     start_time = points_with_time[0]["time"] if points_with_time else None
 
     samples = (
-        [
+        drop_non_monotonic_samples(
             map_trackpoint(p, activity_id=activity_id, start_time=start_time)
             for p in points_with_time
-        ]
+        )
         if start_time is not None
         else []
     )

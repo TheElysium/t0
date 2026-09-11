@@ -49,7 +49,7 @@ def _decode_messages(data: bytes) -> dict[str, Any]:
     return dict(messages)
 
 
-def _drop_non_monotonic_samples(samples: Iterable[SampleRow]) -> list[SampleRow]:
+def drop_non_monotonic_samples(samples: Iterable[SampleRow]) -> list[SampleRow]:
     """Keep only samples with strictly increasing ``elapsed_s``.
 
     Sub-second record timestamps rounded to whole seconds (see ``map_record``) can
@@ -101,7 +101,7 @@ def decode_fit(data: bytes, *, activity_id: int) -> ParsedActivitySource:
             "(neither session.start_time nor record[0].timestamp)."
         )
 
-    samples = _drop_non_monotonic_samples(
+    samples = drop_non_monotonic_samples(
         map_record(msg, activity_id=activity_id, start_time=start_time)  # type: ignore[arg-type]
         for msg in record_msgs
     )
