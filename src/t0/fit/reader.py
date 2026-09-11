@@ -23,9 +23,10 @@ from t0.fit.mapping import (
 from t0.fit.model import ParsedActivitySource
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
-    from t0.fit.model import SwimLengthRow
+    from t0.fit.model import SampleRow, SwimLengthRow
 
 
 def _decode_messages(data: bytes) -> dict[str, Any]:
@@ -46,6 +47,25 @@ def _decode_messages(data: bytes) -> dict[str, Any]:
     # must stay usable on any decoded dict, including hand-built in tests).
     # dict(messages) is plain Python dict at runtime: conversion zero-cost, lossless.
     return dict(messages)
+
+
+def drop_non_monotonic_samples(samples: Iterable[SampleRow]) -> list[SampleRow]:
+    """Keep only samples with strictly increasing ``elapsed_s``.
+
+    Sub-second record timestamps rounded to whole seconds (see ``map_record``) can
+    produce a duplicate or backward ``elapsed_s`` relative to the previous sample --
+    downstream (``t0.compute.regularization``) treats that as caller error, not a
+    gap. Simplest possible fix: drop the offending sample outright, no merging or
+    re-timestamping.
+    """
+    kept: list[SampleRow] = []
+    last_elapsed_s: int | None = None
+    for sample in samples:
+        if last_elapsed_s is not None and sample.elapsed_s <= last_elapsed_s:
+            continue
+        kept.append(sample)
+        last_elapsed_s = sample.elapsed_s
+    return kept
 
 
 def decode_fit(data: bytes, *, activity_id: int) -> ParsedActivitySource:
@@ -81,10 +101,10 @@ def decode_fit(data: bytes, *, activity_id: int) -> ParsedActivitySource:
             "(neither session.start_time nor record[0].timestamp)."
         )
 
-    samples = [
+    samples = drop_non_monotonic_samples(
         map_record(msg, activity_id=activity_id, start_time=start_time)  # type: ignore[arg-type]
         for msg in record_msgs
-    ]
+    )
     laps = [map_lap(msg, activity_id=activity_id) for msg in lap_msgs]
 
     lap_index_by_length = derive_lap_index_for_lengths(lap_msgs)

@@ -1,0 +1,9 @@
+stack: python
+lint: ruff check .
+typecheck: mypy src tests
+build: ruff format --check .
+test: pytest
+# No dedicated SAST tool wired in this repo's CI yet (.github/workflows/ci.yml has
+# no gitleaks/bandit/pip-audit step). Left as a known gap rather than invented.
+sast: echo "no SAST tool configured in this repo yet"
+format: ruff format --check .
