@@ -1,0 +1,945 @@
+{
+  "uid": "t0-fitness",
+  "title": "Fitness",
+  "description": "Performance Management Chart view: current form (CTL/ATL/TSB), ramp risk, and planned vs actual weekly load by discipline. The single cross-sport read of training stress; per-discipline detail lives in the sport dashboards.",
+  "tags": [
+    "t0"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-6M",
+    "to": "now+4w"
+  },
+  "refresh": "",
+  "templating": {
+    "list": [
+      {
+        "name": "athlete_id",
+        "type": "query",
+        "datasource": "PostgreSQL",
+        "query": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "definition": "SELECT a.athlete_id AS __value, a.display_name AS __text FROM core.athlete a ORDER BY a.athlete_id",
+        "refresh": 1,
+        "sort": 1,
+        "current": {},
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Notes",
+        "datasource": "PostgreSQL",
+        "enable": true,
+        "iconColor": "rgba(255, 96, 96, 1)",
+        "hide": false,
+        "target": {
+          "refId": "Anno",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT n.local_date::timestamp AS time, n.note AS text, n.kind AS tags FROM core.note n WHERE n.athlete_id = $athlete_id ORDER BY 1"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CTL",
+      "description": "mart.pmc.ctl, most recent row for the athlete: 42-day exponentially weighted training load (Chronic Training Load, fitness).",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 40
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT p.ctl AS \"CTL\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id ORDER BY p.local_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "ATL",
+      "description": "mart.pmc.atl, most recent row for the athlete: 7-day exponentially weighted training load (Acute Training Load, fatigue).",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 5,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 40
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT p.atl AS \"ATL\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id ORDER BY p.local_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "TSB",
+      "description": "mart.pmc.tsb, most recent row: previous-day CTL minus previous-day ATL (the reference convention; tsb_same_day exists but is not used here). Below -30 high risk, -30 to -10 optimal build, -10 to 5 grey zone, 5 to 25 fresh, above 25 transition/detraining.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": -30
+              },
+              {
+                "color": "grey",
+                "value": -10
+              },
+              {
+                "color": "blue",
+                "value": 5
+              },
+              {
+                "color": "yellow",
+                "value": 25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 40
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT p.tsb AS \"TSB\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id ORDER BY p.local_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "dCTL / week",
+      "description": "mart.ramp_risk.dctl_per_week, most recent row: rate of CTL change per week. Green under 3, yellow from 3, orange from 5, red from 8 -- fast ramps raise injury risk regardless of absolute CTL.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 14,
+          "valueSize": 40
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT r.dctl_per_week AS \"dCTL / week\" FROM mart.ramp_risk r WHERE r.athlete_id = $athlete_id ORDER BY r.local_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "CTL reliable",
+      "description": "mart.pmc.ctl_reliable, most recent row: false for 180 days after the PMC seed date. Over that window CTL growth is an initialisation artifact of the seed value, not real training progression -- read CTL with caution until this reads yes.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "true": {
+                  "text": "yes",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "false": {
+                  "text": "no (provisional)",
+                  "color": "orange"
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "grey",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 22
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT p.ctl_reliable::text AS \"CTL reliable\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id ORDER BY p.local_date DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Performance Management Chart",
+      "description": "mart.pmc, one row per calendar day for $athlete_id, time-range filtered on local_date. Daily TSS as bars (left axis); CTL split into a solid segment while ctl_reliable and a dashed 'CTL (provisional)' segment while not (first 180 days after the PMC seed, an initialisation artifact); ATL alongside CTL. TSB on the right axis with a five-zone background: red below -30 (high risk), green -30 to -10 (optimal), grey -10 to 5 (grey zone), blue 5 to 25 (fresh), yellow above 25 (transition/detraining).",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "axisPlacement": "left"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Daily TSS"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 20
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "left"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "grey"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CTL"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "left"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CTL (provisional)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "left"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ATL"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "left"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TSB"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              },
+              {
+                "id": "custom.thresholdsStyle",
+                "value": {
+                  "mode": "area"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-orange"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": -30
+                    },
+                    {
+                      "color": "grey",
+                      "value": -10
+                    },
+                    {
+                      "color": "blue",
+                      "value": 5
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 25
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT p.local_date::timestamp AS time, p.tss AS \"Daily TSS\", CASE WHEN p.ctl_reliable THEN p.ctl END AS \"CTL\", CASE WHEN NOT p.ctl_reliable THEN p.ctl END AS \"CTL (provisional)\", p.atl AS \"ATL\", p.tsb AS \"TSB\" FROM mart.pmc p WHERE p.athlete_id = $athlete_id AND $__timeFilter(p.local_date) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Ramp rate (dCTL / week)",
+      "description": "mart.ramp_risk.dctl_per_week, time-range filtered on local_date. Bars coloured by the same bands as the dCTL stat panel: green under 3, yellow from 3, orange from 5, red from 8, shown as dashed threshold lines.",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "axisPlacement": "auto",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT r.local_date::timestamp AS time, r.dctl_per_week AS \"dCTL / week\" FROM mart.ramp_risk r WHERE r.athlete_id = $athlete_id AND $__timeFilter(r.local_date) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Weekly TSS by discipline",
+      "description": "mart.activity_wide.tss summed per ISO week and core.sport.discipline (stacked bars), scoped via JOIN core.activity (is_parent = false, mart.activity_wide has no athlete_id). Overlaid with core.plan_week.target_tss summed per week as a dashed unstacked line -- weeks without a plan row yield no point, never a zero.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisPlacement": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "swim"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bike"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "run"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "grey"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Planned TSS"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(w.tss) AS value, s.discipline AS metric FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND $__timeFilter(a.local_date) GROUP BY 1, 3 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT pw.week_start_date::timestamp AS time, sum(pw.target_tss) AS \"Planned TSS\" FROM core.plan_week pw WHERE pw.athlete_id = $athlete_id AND $__timeFilter(pw.week_start_date) GROUP BY 1 HAVING sum(pw.target_tss) IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Weekly hours by discipline",
+      "description": "mart.activity_wide.duration_s summed per ISO week and core.sport.discipline (hours, stacked bars), same scoping as the TSS panel. Overlaid with core.plan_week.target_hours summed per week as a dashed unstacked line -- weeks without a plan row yield no point, never a zero.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisPlacement": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "swim"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bike"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "run"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "grey"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Planned hours"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT date_trunc('week', a.local_date)::timestamp AS time, sum(w.duration_s)/3600.0 AS value, s.discipline AS metric FROM mart.activity_wide w JOIN core.activity a ON a.activity_id = w.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE a.athlete_id = $athlete_id AND a.is_parent = false AND $__timeFilter(a.local_date) GROUP BY 1, 3 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT pw.week_start_date::timestamp AS time, sum(pw.target_hours) AS \"Planned hours\" FROM core.plan_week pw WHERE pw.athlete_id = $athlete_id AND $__timeFilter(pw.week_start_date) GROUP BY 1 HAVING sum(pw.target_hours) IS NOT NULL ORDER BY 1"
+        }
+      ]
+    }
+  ]
+}
