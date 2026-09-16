@@ -499,3 +499,16 @@ def test_grafana_macros_are_substituted_before_strict_sql_analysis() -> None:
     # than fail—substitution itself already verified above without pglast.
     pglast = pytest.importorskip("pglast", reason="pglast available only outside .venv")
     pglast.parse_sql(substituted)  # must not raise
+
+
+@pytest.mark.parametrize("path", DASHBOARD_FILES, ids=lambda p: p.name)
+def test_power_curve_best_is_never_windowed_or_scoped_per_athlete(path: Path) -> None:
+    # mart.power_curve_best keeps one all-time record per duration across athletes:
+    # windowed or per-athlete curves must aggregate core.activity_power_curve instead.
+    data = json.loads(path.read_text(encoding="utf-8"))
+    offending = [
+        sql
+        for sql in _iter_sql_strings(data)
+        if "mart.power_curve_best" in sql and re.search(r"\b(local_date|athlete_id)\b", sql)
+    ]
+    assert not offending, f"{path.name}: windowed/scoped read of mart.power_curve_best: {offending}"
