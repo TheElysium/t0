@@ -56,3 +56,6 @@ values-homelab.yaml
 
 # Personal coordination notes, never committed
 docs/HANDOFF-*
+
+# Agent workflow usage logs (local hooks)
+.usage/
