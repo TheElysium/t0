@@ -263,7 +263,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT CASE WHEN s.duration_s IS NULL THEN NULL ELSE (s.duration_s::int / 3600)::text || ':' || lpad(((((s.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((s.duration_s::int) % 60)::text, 2, '0') END AS \"Last night's sleep\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND s.wake_date = (now() AT TIME ZONE 'Europe/Paris')::date"
+          "rawSql": "SELECT s.duration_s / 3600.0 AS \"Last night's sleep\" FROM core.sleep_session s WHERE s.athlete_id = $athlete_id AND s.wake_date = (now() AT TIME ZONE 'Europe/Paris')::date"
         }
       ]
     },

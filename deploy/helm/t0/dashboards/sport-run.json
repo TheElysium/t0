@@ -384,7 +384,7 @@
     {
       "id": 9,
       "title": "Running power curve",
-      "description": "mart.power_curve_best (kind = 'run_power'), no athlete_id and no sport_code: joined to core.activity (is_parent = false, athlete_id filter) and core.sport (discipline = 'run') for scope, plus a local_date window per series. Four overlaid windows -- last 28 days / 90 days / 365 days / all time -- each taking max(value) per duration_s so the curve shows the single best effort at each duration within that window, not an average. X axis is duration in seconds, not time.",
+      "description": "core.activity_power_curve (kind = 'run_power', windows spanning a pause excluded), joined to core.activity (is_parent = false, athlete_id filter) and core.sport (discipline = 'run') for scope, plus a local_date window per series. mart.power_curve_best is not used: it keeps all-time records only, across athletes. Four overlaid windows -- last 28 days / 90 days / 365 days / all time -- each taking max(value) per duration_s so the curve shows the single best effort at each duration within that window, not an average. X axis is duration in seconds, not time.",
       "type": "xychart",
       "datasource": "PostgreSQL",
       "gridPos": {
@@ -407,25 +407,25 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 28 days (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND pc.local_date >= current_date - interval '28 days' GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 28 days (W)\" FROM core.activity_power_curve pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND NOT pc.spans_pause AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND a.local_date >= current_date - interval '28 days' GROUP BY 1 ORDER BY 1"
         },
         {
           "refId": "B",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 90 days (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND pc.local_date >= current_date - interval '90 days' GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 90 days (W)\" FROM core.activity_power_curve pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND NOT pc.spans_pause AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND a.local_date >= current_date - interval '90 days' GROUP BY 1 ORDER BY 1"
         },
         {
           "refId": "C",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 365 days (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND pc.local_date >= current_date - interval '365 days' GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"Last 365 days (W)\" FROM core.activity_power_curve pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND NOT pc.spans_pause AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id AND a.local_date >= current_date - interval '365 days' GROUP BY 1 ORDER BY 1"
         },
         {
           "refId": "D",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"All time (W)\" FROM mart.power_curve_best pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT pc.duration_s AS \"Duration (s)\", max(pc.value) AS \"All time (W)\" FROM core.activity_power_curve pc JOIN core.activity a ON a.activity_id = pc.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE pc.kind = 'run_power' AND NOT pc.spans_pause AND a.is_parent = false AND s.discipline = 'run' AND a.athlete_id = $athlete_id GROUP BY 1 ORDER BY 1"
         }
       ]
     },
