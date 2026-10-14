@@ -189,6 +189,7 @@ EXPECTED_MIGRATION_FILES = [
     "024_shrink_synthetic_id_range.sql",
     "025_mart_triathlon_session.sql",
     "026_mart_triathlon_session_bike_hr.sql",
+    "027_mart_activity_lap.sql",
 ]
 
 

@@ -21,7 +21,8 @@ number without its caveat:
 - truncated (every multi-row tool): the response envelope is
   {"rows": [...], "truncated": bool}. truncated=true means the window may
   extend beyond the returned rows -- NEVER treat a capped window as the full
-  history; narrow the date range or raise list_activities' limit.
+  history; narrow the date range or raise list_activities' limit. get_laps
+  carries two flags: truncated (laps) and lengths_truncated (pool lengths).
 - has_estimated_load (get_pmc): signals that at least one session of the day
   has estimated load (HR or RPE) not measured.
 - data_quality / needs_manual_rpe (list_activities/get_activity): surface data
@@ -30,6 +31,7 @@ number without its caveat:
   sequences (e.g. a triathlon) are stored as one parent row plus one row per
   leg, and every load view filters is_parent = false to avoid double-counting.
   The parent row is never returned: count legs, never legs + parent.
+  get_laps on a parent id returns null: call it on each leg id.
 - css_estimated (get_thresholds): true when CSS comes from the coarse fallback;
   an sTSS built on an estimated CSS does not have the same status.
 
@@ -78,4 +80,11 @@ Data semantics:
   comparable across sports -- efficiency_factor_unit says which family:
   "m/s per bpm" (running, trail_running) vs "W per bpm" (cycling,
   virtual_cycling).
+- Laps (get_laps): laps are splits -- auto-lap per device setting on free
+  activities, one lap per step on structured workouts (rest steps included, see intensity).
+  lengths are pool lengths; length_type idle = rest at the wall. lap_index is
+  the raw FIT index: a multisport leg's laps may not start at 0. Lap avg_hr and
+  max_hr are the UNFILTERED sensor values and can be wrong. An unknown id,
+  a parent or a not-yet-refreshed activity returns null;
+  an activity without laps returns empty lists.
 """

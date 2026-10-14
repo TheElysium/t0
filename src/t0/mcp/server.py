@@ -1,4 +1,4 @@
-"""MCP server assembly: eight curated tools over the marts, streamable HTTP at /mcp."""
+"""MCP server assembly: nine curated tools over the marts, streamable HTTP at /mcp."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class McpConfigError(RuntimeError):
 
 
 def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
-    """Build the FastMCP server with exactly the eight curated tools."""
+    """Build the FastMCP server with exactly the nine curated tools."""
     mcp = FastMCP(
         "t0",
         instructions=INSTRUCTIONS,
@@ -92,6 +92,16 @@ def create_mcp_server(settings: McpSettings, reader: Reader) -> FastMCP:
         """One session by id, all wide-view metrics (HR, power, NP, IF,
         decoupling, efficiency) with their caveat flags."""
         return await asyncio.to_thread(handlers.get_activity, reader, activity_id=activity_id)
+
+    @mcp.tool()
+    async def get_laps(activity_id: int) -> dict[str, Any] | None:
+        """Laps (splits) and pool lengths of one session: {"rows": laps,
+        "truncated", "lengths", "lengths_truncated"}. Null for an unknown id,
+        a not-yet-refreshed activity or a multisport parent: call it on each leg id.
+        CAVEAT: lap avg_hr and max_hr are the unfiltered sensor values and can be wrong."""
+        return await asyncio.to_thread(
+            handlers.get_laps, reader, activity_id=activity_id, max_rows=max_rows
+        )
 
     @mcp.tool()
     async def get_power_curve(
