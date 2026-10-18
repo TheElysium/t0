@@ -1,6 +1,6 @@
 # Task: Activity laps via MCP + Grafana
 
-Status: slices 1-2 committed (DB tests written, UNVERIFIED: no Docker daemon) | branch feat/activity-laps | next: run DB tests on postgres:16, then slice 3
+Status: slices 1-2 committed, DB tests VERIFIED on postgres:16 | branch feat/activity-laps | next: slice 3
 Started: 2026-10-14
 
 ## Spec
@@ -22,6 +22,7 @@ Decisions
 - HR caveat in `instructions.py` + tool docstring: lap HR is unfiltered sensor value, can be wrong. No per-row field.
 - Grafana reads `mart.*`. Tri: one table, Leg column, T1/T2 excluded, order `leg_order, lap_index`.
 - Columns: run = lap, duration, distance, pace min/km, avg HR, avg power; swim = lap, lengths, distance, pace /100 m, stroke; bike = lap, duration, distance, avg HR, avg power.
+- 2026-10-18 (athlete): run/bike already had a `core.activity_lap` Laps table: repoint to `mart.activity_lap`, Lap = `row_number()`, keep current columns. Swim: add a Laps table, keep Swim lengths, repointed to `mart.swim_length`.
 
 Out of scope
 - Raw FIT/sample access, `activity_split` km bucketing, HR correction, DB role changes, TCX lengths (always empty).
@@ -53,7 +54,7 @@ Out of scope
 - Migration number clash: check latest in `migrations/` at slice 1 start.
 - `test_dashboards.py` columns are hand-copied; keep in sync with the view.
 - Run auto-lap on the race itself unverified (DB read was denied); QA step 5 confirms.
-- Migration 027 never executed on Postgres: `tests/mcp/test_db_reader.py` laps tests skip without `T0_TEST_POSTGRES_DSN` (CI has no Postgres).
+- CI has no Postgres: DB tests skip without `T0_TEST_POSTGRES_DSN`. Local run: postgres:16 container + `CREATE ROLE t0_mcp_ro` (CNPG creates it in prod), pytest via WSL (`.venv` is Linux).
 - Deferred to slice 3: `deploy/helm/t0/README.md` tool → mart table lacks `get_laps` (needs the chart bump slice 3 already makes).
 
 ## Metrics
@@ -66,3 +67,4 @@ Out of scope
 - gate-keeper s1+2 r2 | 16285 | 9 | 52s | 0 | 1 | 0 | GREEN
 - reviewer s1+2 r2 (opus) | 69313 | 25 | 92s | 0 | 2 | 0 | APPROVE (root README count fixed by orchestrator)
 - gate-keeper s1+2 r3 | n/a | n/a | n/a | 0 | 2 | 0 | GREEN
+- gate-keeper s2 DB verify | 17305 | 8 | 130s | 0 | 0 | 0 | GREEN (969 passed incl. DB tests; sast placeholder = known gap)

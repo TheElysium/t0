@@ -67,7 +67,7 @@ def test_remigration_is_a_no_op(clean_dsn: str) -> None:
     assert second == []
 
 
-def test_all_31_objects_are_present_and_commented(clean_dsn: str) -> None:
+def test_all_42_objects_are_present_and_commented(clean_dsn: str) -> None:
     import psycopg
 
     migrate(dsn=clean_dsn, migrations_dir=REPO_MIGRATIONS_DIR)
@@ -79,12 +79,12 @@ def test_all_31_objects_are_present_and_commented(clean_dsn: str) -> None:
               FROM pg_class c
               JOIN pg_namespace n ON n.oid = c.relnamespace
              WHERE n.nspname IN ('raw', 'core', 'mart')
-               AND c.relkind IN ('r', 'm')
+               AND c.relkind IN ('r', 'm', 'v')
             """
         )
         rows = cur.fetchall()
 
-    assert len(rows) == 31, f"expected 31 tables/views, found {len(rows)}"
+    assert len(rows) == 42, f"expected 42 tables/views, found {len(rows)}"
     uncommented = [name for name, comment in rows if not comment]
     assert not uncommented, f"objects without comment: {uncommented}"
 

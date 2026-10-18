@@ -58,7 +58,6 @@ def _insert_bike_threshold(dsn: str) -> None:
             "ftp_watts, lthr_bpm) SELECT athlete_id, 'bike', '[2026-01-01, infinity)', "
             "245.0, 152 FROM core.athlete ORDER BY athlete_id DESC LIMIT 1"
         )
-        cur.fetchone()
 
 
 def test_readiness_check_succeeds(reader: Reader) -> None:
