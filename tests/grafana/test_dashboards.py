@@ -250,6 +250,44 @@ MART_VIEWS: dict[str, set[str]] = {
         "zone_code",
         "seconds",
     },
+    # Copied from migration 027 (plain views, not materialized).
+    "mart.activity_lap": {
+        "activity_id",
+        "lap_index",
+        "start_time",
+        "duration_s",
+        "elapsed_s",
+        "distance_m",
+        "avg_speed_mps",
+        "avg_hr",
+        "max_hr",
+        "avg_power",
+        "max_power",
+        "np_watts",
+        "np_convention",
+        "avg_cadence",
+        "ascent_m",
+        "descent_m",
+        "intensity",
+        "lap_trigger",
+        "swim_stroke",
+        "num_lengths",
+        "parent_activity_id",
+        "leg_order",
+    },
+    "mart.swim_length": {
+        "activity_id",
+        "length_index",
+        "lap_index",
+        "start_time",
+        "duration_s",
+        "length_type",
+        "swim_stroke",
+        "total_strokes",
+        "avg_cadence",
+        "parent_activity_id",
+        "leg_order",
+    },
 }
 
 KNOWN_TABLES: dict[str, set[str]] = {**CORE_TABLES, **MART_VIEWS}
@@ -398,7 +436,8 @@ def _final_projection(view_name: str, migrations_text: str) -> str:
     projects. Output columns always appear, either by name or AS alias.
     """
     bloc_re = re.compile(
-        rf"CREATE MATERIALIZED VIEW\s+{re.escape(view_name)}\s+AS(?P<body>.*?);\s*$",
+        rf"CREATE (?:OR REPLACE )?(?:MATERIALIZED )?VIEW\s+{re.escape(view_name)}\s+"
+        r"AS(?P<body>.*?);\s*$",
         re.DOTALL | re.MULTILINE | re.IGNORECASE,
     )
     match = bloc_re.search(migrations_text)
@@ -434,13 +473,13 @@ def test_expected_mart_columns_exist_in_migrations() -> None:
     definitions: dict[str, str] = {}
     for _, text in sorted(sources.items()):
         for view_name in re.findall(
-            r"CREATE (?:OR REPLACE )?MATERIALIZED VIEW\s+(mart\.\w+)", text, re.IGNORECASE
+            r"CREATE (?:OR REPLACE )?(?:MATERIALIZED )?VIEW\s+(mart\.\w+)", text, re.IGNORECASE
         ):
             definitions[view_name] = text
 
     for view_name, colonnes in MART_VIEWS.items():
         assert view_name in definitions, (
-            f"{view_name} listed in MART_VIEWS but no matching CREATE MATERIALIZED VIEW "
+            f"{view_name} listed in MART_VIEWS but no matching CREATE VIEW "
             "in migrations: manual list has drifted"
         )
         # Keep most recent CREATE, not bare mention: migrations cite other views in
@@ -512,3 +551,37 @@ def test_power_curve_best_is_never_windowed_or_scoped_per_athlete(path: Path) ->
         if "mart.power_curve_best" in sql and re.search(r"\b(local_date|athlete_id)\b", sql)
     ]
     assert not offending, f"{path.name}: windowed/scoped read of mart.power_curve_best: {offending}"
+
+
+def _has_cell_novalue_override(panel: dict[str, Any]) -> bool:
+    for override in panel["fieldConfig"].get("overrides", []):
+        matcher = override.get("matcher", {})
+        if matcher.get("id") != "byRegexp" or matcher.get("options") != ".*":
+            continue
+        if any(prop.get("id") == "noValue" for prop in override.get("properties", [])):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("path", DASHBOARD_FILES, ids=lambda p: p.name)
+def test_table_empty_message_does_not_leak_into_null_cells(path: Path) -> None:
+    # Grafana applies defaults.noValue to every null cell: a per-field override restores it.
+    data = json.loads(path.read_text(encoding="utf-8"))
+    offending = [
+        panel["title"]
+        for panel in data["panels"]
+        if panel.get("type") == "table"
+        and "noValue" in panel.get("fieldConfig", {}).get("defaults", {})
+        and not _has_cell_novalue_override(panel)
+    ]
+    assert not offending, f"{path.name}: null cells would show the empty message: {offending}"
+
+
+def test_lap_view_guard_never_exposes_extra_and_keeps_leg_order() -> None:
+    text_027 = (MIGRATIONS_DIR / "027_mart_activity_lap.sql").read_text(encoding="utf-8")
+    projection = _final_projection("mart.activity_lap", text_027)
+    identifiants = set(re.findall(r"[a-z_][a-z0-9_]*", projection))
+
+    assert "leg_order" in identifiants
+    assert "extra" not in identifiants
+    assert "is_parent" not in identifiants

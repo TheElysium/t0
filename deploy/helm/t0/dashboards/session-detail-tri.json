@@ -656,6 +656,63 @@
           "sort": "none"
         }
       }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Laps",
+      "description": "mart.activity_lap for the swim, bike and run legs only (T1/T2 excluded). Pace is m:ss per km on run legs and per 100 m on swim legs, empty on bike. Lap HR is the unfiltered sensor value.",
+      "datasource": "PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No laps recorded for this session"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "-"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Distance (km)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "km"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "datasource": "PostgreSQL",
+          "rawSql": "SELECT s.label AS \"Leg\", row_number() OVER (PARTITION BY l.activity_id ORDER BY l.lap_index) AS \"Lap\", CASE WHEN l.duration_s IS NULL THEN NULL ELSE (l.duration_s::int / 3600)::text || ':' || lpad(((((l.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((l.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", l.distance_m / 1000.0 AS \"Distance (km)\", CASE WHEN l.distance_m > 0 AND l.duration_s IS NOT NULL AND a.sport_code IN ('running', 'trail_running', 'treadmill') THEN (round(1000.0 * l.duration_s / l.distance_m)::int / 60)::text || ':' || lpad((round(1000.0 * l.duration_s / l.distance_m)::int % 60)::text, 2, '0') WHEN l.distance_m > 0 AND l.duration_s IS NOT NULL AND a.sport_code IN ('lap_swimming', 'open_water') THEN (round(100.0 * l.duration_s / l.distance_m)::int / 60)::text || ':' || lpad((round(100.0 * l.duration_s / l.distance_m)::int % 60)::text, 2, '0') END AS \"Pace\", l.avg_hr AS \"Avg HR\", l.avg_power AS \"Avg power (W)\" FROM mart.activity_lap l JOIN core.activity a ON a.activity_id = l.activity_id JOIN core.sport s ON s.sport_code = a.sport_code WHERE l.parent_activity_id = $activity_id AND a.sport_code <> 'transition' ORDER BY l.leg_order, l.lap_index"
+        }
+      ]
     }
   ]
 }

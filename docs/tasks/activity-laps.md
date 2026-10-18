@@ -1,6 +1,6 @@
 # Task: Activity laps via MCP + Grafana
 
-Status: slices 1-2 committed, DB tests VERIFIED on postgres:16 | branch feat/activity-laps | next: slice 3
+Status: slices 1-4 committed, dashboard SQL verified on postgres:16 | branch feat/activity-laps | next: slice 5 (HITL QA + release)
 Started: 2026-10-14
 
 ## Spec
@@ -23,6 +23,7 @@ Decisions
 - Grafana reads `mart.*`. Tri: one table, Leg column, T1/T2 excluded, order `leg_order, lap_index`.
 - Columns: run = lap, duration, distance, pace min/km, avg HR, avg power; swim = lap, lengths, distance, pace /100 m, stroke; bike = lap, duration, distance, avg HR, avg power.
 - 2026-10-18 (athlete): run/bike already had a `core.activity_lap` Laps table: repoint to `mart.activity_lap`, Lap = `row_number()`, keep current columns. Swim: add a Laps table, keep Swim lengths, repointed to `mart.swim_length`.
+- Run Laps `Start` is now the offset from the first lap (was wall-clock time of day).
 
 Out of scope
 - Raw FIT/sample access, `activity_split` km bucketing, HR correction, DB role changes, TCX lengths (always empty).
@@ -42,7 +43,7 @@ Out of scope
 4. **Dashboard tri** (proof: static test)
    - `session-detail-tri.json`: single table keyed on parent `$activity_id`, via `parent_activity_id`, Leg column, no transitions.
 5. **HITL: manual QA + release**
-   - QA script (athlete): open 2026-10-11 tri dashboard, expect swim/bike/run legs with ~9 run laps at 1 km, no duplicates; `get_laps` on run leg returns ~9 rows, on parent id returns None; 2026-09-05 tri legs non-empty.
+   - QA script (athlete): open 2026-10-11 tri dashboard, expect swim/bike/run legs with ~9 run laps at 1 km, no duplicates; `get_laps` on run leg returns ~9 rows, on parent id returns None; 2026-09-05 tri legs non-empty; a session without laps shows the empty-state text, no `-` grid.
    - Bump `deploy/helm/t0/Chart.yaml` `version` (0.1.38 -> next) and `appVersion`; tag `vX.Y.Z` before deploy (README "Release"). Push only on user request.
 
 ## Gates
@@ -68,3 +69,10 @@ Out of scope
 - reviewer s1+2 r2 (opus) | 69313 | 25 | 92s | 0 | 2 | 0 | APPROVE (root README count fixed by orchestrator)
 - gate-keeper s1+2 r3 | n/a | n/a | n/a | 0 | 2 | 0 | GREEN
 - gate-keeper s2 DB verify | 17305 | 8 | 130s | 0 | 0 | 0 | GREEN (969 passed incl. DB tests; sast placeholder = known gap)
+- implementer s3+4 | 42297 | 35 | 131s | 0 | 0 | 0 | done, SQL run on empty container only
+- gate-keeper s3+4 | 18087 | 8 | 88s | 0 | 0 | 0 | GREEN (969 passed; sast placeholder)
+- reviewer s3+4 (opus) | 50672 | 15 | 121s | 0 | 1 | 0 | REQUEST_CHANGES (2 blocker pace rounding, 1 major noValue)
+- implementer review-fixes s3+4 | 51065 | 33 | 243s | 0 | 1 | 0 | 8/8 fixed, 4 SQL tests red→green
+- gate-keeper s3+4 r2 | 17391 | 8 | 84s | 0 | 1 | 0 | GREEN (986 passed; sast placeholder)
+- reviewer s3+4 r2 (opus) | 45696 | 16 | 128s | 0 | 2 | 0 | APPROVE (minor: run/bike/lengths SQL untested, 3 DB tests added by orchestrator)
+- gate-keeper s3+4 r3 | n/a | n/a | n/a | 0 | 2 | 0 | GREEN (989 passed; sast placeholder)
