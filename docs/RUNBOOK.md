@@ -228,7 +228,7 @@ volume. Check the free space first (`kubectl exec <postgresql pod> -- df -h /var
              topologyKey: kubernetes.io/hostname
      containers:
        - name: drill
-         image: postgres:16-alpine
+         image: postgres:18-alpine
          command: ["sleep", "3600"]
          env:
            - name: PGHOST

@@ -495,9 +495,11 @@ grafana:
 backup:
   enabled: true
   schedule: "0 3 * * 0"    # Sunday 03:00
+  # pg_dump aborts on a server newer than itself: keep this major >= the server's
+  # (bundled or external). Restore needs a pg_restore of at least the same major.
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "18-alpine"
     pullPolicy: IfNotPresent
   # Number of dumps to keep (simple rotation by purging oldest).
   retention: 8

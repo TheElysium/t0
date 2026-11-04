@@ -582,8 +582,8 @@ To manually restore a dump (run outside ingestion hours, ideally after setting
 ```bash
 # 1. List available dumps, via a temporary pod mounted on the PVC.
 kubectl run -n t0 restore-shell --rm -it --restart=Never \
-  --image=postgres:16-alpine \
-  --overrides='{"spec":{"containers":[{"name":"restore-shell","image":"postgres:16-alpine","command":["sh"],"stdin":true,"tty":true,"volumeMounts":[{"name":"fit-archive","mountPath":"/backups","subPath":"postgres-backups"}]}],"volumes":[{"name":"fit-archive","persistentVolumeClaim":{"claimName":"t0-fit-archive"}}]}}' \
+  --image=postgres:18-alpine \
+  --overrides='{"spec":{"containers":[{"name":"restore-shell","image":"postgres:18-alpine","command":["sh"],"stdin":true,"tty":true,"volumeMounts":[{"name":"fit-archive","mountPath":"/backups","subPath":"postgres-backups"}]}],"volumes":[{"name":"fit-archive","persistentVolumeClaim":{"claimName":"t0-fit-archive"}}]}}' \
   -- ls -la /backups
 
 # 2. Copy the chosen dump out of the cluster (or use it directly from
