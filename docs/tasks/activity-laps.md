@@ -1,6 +1,6 @@
 # Task: Activity laps via MCP + Grafana
 
-Status: slices 1-4 committed, dashboard SQL verified on postgres:16 | branch feat/activity-laps | next: slice 5 (HITL QA + release)
+Status: slices 1-4 committed, rebased on main, chart 0.1.40 | branch feat/activity-laps | next: slice 5 QA after deploy
 Started: 2026-10-14
 
 ## Spec
@@ -44,7 +44,7 @@ Out of scope
    - `session-detail-tri.json`: single table keyed on parent `$activity_id`, via `parent_activity_id`, Leg column, no transitions.
 5. **HITL: manual QA + release**
    - QA script (athlete): open 2026-10-11 tri dashboard, expect swim/bike/run legs with ~9 run laps at 1 km, no duplicates; `get_laps` on run leg returns ~9 rows, on parent id returns None; 2026-09-05 tri legs non-empty; a session without laps shows the empty-state text, no `-` grid.
-   - Bump `deploy/helm/t0/Chart.yaml` `version` (0.1.38 -> next) and `appVersion`; tag `vX.Y.Z` before deploy (README "Release"). Push only on user request.
+   - Bump `deploy/helm/t0/Chart.yaml` `version` to 0.1.40 with `appVersion` "0.1.40" (0.1.39 taken by PR #5); tag `vX.Y.Z` before deploy (README "Release"). Push only on user request.
 
 ## Gates
 
