@@ -451,3 +451,89 @@ def get_thresholds(
     _validated_discipline(run, discipline)
     params = {"discipline": discipline, "limit": max_rows}
     return [_shape_threshold(row) for row in run.fetch(_THRESHOLDS_SQL, params)]
+
+
+_ACTIVITY_EXISTS_SQL = (
+    "SELECT w.activity_id FROM mart.activity_wide w WHERE w.activity_id = %(activity_id)s LIMIT 1"
+)
+
+_LAPS_SQL = """
+SELECT activity_id, lap_index, start_time, duration_s, elapsed_s, distance_m,
+       avg_speed_mps, avg_hr, max_hr, avg_power, max_power, np_watts,
+       np_convention, avg_cadence, ascent_m, descent_m, intensity,
+       lap_trigger, swim_stroke, num_lengths, parent_activity_id, leg_order
+  FROM mart.activity_lap
+ WHERE activity_id = %(activity_id)s
+ ORDER BY lap_index
+ LIMIT %(limit)s
+"""
+
+_LENGTHS_SQL = """
+SELECT activity_id, length_index, lap_index, start_time, duration_s,
+       length_type, swim_stroke, total_strokes, avg_cadence,
+       parent_activity_id, leg_order
+  FROM mart.swim_length
+ WHERE activity_id = %(activity_id)s
+ ORDER BY length_index
+ LIMIT %(limit)s
+"""
+
+
+def _shape_lap(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "activity_id": row["activity_id"],
+        "lap_index": row["lap_index"],
+        "start_time": _iso(row["start_time"]),
+        "duration_s": row["duration_s"],
+        "elapsed_s": row["elapsed_s"],
+        "distance_m": round_number(row["distance_m"], 1),
+        "avg_speed_mps": round_number(row["avg_speed_mps"]),
+        "avg_hr": row["avg_hr"],
+        "max_hr": row["max_hr"],
+        "avg_power": round_number(row["avg_power"], 0),
+        "max_power": round_number(row["max_power"], 0),
+        "np_watts": round_number(row["np_watts"], 0),
+        "np_convention": row["np_convention"],
+        "avg_cadence": round_number(row["avg_cadence"], 1),
+        "ascent_m": round_number(row["ascent_m"], 1),
+        "descent_m": round_number(row["descent_m"], 1),
+        "intensity": row["intensity"],
+        "lap_trigger": row["lap_trigger"],
+        "swim_stroke": row["swim_stroke"],
+        "num_lengths": row["num_lengths"],
+        "parent_activity_id": row["parent_activity_id"],
+        "leg_order": row["leg_order"],
+    }
+
+
+def _shape_length(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "activity_id": row["activity_id"],
+        "length_index": row["length_index"],
+        "lap_index": row["lap_index"],
+        "start_time": _iso(row["start_time"]),
+        "duration_s": round_number(row["duration_s"]),
+        "length_type": row["length_type"],
+        "swim_stroke": row["swim_stroke"],
+        "total_strokes": row["total_strokes"],
+        "avg_cadence": round_number(row["avg_cadence"], 1),
+        "parent_activity_id": row["parent_activity_id"],
+        "leg_order": row["leg_order"],
+    }
+
+
+def get_laps(run: SqlRunner, *, activity_id: int, max_rows: int) -> dict[str, Any] | None:
+    """Laps and pool lengths of one session, or None for an unknown, parent or not-yet-refreshed id.
+
+    Lap avg_hr/max_hr are the unfiltered sensor values and can be wrong."""
+    if run.fetch_one(_ACTIVITY_EXISTS_SQL, {"activity_id": activity_id}) is None:
+        return None
+    params = {"activity_id": activity_id, "limit": max_rows}
+    laps = _page([_shape_lap(r) for r in run.fetch(_LAPS_SQL, params)], max_rows)
+    lengths = _page([_shape_length(r) for r in run.fetch(_LENGTHS_SQL, params)], max_rows)
+    return {
+        "rows": laps["rows"],
+        "truncated": laps["truncated"],
+        "lengths": lengths["rows"],
+        "lengths_truncated": lengths["truncated"],
+    }

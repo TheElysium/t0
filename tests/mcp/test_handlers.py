@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -460,3 +460,179 @@ def test_parse_iso_date_rejects_garbage_naming_the_argument() -> None:
 
 def test_parse_iso_date_accepts_none() -> None:
     assert handlers.parse_iso_date(None, "start_date") is None
+
+
+ACTIVITY_MARKER = "FROM MART.ACTIVITY_WIDE"
+LAP_MARKER = "FROM MART.ACTIVITY_LAP"
+LENGTH_MARKER = "FROM MART.SWIM_LENGTH"
+LAP_START = datetime(2026, 9, 1, 6, 30, 0, tzinfo=UTC)
+
+
+def _lap_row(lap_index: int = 0) -> dict[str, Any]:
+    return {
+        "activity_id": 42,
+        "lap_index": lap_index,
+        "start_time": LAP_START,
+        "duration_s": 300,
+        "elapsed_s": 305,
+        "distance_m": 1000.0049,
+        "avg_speed_mps": 3.33333,
+        "avg_hr": 151,
+        "max_hr": 160,
+        "avg_power": 250.4,
+        "max_power": 400.0,
+        "np_watts": 255.6,
+        "np_convention": "global_window",
+        "avg_cadence": 88.123,
+        "ascent_m": 3.456,
+        "descent_m": None,
+        "intensity": "active",
+        "lap_trigger": "distance",
+        "swim_stroke": None,
+        "num_lengths": None,
+        "parent_activity_id": 7,
+        "leg_order": 2,
+    }
+
+
+def _length_row(length_index: int = 0) -> dict[str, Any]:
+    return {
+        "activity_id": 42,
+        "length_index": length_index,
+        "lap_index": 0,
+        "start_time": LAP_START,
+        "duration_s": 31.4567,
+        "length_type": "active",
+        "swim_stroke": "freestyle",
+        "total_strokes": 18,
+        "avg_cadence": 30.04,
+        "parent_activity_id": None,
+        "leg_order": None,
+    }
+
+
+def _queue_activity(fake_runner: FakeRunner, *, known: bool = True) -> None:
+    fake_runner.queue(ACTIVITY_MARKER, [{"activity_id": 42}] if known else [])
+
+
+def test_get_laps_unknown_or_parent_id_returns_none_without_lap_queries(
+    fake_runner: FakeRunner,
+) -> None:
+    _queue_activity(fake_runner, known=False)
+
+    assert handlers.get_laps(fake_runner, activity_id=999, max_rows=MAX_ROWS) is None
+    assert len(fake_runner.calls) == 1
+
+
+def test_get_laps_without_lengths(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [_lap_row(0), _lap_row(1)])
+    fake_runner.queue(LENGTH_MARKER, [])
+
+    result = handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    assert result is not None
+    assert [r["lap_index"] for r in result["rows"]] == [0, 1]
+    assert result["lengths"] == []
+    assert result["truncated"] is False
+    assert result["lengths_truncated"] is False
+
+
+def test_get_laps_shapes_lap_rows(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [_lap_row()])
+    fake_runner.queue(LENGTH_MARKER, [])
+
+    result = handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    assert result is not None
+    (lap,) = result["rows"]
+    assert lap["start_time"] == "2026-09-01T06:30:00+00:00"
+    assert lap["distance_m"] == 1000.0
+    assert lap["avg_speed_mps"] == 3.33
+    assert lap["avg_power"] == 250.0
+    assert lap["np_watts"] == 256.0
+    assert lap["avg_cadence"] == 88.1
+    assert lap["ascent_m"] == 3.5
+    assert lap["descent_m"] is None
+    assert lap["avg_hr"] == 151
+    assert lap["intensity"] == "active"
+    assert lap["parent_activity_id"] == 7
+    assert lap["leg_order"] == 2
+
+
+def test_get_laps_with_lengths(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [_lap_row()])
+    fake_runner.queue(LENGTH_MARKER, [_length_row(0), _length_row(1)])
+
+    result = handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    assert result is not None
+    first = result["lengths"][0]
+    assert [r["length_index"] for r in result["lengths"]] == [0, 1]
+    assert first["duration_s"] == 31.46
+    assert first["length_type"] == "active"
+    assert first["start_time"] == "2026-09-01T06:30:00+00:00"
+    assert first["total_strokes"] == 18
+
+
+def test_get_laps_flags_each_truncation_independently(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [_lap_row(i) for i in range(MAX_ROWS)])
+    fake_runner.queue(LENGTH_MARKER, [_length_row(0)])
+
+    result = handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    assert result is not None
+    assert result["truncated"] is True
+    assert result["lengths_truncated"] is False
+
+
+def test_get_laps_both_truncated_at_max_rows(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [_lap_row(i) for i in range(MAX_ROWS)])
+    fake_runner.queue(LENGTH_MARKER, [_length_row(i) for i in range(MAX_ROWS)])
+
+    result = handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    assert result is not None
+    assert result["truncated"] is True
+    assert result["lengths_truncated"] is True
+
+
+def test_get_laps_binds_max_rows_as_limit_on_both_queries(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [])
+    fake_runner.queue(LENGTH_MARKER, [])
+
+    handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    limited = [params for sql, params in fake_runner.calls if "LIMIT %(limit)s" in sql]
+    assert [p["limit"] for p in limited] == [MAX_ROWS, MAX_ROWS]
+    assert all(p["activity_id"] == 42 for _, p in fake_runner.calls)
+
+
+def test_get_laps_never_exposes_extra(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [{**_lap_row(), "extra": {"start_position_lat": 1}}])
+    fake_runner.queue(LENGTH_MARKER, [{**_length_row(), "extra": {"x": 1}}])
+
+    result = handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    assert result is not None
+    assert "extra" not in result["rows"][0]
+    assert "extra" not in result["lengths"][0]
+    assert all("extra" not in sql for sql, _ in fake_runner.calls)
+
+
+def test_get_laps_orders_laps_and_lengths_by_index(fake_runner: FakeRunner) -> None:
+    _queue_activity(fake_runner)
+    fake_runner.queue(LAP_MARKER, [])
+    fake_runner.queue(LENGTH_MARKER, [])
+
+    handlers.get_laps(fake_runner, activity_id=42, max_rows=MAX_ROWS)
+
+    sqls = [sql for sql, _ in fake_runner.calls]
+    assert any("ORDER BY lap_index" in s for s in sqls)
+    assert any("ORDER BY length_index" in s for s in sqls)

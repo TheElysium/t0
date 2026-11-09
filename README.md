@@ -11,7 +11,7 @@ tracking.
   `core` (normalized data), `mart` (materialized training load views).
 - **Grafana** : dashboards (PMC, power-duration curve, swimming, wellness, sleep).
 - **`t0-mcp`** (optional) : read-only MCP server giving an LLM access to the training marts
-  through 8 curated tools (PMC, activities, power curve, wellness, coach signals, thresholds).
+  through 9 curated tools (PMC, activities, laps, power curve, wellness, coach signals, thresholds).
 - **Helm Chart** : deployment on a personal Kubernetes cluster (see security note below).
 
 The repository produces code and manifests. **No agent or CI calls Garmin Connect and no agent

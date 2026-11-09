@@ -98,7 +98,7 @@ Manual path: `POST /uploads` archives the file and inserts `raw.fit_file` with
 
 ## 3. MCP server
 
-Read-only FastMCP server exposing exactly eight curated tools — no raw-SQL escape
+Read-only FastMCP server exposing exactly nine curated tools — no raw-SQL escape
 hatch. Requires `T0_MCP_BEARER_TOKEN` and `T0_MCP_POSTGRES_DSN`; refuses to start
 without them.
 
@@ -111,9 +111,10 @@ flowchart LR
         SVC[ClusterIP Service]
         BEAR[BearerTokenMiddleware<br/>compare_digest]
         APP[FastMCP /mcp<br/>stateless HTTP, JSON]
-        subgraph Tools["8 curated tools"]
+        subgraph Tools["9 curated tools"]
             T1[get_pmc]
             T2[list_activities / get_activity]
+            T8[get_laps]
             T3[get_power_curve]
             T4[get_wellness]
             T5[get_coach_flags]

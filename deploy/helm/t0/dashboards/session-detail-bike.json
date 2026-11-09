@@ -581,7 +581,7 @@
       "id": 9,
       "type": "table",
       "title": "Laps",
-      "description": "core.activity_lap: the watch's own lap boundaries, i.e. the training intention. Empty when the session was recorded without laps.",
+      "description": "mart.activity_lap: the watch's own lap boundaries, i.e. the training intention. Empty when the session was recorded without laps. Lap HR is the unfiltered sensor value and can be wrong.",
       "datasource": "PostgreSQL",
       "gridPos": {
         "x": 8,
@@ -590,8 +590,22 @@
         "h": 8
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "noValue": "No laps recorded for this session"
+        },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "-"
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -635,7 +649,7 @@
           "refId": "A",
           "format": "table",
           "datasource": "PostgreSQL",
-          "rawSql": "SELECT l.lap_index AS \"Lap\", to_char(l.start_time, 'HH24:MI:SS') AS \"Start\", CASE WHEN l.duration_s IS NULL THEN NULL ELSE (l.duration_s::int / 3600)::text || ':' || lpad(((((l.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((l.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", l.distance_m / 1000.0 AS \"Distance (km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.np_watts AS \"NP (W)\", l.ascent_m AS \"Ascent (m)\" FROM core.activity_lap l WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
+          "rawSql": "SELECT row_number() OVER (ORDER BY l.lap_index) AS \"Lap\", to_char(l.start_time, 'HH24:MI:SS') AS \"Start\", CASE WHEN l.duration_s IS NULL THEN NULL ELSE (l.duration_s::int / 3600)::text || ':' || lpad(((((l.duration_s::int) % 3600) / 60))::text, 2, '0') || ':' || lpad(((l.duration_s::int) % 60)::text, 2, '0') END AS \"Duration\", l.distance_m / 1000.0 AS \"Distance (km)\", l.avg_hr AS \"Avg HR\", l.max_hr AS \"Max HR\", l.avg_power AS \"Avg power (W)\", l.np_watts AS \"NP (W)\", l.ascent_m AS \"Ascent (m)\" FROM mart.activity_lap l WHERE l.activity_id = $activity_id ORDER BY l.lap_index"
         }
       ]
     },

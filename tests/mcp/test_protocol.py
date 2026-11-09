@@ -26,6 +26,7 @@ EXPECTED_TOOLS = {
     "get_ramp_risk",
     "get_coach_flags",
     "get_thresholds",
+    "get_laps",
 }
 
 
@@ -54,7 +55,7 @@ async def _mcp_client(mcp_app: Any, token: str | None) -> AsyncIterator[ClientSe
 
 
 @pytest.mark.anyio
-async def test_server_lists_exactly_the_eight_tools(mcp_app: Any) -> None:
+async def test_server_lists_exactly_the_nine_tools(mcp_app: Any) -> None:
     async with _mcp_client(mcp_app, TEST_TOKEN) as session:
         result = await session.list_tools()
 

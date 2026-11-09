@@ -381,6 +381,7 @@ tools -- no raw SQL, no writes:
 | `get_ramp_risk` | `mart.ramp_risk` |
 | `get_coach_flags` | `mart.coach_flags` |
 | `get_thresholds` | `core.threshold` |
+| `get_laps` | `mart.activity_lap`, `mart.swim_length` |
 
 Multi-row tools answer `{"rows": [...], "truncated": bool}`. Filters validate
 their vocabulary and fail loudly on an unknown value -- never a silent `[]`.

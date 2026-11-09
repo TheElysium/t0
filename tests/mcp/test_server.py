@@ -24,6 +24,7 @@ EXPECTED_TOOLS = (
     "get_ramp_risk",
     "get_coach_flags",
     "get_thresholds",
+    "get_laps",
 )
 
 
