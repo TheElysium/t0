@@ -1,6 +1,6 @@
 # Task: Activity laps via MCP + Grafana
 
-Status: done 2026-11-09 | released v0.1.40 (PR #6), QA passed; run laps pace m:ss fix in chart 0.1.41
+Status: done 2026-11-09 | released v0.1.40 (PR #6), QA passed; run laps pace m:ss and bike laps Start offset fixes in chart 0.1.41
 Started: 2026-10-14
 
 ## Spec
@@ -23,7 +23,7 @@ Decisions
 - Grafana reads `mart.*`. Tri: one table, Leg column, T1/T2 excluded, order `leg_order, lap_index`.
 - Columns: run = lap, duration, distance, pace min/km, avg HR, avg power; swim = lap, lengths, distance, pace /100 m, stroke; bike = lap, duration, distance, avg HR, avg power.
 - 2026-10-18 (athlete): run/bike already had a `core.activity_lap` Laps table: repoint to `mart.activity_lap`, Lap = `row_number()`, keep current columns. Swim: add a Laps table, keep Swim lengths, repointed to `mart.swim_length`.
-- Run Laps `Start` is now the offset from the first lap (was wall-clock time of day).
+- Run and bike Laps `Start` is the offset from the first lap (was wall-clock time of day, UTC on bike).
 
 Out of scope
 - Raw FIT/sample access, `activity_split` km bucketing, HR correction, DB role changes, TCX lengths (always empty).

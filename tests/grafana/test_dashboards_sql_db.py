@@ -195,6 +195,12 @@ def test_bike_laps_read_the_leg(seeded_dsn: str) -> None:
     assert (row["Lap"], row["Avg power (W)"]) == (1, 200)
 
 
+def test_bike_laps_start_is_offset_not_utc_clock(seeded_dsn: str) -> None:
+    (row,) = _run_panel(seeded_dsn, "bike", "Laps", 4)
+
+    assert row["Start"] == "00:00:00"
+
+
 def test_swim_lengths_keep_idle_rows(seeded_dsn: str) -> None:
     rows = _run_panel(seeded_dsn, "swim", "Swim lengths", SIMPLE_SWIM_ID)
 
