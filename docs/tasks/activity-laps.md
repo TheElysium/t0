@@ -1,6 +1,6 @@
 # Task: Activity laps via MCP + Grafana
 
-Status: slices 1-4 committed, rebased on main, chart 0.1.40 | branch feat/activity-laps | next: slice 5 QA after deploy
+Status: done 2026-11-09 | released v0.1.40 (PR #6), QA passed; run laps pace m:ss fix in chart 0.1.41
 Started: 2026-10-14
 
 ## Spec

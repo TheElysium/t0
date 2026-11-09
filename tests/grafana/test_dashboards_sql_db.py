@@ -183,6 +183,12 @@ def test_run_laps_start_is_offset_from_first_lap(seeded_dsn: str) -> None:
     ]
 
 
+def test_run_laps_pace_is_minutes_seconds(seeded_dsn: str) -> None:
+    rows = _run_panel(seeded_dsn, "run", "Laps", 5)
+
+    assert [r["Pace (min/km)"] for r in rows] == ["4:00", "3:56"]
+
+
 def test_bike_laps_read_the_leg(seeded_dsn: str) -> None:
     (row,) = _run_panel(seeded_dsn, "bike", "Laps", 4)
 
