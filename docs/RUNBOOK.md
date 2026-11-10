@@ -1,11 +1,7 @@
 # RUNBOOK — Running t0
 
-This document covers the operational procedures actually available today. It describes
-only what exists: no command, endpoint, or table mentioned here is hypothetical. Where
-a piece is still missing, it is stated explicitly, with the reason.
-
-All commands below assume `T0_POSTGRES_DSN` is defined in the environment
-(never `--dsn` on the command line in a shared context: see "Why not `--dsn`" below).
+Operational procedures. Everything here exists; nothing is hypothetical.
+Commands assume `T0_POSTGRES_DSN` is set (see section 7). `<release>` = Helm release name.
 
 ## Contents
 
@@ -17,45 +13,44 @@ All commands below assume `T0_POSTGRES_DSN` is defined in the environment
 6. [Garmin returns 401](#6-garmin-returns-401)
 7. [Why not `--dsn`](#7-why-not---dsn)
 8. [Daily polling (CronJob `scheduler`)](#8-daily-polling-cronjob-scheduler)
- 9. [Reconciling the PVC and `raw.fit_file`](#9-reconciling-the-pvc-and-rawfit_file)
- 10. [Daily transformation (CronJob `transform`)](#10-daily-transformation-cronjob-transform)
- 11. [Uploading a file manually](#11-uploading-a-file-manually)
- 12. [Seeding the PMC](#12-seeding-the-pmc)
- 13. [Multisport events (triathlon)](#13-multisport-events-triathlon)
+9. [Reconciling the PVC and `raw.fit_file`](#9-reconciling-the-pvc-and-rawfit_file)
+10. [Daily transformation (CronJob `transform`)](#10-daily-transformation-cronjob-transform)
+11. [Uploading a file manually](#11-uploading-a-file-manually)
+12. [Seeding the PMC](#12-seeding-the-pmc)
+13. [Multisport events (triathlon)](#13-multisport-events-triathlon)
+
+## Quick reference
+
+| Command | Does |
+| --- | --- |
+| `python -m t0.db migrate` / `status` | Apply migrations / show drift |
+| `python -m t0.ops health` | Windows, failures, `mart` row counts |
+| `python -m t0.ops backfill-status` | Backfill progress (read-only) |
+| `python -m t0.ops refresh` | Refresh `mart.*` |
+| `python -m t0.ops reconcile` | PVC vs `raw.fit_file` (read-only) |
+| `python -m t0.ops seed-pmc` | Seed `mart.pmc` |
+| `python -m t0.transform` | raw → core |
+| `kubectl create job --from=cronjob/<release>-<name> <job>` | Run any CronJob now |
 
 ---
 
 ## 1. First startup
 
-1. Apply migrations:
+1. **Migrations.** Helm runs them as a hook Job (`migrate-job.yaml`). Manual run only
+   locally or with `migrate.enabled=false`:
 
    ```
    python -m t0.db migrate
+   python -m t0.db status   # "Drifts detected: " with no `!` lines
    ```
 
-   **On a Helm deployment this step is already done**: the chart runs the same command
-   as a `post-install`/`pre-upgrade` hook Job (`templates/migrate-job.yaml`), and Helm
-   waits for it before reporting the release as deployed. The command above is for a
-   local run, or for a cluster where `migrate.enabled` was set to `false`.
+   SQL files come from `T0_MIGRATIONS_DIR` (image: `/app/migrations`), else `migrations/`.
+   A failed hook Job is kept: `kubectl logs job/<release>-migrate`.
 
-   The runner reads its `.sql` files from `T0_MIGRATIONS_DIR` when that variable is set
-   (the container image sets it to `/app/migrations`), otherwise from `migrations/`
-   relative to the repository root -- which only exists in a source checkout.
+2. **`mart.*` views** are created populated but empty until activities land. Normal.
 
-   Verify the absence of drift: `python -m t0.db status` should display
-   "Drifts detected: " with no `!` lines below.
-
-   The hook Job is deleted once it succeeds; a **failed** one is kept on purpose, so
-   `kubectl logs job/<release>-migrate` still answers after a failed `helm upgrade`.
-
-2. The six `mart.*` views are automatically populated on creation by migrations 007/008
-   (`CREATE MATERIALIZED VIEW` without `WITH NO DATA`): no additional action is needed at
-   this stage for them to exist, but they will be EMPTY as long as no activity has been
-   ingested into `core.activity` -- this is normal, not a failure.
-
-3. **Seed the athlete and their thresholds.** MANDATORY step, and the only one that is
-   not automatable: copy `deploy/seed/athlete.sql.example` **outside the repository**,
-   fill it in, then execute it:
+3. **Seed the athlete and thresholds. Mandatory, per database.** Personal data, so never a
+   migration. Keep the filled copy outside the repo:
 
    ```
    cp deploy/seed/athlete.sql.example ~/t0-seed.sql
@@ -63,142 +58,90 @@ All commands below assume `T0_POSTGRES_DSN` is defined in the environment
    psql "$T0_POSTGRES_DSN" -f ~/t0-seed.sql
    ```
 
-   This is not a migration because these values are personal data (weight, heart rates,
-   thresholds): the repository carries the procedure, never the data -- same reasoning as
-   for the GPS traces in .FIT files. The price to pay is that **this step must be
-   repeated for each new database**.
+   Without it, `python -m t0.transform` exits 2 ("core.athlete contains 0 row(s)").
+   It refuses to guess: a wrong athlete means wrong thresholds, wrong TSS, no symptom.
 
-   Without it, `python -m t0.transform` exits with code 2 ("core.athlete
-   contains 0 row(s)"): it refuses to guess the athlete, because a wrong athlete would
-   give wrong thresholds, so false TSS -- without violating any constraint or producing
-   any visible symptom for months.
+4. **Check state:** `python -m t0.ops health`. New database: no endpoints, no failed or
+   stuck windows, `mart` views at 0 rows.
 
-4. Observe the starting state:
-
-   ```
-   python -m t0.ops health
-   ```
-
-   On a new database, expect: no endpoint in "Last success per endpoint" (raw.poll_window
-   is empty), zero failed windows, zero stuck windows, and all six `mart` views at 0 rows
-   (populated but empty).
-
-5. Trigger the first poll. There is nothing special to do: the CronJob `<release>-scheduler`
-   (`scheduler-cronjob.yaml`) runs daily and catches up itself all missing history since
-   `T0_HISTORY_START`, at a rate of `scheduler.maxWindowsPerEndpoint` windows per
-   endpoint per run -- see section 8. To avoid waiting for the next scheduled run:
+5. **First poll.** The `scheduler` CronJob backfills from `T0_HISTORY_START` on its own
+   (section 8). To start now:
 
    ```
    kubectl create job --from=cronjob/<release>-scheduler first-poll
    ```
 
-   On a very first backfill, this first run also downloads the original files (.FIT/.TCX)
-   for each activity encountered. To spread out this batch, a JSON-only run is possible
-   via `scheduler.activityFiles: false` (flag `--no-activity-files`): files will be
-   retrieved on subsequent runs, once the flag is set back to `true`.
+   To lighten the first run, set `scheduler.activityFiles: false` (JSON only), then back
+   to `true` to fetch files later.
 
-6. Follow the backfill progress:
-
-   ```
-   python -m t0.ops backfill-status
-   ```
-
-   This command is a read-only REPORT on `raw.poll_window`: it triggers no polling. It is
-   the CronJob above that progresses, run after run.
+6. **Follow progress:** `python -m t0.ops backfill-status`. Report only, polls nothing.
 
 ## 2. Recovering from a failure
 
-The polling (`t0.scheduler.service.run_scheduled_poll`, used by the ingestion
-service) is designed to be safely replayable: a window already `done` is only
-re-downloaded if it falls back into the recent refresh sliding window (`refresh_lookback_days`,
-3 days by default). Recovering from a failure (pod crash, network outage, cluster restart)
-therefore requires **no manual action**: restarting the ingestion service is enough, it
-will resume exactly where it left off.
+`raw.poll_window` lifecycle (one row per endpoint × day):
 
-To check what remains to be done before restarting:
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> in_progress: poll starts
+    in_progress --> done
+    in_progress --> failed
+    failed --> in_progress: next run
+    in_progress --> in_progress: stale > 2 h, next run
+    done --> in_progress: within lookback days
+```
+
+No manual action. Polling is replayable: `done` windows are skipped except the last
+`refresh_lookback_days` (default 3). Restart the service; it resumes where it stopped.
+
+Check what remains:
 
 ```
 python -m t0.ops backfill-status --endpoint <endpoint> [--endpoint <endpoint> ...]
 ```
 
-Replace `<endpoint>` with the names of endpoints actually polled by the ingestion service
-(this runbook does not invent them: consult the ingestion service configuration for the
-current list).
+Endpoint names: `scheduler.endpoints` in `values.yaml`.
 
 ## 3. A window stuck in `in_progress`
 
-A window remains `in_progress` when the process was interrupted (kill, OOM, node crash)
-between the moment it was marked `in_progress` and when it should have been marked `done`
-or `failed`.
+Cause: process killed between `in_progress` and `done`/`failed`.
 
-**No manual database intervention is necessary or recommended.** The calculation of due
-windows (`t0.scheduler.planning.due_windows`) automatically considers any
-`in_progress` window whose `last_attempted_at` exceeds `DEFAULT_STALE_IN_PROGRESS_AFTER`
-(2 hours) as due: on the next poll cycle, it will be retried normally, without duplication
-(the window is simply reprocessed as if it were `pending`).
+No DB intervention. `in_progress` windows older than 2 h
+(`DEFAULT_STALE_IN_PROGRESS_AFTER`) are due again on the next poll, without duplicates.
 
-To observe this:
-
-```
-python -m t0.ops health
-```
-
-section "Stuck in_progress windows". If a window remains listed there across MULTIPLE
-consecutive executions separated by more than 2 hours, it is no longer a normal wait case:
-it means the polling service itself is no longer running (otherwise it would have picked
-it up). Diagnose the ingestion pod state first (`kubectl get pods`, `kubectl logs`) before
-any manipulation of `raw.poll_window`.
-
-Never manually `UPDATE raw.poll_window SET status = 'failed'` to "unblock" a window: it
-is unnecessary (the mechanism above handles it) and risks masking a polling job that is
-truly stopped (the visible symptom would disappear without the cause being addressed).
+- See them: `python -m t0.ops health`, section "Stuck in_progress windows".
+- Still listed across several runs > 2 h apart: polling itself is down. Check
+  `kubectl get pods` / `kubectl logs`.
+- **Never** `UPDATE raw.poll_window SET status = 'failed'` by hand: it hides a dead poller.
 
 ## 4. Restoring from a backup
 
-Backups are produced by the existing CronJob
-(`deploy/helm/t0/templates/backup-cronjob.yaml`), in `pg_dump --format=custom`
-format, in `fitArchive.subPaths.postgresBackups` of the shared PVC, named
-`t0-<UTC-timestamp>.dump`.
+Backups: CronJob `postgresql-backup`, `pg_dump --format=custom`, in the PVC subpath
+`fitArchive.subPaths.postgresBackups`, named `t0-<UTC-timestamp>.dump`.
 
-1. Identify the dump to restore (the most recent, unless explicitly needing a point in
-   the past): list the contents of the backup subdirectory on the PVC.
-2. Restore with `pg_restore` against a reachable PostgreSQL database:
+1. Pick a dump (latest unless you need an older point).
+2. Restore. **`--clean` wipes the target database.** Confirm the target first:
 
    ```
    pg_restore --clean --if-exists --no-owner --dbname="$T0_POSTGRES_DSN" t0-<timestamp>.dump
    ```
 
-   `--clean --if-exists` deletes existing objects before recreating them: the restore
-   completely replaces the contents of the target database -- only execute against a
-   database explicitly intended to receive this restore, never against a production
-   database without prior confirmation.
-
-3. After restore, verify the absence of schema drift and the state of the views:
+3. Verify, then refresh views (dumps don't carry materialized view data):
 
    ```
    python -m t0.db status
    python -m t0.ops health
+   python -m t0.ops refresh
    ```
 
-   If the `mart` views appear "NEVER POPULATED" after restore (possible if the dump was
-   produced by a tool that excludes materialized view data), see the next section:
-   `python -m t0.ops refresh` automatically switches to non-concurrent refresh
-   for this specific case.
+### Restore drill
 
-### Verifying a backup (restore drill)
+An unrestored dump is not a backup. Run once after the first backup, and after every
+PostgreSQL major upgrade. Restores into a throwaway database; never touches `t0`.
+Needs free space equal to the data size: `kubectl exec <postgresql pod> -- df -h /var/lib/postgresql/data`.
 
-A dump that has never been restored is a hypothesis, not a backup. Run this drill
-**once after the first successful backup**, and again after any PostgreSQL major
-version change. It restores into a throwaway database on the same server and never
-touches `t0`.
-
-Cost: the drill database temporarily doubles the size of the data on the PostgreSQL
-volume. Check the free space first (`kubectl exec <postgresql pod> -- df -h /var/lib/postgresql/data`).
-
-1. Start a drill pod mounting the backup PVC. It carries no Garmin credential and no
-   service account token; the PVC is `ReadWriteOnce`, so this pod must land on the node
-   already holding it -- which is what `podAffinity` on the PostgreSQL pod below
-   guarantees. Replace `t0` with the release name if it differs.
+1. Start a drill pod on the PostgreSQL node (PVC is `ReadWriteOnce`). Replace `t0` with
+   your release name:
 
    ```
    kubectl apply -f - <<'YAML'
@@ -213,10 +156,8 @@ volume. Check the free space first (`kubectl exec <postgresql pod> -- df -h /var
        runAsNonRoot: true
        runAsUser: 999
        runAsGroup: 999
-       # fsGroup MUST match `ingest.securityContext.fsGroup` (10001 by default).
-       # The kubelet applies fsGroup RECURSIVELY to the volume on every mount, so a
-       # different value here would re-chown the whole FIT archive and leave ingest
-       # unable to write to it -- the same trap documented in backup-cronjob.yaml.
+       # Must equal ingest.securityContext.fsGroup: kubelet re-chowns the volume
+       # recursively, a different value breaks ingest writes.
        fsGroup: 10001
      affinity:
        podAffinity:
@@ -251,21 +192,18 @@ volume. Check the free space first (`kubectl exec <postgresql pod> -- df -h /var
    YAML
    ```
 
-2. Pick the dump and restore it into a fresh database:
+2. Restore into a fresh database. `--exit-on-error` matters: without it a partial
+   restore exits 0.
 
    ```
    kubectl exec -it t0-restore-drill -- sh
-   ls -l /backups
-   dump=$(ls /backups/t0-*.dump | tail -1)   # names are fixed-width UTC: last == newest
+   dump=$(ls /backups/t0-*.dump | tail -1)   # fixed-width UTC names: last = newest
    createdb t0_restore_drill
    pg_restore --no-owner --exit-on-error --dbname=t0_restore_drill "$dump"
    ```
 
-   `--exit-on-error` is the point of the drill: without it `pg_restore` reports errors
-   and still exits 0, so a partial restore looks like a success.
-
-3. Check that the restored database holds what it should. A restore that produces an
-   empty `core.activity` has "succeeded" and is worthless:
+3. Check content. `migrations` must match the `.sql` count in `migrations/`; `latest`
+   must match your last known activity. Empty `mart` views are expected.
 
    ```
    psql --dbname=t0_restore_drill -c "
@@ -275,13 +213,7 @@ volume. Check the free space first (`kubectl exec <postgresql pod> -- df -h /var
             (SELECT count(*) FROM core.daily_wellness)      AS wellness_days;"
    ```
 
-   Compare `migrations` with the number of `.sql` files in `migrations/`, and `latest`
-   with the date of the last activity you know about. The `mart` views are restored
-   without their data (`pg_dump` does not carry materialized view contents): that is
-   expected, `python -m t0.ops refresh` rebuilds them.
-
-4. Drop the drill database and delete the pod. Skipping this leaves a full copy of the
-   data occupying the PostgreSQL volume:
+4. Clean up (otherwise a full data copy stays on the volume):
 
    ```
    dropdb t0_restore_drill
@@ -291,8 +223,7 @@ volume. Check the free space first (`kubectl exec <postgresql pod> -- df -h /var
    kubectl delete pod t0-restore-drill
    ```
 
-Record the date of the drill somewhere you will find it again. If a restore has not
-been verified in the last year, it has not been verified.
+Write down the drill date. Not verified within a year = not verified.
 
 ## 5. Refreshing `mart` views manually
 
@@ -300,151 +231,95 @@ been verified in the last year, it has not been verified.
 python -m t0.ops refresh
 ```
 
-Refreshes the six `mart.*` views in the order imposed by their actual dependencies
-(`mart.daily_load` before `mart.pmc`, which reads it -- the other four views have no
-imposed order among themselves). Each view is refreshed independently: the failure of one
-view does not prevent subsequent ones from being attempted, and the exit code of the
-command (`1`) signals a partial failure without needing to reread the logs.
-
-This manual refresh is a COMPLEMENT to the periodic refresh `CronJob`
-(`ops-refresh-cronjob.yaml`, schedule in `opsRefresh.schedule`), useful immediately
-after a restore or massive catch-up, without waiting for the next scheduled run.
+- Respects dependencies (`mart.daily_load` before `mart.pmc`).
+- Views refresh independently; exit `1` = at least one failed.
+- Never-populated views (after a restore) get a non-concurrent refresh automatically.
+- Use after a restore or big catch-up. Otherwise `ops-refresh` CronJob handles it.
 
 ## 6. Garmin returns 401
 
-A 401 means that the session persisted in `GARMINTOKENS` is no longer valid (password
-changed, session expired on Garmin's side, or account locked after too many attempts).
+The session in `GARMINTOKENS` is invalid: password changed, session expired, or account locked.
 
-1. **Do not restart the service in a loop**: each failed reconnection attempt with bad
-   credentials brings the account closer to a total lockout.
-2. Verify that `T0_GARMIN_USERNAME`/`T0_GARMIN_PASSWORD` (container
-   environment variables, fed from the `username`/`password` keys of the Kubernetes Secret
-   referenced by `ingest-deployment.yaml` and the scheduler CronJob) are still correct.
-   The `T0_` prefix is mandatory: `Settings` is a `BaseSettings` with
-   `env_prefix="T0_"` and `extra="ignore"`, so an unprefixed variable is silently
-   ignored and the pod fails on startup with a missing required field -- a symptom that
-   does NOT look like a credentials problem.
-3. If the credentials are correct but the session has simply expired, purge the contents
-   of `GARMINTOKENS` (subdirectory `fitArchive.subPaths.garminTokens` of the PVC) to
-   force a new full authentication on the next ingestion pod startup -- do this
-   consciously, not systematically: each full authentication is itself more visible to
-   Garmin than session resumption.
-4. If the lockout persists after a successful manual authentication outside the cluster
-   (browser), it is no longer a problem this repository can solve with code: it is a
-   Garmin account incident, to be handled directly on their interface.
+1. **Don't restart in a loop.** Each failed login brings the account closer to lockout.
+2. Check `T0_GARMIN_USERNAME` / `T0_GARMIN_PASSWORD` (from the Garmin Secret keys
+   `username`/`password`). The `T0_` prefix is required: unprefixed vars are silently
+   ignored and the pod fails on a missing field, which doesn't look like a credentials issue.
+3. Credentials fine but session expired: purge the tokens dir
+   (`fitArchive.subPaths.garminTokens` on the PVC) to force one full login. Don't make
+   this a habit: full logins are more visible to Garmin.
+4. Still locked after logging in via a browser: Garmin account issue, not fixable here.
 
-This batch adds no automatic 401 detection: `python -m t0.ops health` will see
-such an incident only indirectly, through the accumulation of `failed` windows (the error
-message persisted in `raw.poll_window.last_error` by polling, if the 401 propagates there,
-will give the exact detail -- the `health` CLI already displays it per window).
+No automatic 401 detection. It shows up as `failed` windows in `python -m t0.ops health`,
+with the error in `raw.poll_window.last_error`.
 
 ## 7. Why not `--dsn`
 
-`python -m t0.ops` accepts `--dsn` for occasional interactive use, but the
-environment variable `T0_POSTGRES_DSN` remains the recommended default choice
-and the one used by all Helm manifests in this batch: a DSN passed as a command-line
-argument carries the PostgreSQL password in the clear and remains visible in the
-container's process list (`ps`, `/proc/<pid>/cmdline`, and `spec.containers[].command`
-via `kubectl describe pod`) for the entire lifetime of the process -- the environment
-variable is only exposed via `/proc/<pid>/environ`, already the channel used by the rest
-of the repository (including Garmin credentials) and judged acceptable for this level of
-risk.
+`python -m t0.ops --dsn` exists for occasional interactive use. Prefer `T0_POSTGRES_DSN`:
+a DSN argument exposes the password in `ps`, `/proc/<pid>/cmdline` and `kubectl describe pod`.
+The env var is only in `/proc/<pid>/environ`, same as Garmin credentials.
 
 ---
 
 ## 8. Daily polling (CronJob `scheduler`)
 
-This is the piece that actually queries Garmin. Manifest:
-`deploy/helm/t0/templates/scheduler-cronjob.yaml`, values under `scheduler.*`.
+The only piece that calls Garmin. Template: `scheduler-cronjob.yaml`.
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `scheduler.enabled` | `true` | Completely disables polling if `false`. |
-| `scheduler.schedule` | `"0 10,15,22 * * *"` | Schedule. Three cycles a day: the 10:00 run captures the consolidated night data (sleep, HRV), the 15:00 and 22:00 runs surface the day's activities soon after the watch syncs. |
-| `scheduler.maxWindowsPerEndpoint` | `60` | Windows processed per endpoint per run. Bounds the duration of a run and the number of requests to a non-public API. |
-| `scheduler.activityFiles` | `true` | When `false`, adds `--no-activity-files`: JSON polling only, without downloading .FIT/.TCX. |
-| `scheduler.endpoints` | the 10 of `DEFAULT_ENDPOINTS` | Must stay aligned with the code catalog; `tests/test_config_coherence.py` verifies it. |
+| `scheduler.enabled` | `true` | `false` disables polling |
+| `scheduler.schedule` | `"0 10,15,22 * * *"` | 10:00 gets the night (sleep, HRV); 15:00 and 22:00 get the day's activities |
+| `scheduler.maxWindowsPerEndpoint` | `60` | Windows per endpoint per run. Bounds run time and API load |
+| `scheduler.activityFiles` | `true` | `false` = JSON only, no `.FIT`/`.TCX` download |
+| `scheduler.endpoints` | the 10 of `DEFAULT_ENDPOINTS` | Must match the code; `tests/test_config_coherence.py` checks |
 
-What a run does, in order: it calculates due windows (every day not yet `done` since
-`T0_HISTORY_START`, plus the `T0_REFRESH_LOOKBACK_DAYS` last days
-systematically replayed, plus always the current day), polls each endpoint, then archives
-on the PVC the original files of activities the poll just listed -- without an additional
-request to re-ask for this list.
+A run: compute due windows (every day not `done` since `T0_HISTORY_START`, plus the last
+`T0_REFRESH_LOOKBACK_DAYS`, plus today), poll each endpoint, archive the listed activity files.
 
-**`concurrencyPolicy: Forbid` is not a comfort.** Two simultaneous runs would authenticate
-two Garmin sessions in parallel on the same account, and a wave of authentications is
-precisely what locks a Garmin Connect account. For the same reason `backoffLimit: 0`: a
-failed window is already persisted as `'failed'` in the database and will be retried on
-the next run, whereas immediately retrying an authentication failure only accelerates the
-lockout. Do not restart the Job in a loop after a failure -- see section 6.
+Backfill has no separate command: this CronJob consumes it run after run.
 
-Historical catch-up has no dedicated command: it is this same CronJob that, run after run,
-consumes the remaining windows. `python -m t0.ops backfill-status` gives its
-progress.
+**Do not relax these:**
+- `concurrencyPolicy: Forbid`: parallel runs = parallel Garmin logins = lockout.
+- `backoffLimit: 0`: failed windows are retried next run; instant retries speed up lockout.
 
 ---
 
 ## 9. Reconciling the PVC and `raw.fit_file`
 
-`migrations/002_raw.sql` establishes the atomicity rule -- **the file is written and
-fsynced on the PVC BEFORE its row is INSERTed, never the other way around** -- and
-qualifies the two possible disagreements. The CronJob `ops-reconcile` (daily at 07:00)
-looks for them. It is **strictly read-only**: the PVC is mounted `readOnly` for it, it
-deletes no files and modifies no rows.
+Rule (`migrations/002_raw.sql`): **file written and fsynced on the PVC before its row is
+inserted.** CronJob `ops-reconcile` (daily 07:00) checks it. Read-only: PVC mounted
+`readOnly`, deletes nothing.
 
-| Anomaly | Severity | What it means |
+| Anomaly | Severity | Meaning |
 |---|---|---|
-| **Orphan file** (on PVC, no row) | benign | Archive succeeded, INSERT failed. This is the case the atomicity rule deliberately makes possible. The file is simply unused. |
-| **Orphan row** (in database, no file) | **grave** | The row asserts the existence of a source file. Any reconstruction of `core` from `raw` will rely on it and fail, or silently skip the activity. |
-| **Size (or sha256) divergent** | **grave** | Truncation or overwrite: the row no longer describes its file. |
+| Orphan file (on PVC, no row) | benign | Archive ok, INSERT failed. Unused file |
+| Orphan row (row, no file) | **grave** | Source lost; rebuilding `core` will fail or skip it |
+| Size or sha256 mismatch | **grave** | Truncated or overwritten |
 
-The Job exits with failure only on a **grave** anomaly. An orphan file leaves it in
-success, deliberately: a CronJob that fails for an unused file ends up not being read at
-all, and it is the "orphan row" alert that cannot be afforded to ignore.
+The Job fails only on grave anomalies.
 
-### Run a scan on demand
+Run now and read:
 
 ```bash
-kubectl create job -n t0 --from=cronjob/t0-ops-reconcile manual-scan
+kubectl create job -n <namespace> --from=cronjob/<release>-ops-reconcile manual-scan
+kubectl logs -n <namespace> job/manual-scan
 ```
 
-Then read the report:
-
-```bash
-kubectl logs -n t0 job/manual-scan
-```
-
-### Deep scan
-
-By default the scan compares **sizes**: on ~1,090 files of several MB, re-reading the
-entire volume for a daily check is expensive, and size catches the vast majority of
-cases. On suspicion of silent corruption (same size, different content), pass
-`opsReconcile.deep=true` -- or occasionally run the module by hand from a pod that mounts
-the PVC:
+Default compares sizes. For silent corruption, set `opsReconcile.deep=true` or run from a
+pod mounting the PVC:
 
 ```bash
 python -m t0.ops reconcile --archive-root /data/fit-archive --deep
 ```
 
-### What to do with anomalies
+### Handling anomalies
 
-- **Orphan files** -- nothing urgent. They only take up space. Before deleting one, verify
-  that no row references it (the report already did, but deletion is irreversible and the
-  report may be stale). A sudden accumulation is however a symptom to understand, not to
-  sweep away.
-- **Orphan rows** -- this is the grave case. The source file is lost: the `raw.fit_file`
-  row can no longer be replayed. If the activity still exists at Garmin, the repair path
-  is to **delete the row** then let polling re-download it (a window changed to `failed`
-  will be picked up -- see section 2). If it comes from a manual upload, the original file
-  is the only source.
-- **All reported rows missing at once** -- this is not data loss, it is almost always a
-  **PVC mounted elsewhere** than at write time. Compare `--archive-root` to
-  `ingest.config.fitArchivePath` and the `subPath` of the mount. The scan is deliberately
-  loud in this case rather than silent.
-
-Useful historical context: until the ZIP download hash fix in `t0.scheduler.activity_files`,
-each run on the current day's window re-archived that day's activities. A deployment before
-this fix has therefore very likely accumulated orphan files -- benign, but numerous.
+- **Orphan files:** not urgent. Re-check no row references one before deleting. A sudden
+  pile-up is a symptom to investigate. Deployments predating the ZIP hash fix in
+  `t0.scheduler.activity_files` have many; they're harmless.
+- **Orphan rows:** if the activity still exists at Garmin, delete the row and let polling
+  re-download it. A manual upload's file was the only copy.
+- **Every row orphaned at once:** almost always the PVC mounted at a different path.
+  Compare `--archive-root`, `ingest.config.fitArchivePath` and the mount `subPath`.
 
 ## 10. Daily transformation (CronJob `transform`)
 
@@ -452,67 +327,58 @@ this fix has therefore very likely accumulated orphan files -- benign, but numer
 python -m t0.transform [--limit N] [--athlete-id N] [--retry-failed]
 ```
 
-This is the link between the archive and the dashboards: it consumes files from
-`raw.fit_file` whose `parsed_at` is NULL, decodes them, and writes the `core.*` rows
-that the `mart.*` views derive from. The CronJob `<release>-transform` runs it daily,
-between polling and view refresh (`transform.schedule` in `values.yaml`).
+Reads `raw.fit_file` rows with `parsed_at IS NULL`, writes `core.*`. Runs between poll and
+refresh (`transform.schedule`).
 
-**This order is not a preference.** Refreshing views before transformation SUCCEEDS: the
-refresh simply copies empty data. The dashboards remain blank for an entire day without
-any lights turning on. A test (`tests/test_config_coherence.py`) verifies that the three
-`schedule` entries in the chart stay in the order poll -> transform -> refresh; do not
-work around it.
+```mermaid
+stateDiagram-v2
+    [*] --> queued: row inserted (parsed_at NULL)
+    queued --> parsed: core.* committed, then parsed_at set
+    queued --> queued: deferred (no Garmin summary yet)
+    queued --> parse_error: failure, leaves queue
+    parse_error --> queued: --retry-failed
+    parsed --> queued: parsed_at reset (section 13)
+```
 
-### Read the exit code
+**Order poll → transform → refresh is mandatory.** Refresh before transform succeeds
+silently with stale data. `tests/test_config_coherence.py` enforces it.
 
-- **`0`** -- normal run, **including with deferred files**. A file whose Garmin summary
-  is not yet ingested is an expected transitory state: neither `parsed_at` nor
-  `parse_error` are set, the file returns itself to the queue on the next run. Counting
-  it as a failure would fail the CronJob almost every night, and a CronJob that fails
-  every night is one you stop reading.
-- **`1`** -- at least one file failed. The incident is already recorded in
-  `raw.fit_file.parse_error`; the exit code just makes it visible without reading logs.
-- **`2`** -- the run could not start: DSN missing, or `core.athlete` empty or ambiguous
-  (see step 3 of first startup). Distinct from `1` because **nothing was attempted**: it
-  is a configuration error, not faulty data.
+### Exit codes
 
-### A file in failure
+| Code | Meaning |
+| --- | --- |
+| `0` | OK, **including deferred files** (Garmin summary not ingested yet; retried next run) |
+| `1` | At least one file failed; see `raw.fit_file.parse_error` |
+| `2` | Didn't start: no DSN, or `core.athlete` empty/ambiguous (section 1, step 3) |
+
+### A failed file
 
 ```
 SELECT fit_file_id, garmin_activity_id, storage_path, parse_error
 FROM raw.fit_file WHERE parse_error IS NOT NULL ORDER BY downloaded_at DESC;
 ```
 
-A file carrying a `parse_error` **leaves the queue** and is no longer retried: without
-this, an indigestible file would fail the run every night. Once the cause is fixed
-(missing sport mapping, decoder to repair):
+Files with `parse_error` leave the queue. Fix the cause first (sport mapping, decoder), then:
 
 ```
 python -m t0.transform --retry-failed
 ```
 
-Success clears the previous `parse_error`. Replaying **before** fixing the cause only
-reproduces the same failure.
+Success clears `parse_error`.
 
-### Catching up on a backlog
+### Backlog
 
-Each activity is committed individually: a run interrupted (pod eviction, node restart)
-loses only the current file, never the batch. Initial backfill thus clears over multiple
-nights, at `transform.batchLimit` files per run. To speed it up without waiting:
+Each activity commits on its own: an interrupted run loses one file at most. Batch size:
+`transform.batchLimit`. To speed up:
 
 ```
 kubectl create job --from=cronjob/<release>-transform transform-catchup
 ```
 
-`concurrencyPolicy: Forbid` prevents this manual Job from crossing the scheduled run.
+`concurrencyPolicy: Forbid` keeps it from overlapping the scheduled run.
 
-### What transformation never writes before finishing
-
-The write order follows the same principle as archiving (file fsynced on the PVC BEFORE
-its row is inserted): the `core.*` bundle is **committed before** `parsed_at` is set. A
-cut between the two leaves the file in the queue, and it will be reprocessed -- the write
-being idempotent, this does not produce a duplicate. Setting `parsed_at` first would have
-silently made the activity disappear from the queue without being written anywhere.
+`core.*` is committed **before** `parsed_at` is set. A crash in between requeues the file;
+writes are idempotent, so no duplicates.
 
 ## 11. Uploading a file manually
 
@@ -520,128 +386,76 @@ silently made the activity disappear from the queue without being written anywhe
 curl -F "file=@/path/to/activity.fit" http://localhost:8000/uploads
 ```
 
-The `POST /uploads` endpoint (`t0.api.upload`) is **local only** for now -- no
-Ingress, no TLS, no authentication (decision taken, see the batch report that introduced
-it). It serves for an activity that Garmin polling has not or cannot retrieve: import from
-another tool, activity deleted on Garmin's side before the `scheduler` CronJob run, etc.
-
-The format (FIT, TCX, or ZIP containing either) is detected **by content**, never by
-filename extension. The file is archived on the PVC -- same atomicity rule as polling:
-written and fsynced BEFORE its `raw.fit_file` row is inserted -- with `garmin_activity_id = NULL`.
-This is the only mark of origin: `raw.fit_file` carries no column dedicated to
-distinguishing a manual upload from a Garmin download, the NULL value suffices and is
-the convention established by `migrations/012_raw_fit_file_manual_upload.sql`.
-
-Possible responses:
+- `POST /uploads` (`t0.api.upload`): **local only**, no Ingress, TLS or auth.
+- For activities polling can't get (other tools, deleted on Garmin).
+- FIT, TCX, or a ZIP of either. Detected by content, not extension.
+- Archived like polling (fsync before INSERT), with `garmin_activity_id = NULL`. That
+  NULL is the only upload marker (`migrations/012_raw_fit_file_manual_upload.sql`).
 
 | Code | Meaning |
 |---|---|
-| `201` | Archived and parsed successfully. The body returns `fit_file_id`. |
-| `409` | The content (same `sha256`) is already attached in the database to a DIFFERENT origin -- real Garmin activity, or distinct manual upload. Nothing is lost: the file remains archived, no rows are created or modified. |
-| `413` | Request body above the size limit. |
-| `422` | Content not recognized (neither FIT nor TCX, empty/multi-member/dangerous ZIP), or archiving succeeded but local parsing failed -- the response body specifies which in both cases, and the archive is never lost even if parsing fails. |
+| `201` | Archived and parsed. Body has `fit_file_id` |
+| `409` | Same `sha256` already tied to another origin. File archived, no rows changed |
+| `413` | Body too large |
+| `422` | Unrecognized content (not FIT/TCX, bad ZIP) or parsing failed. Body says which; archive kept |
 
-### What a manual upload becomes in `core.*`
+### In `core.*`
 
-A manual upload goes all the way to `core.*`, through a path of its own
-(`t0.transform.manual`, migrations 012 and 014). Two things a Garmin download gets
-for free had to be produced elsewhere:
+Handled by `t0.transform.manual` (migrations 012, 014):
 
-1. **The context** -- sport, timezone, duration. `t0.transform.summary` reads them
-   from the Garmin JSON summary, which a manual upload has never had.
-   `build_manual_activity_context` derives them from the archived file itself: the FIT
-   `session` message, or the `Sport` attribute of the TCX `Activity` element. Timezone is
-   the only element the file truly cannot carry: `core.athlete.home_timezone` stands in for
-   it, the case its own column comment sanctions (`migrations/003_core_ref.sql`).
-2. **The primary key.** `core.activity.activity_id` **is** the Garmin identifier -- bigint
-   primary key, no sequence, no default. A manual upload draws instead from
-   `core.manual_activity_id_seq`, which starts at 1e15 (since migration 024; was 9e18),
-   five orders of magnitude above any identifier Garmin has emitted yet below the float64
-   exact-integer limit (2^53) so the id is not rounded when read through JSON. `core.activity.source`
-   records the provenance, and the `activity_synthetic_id_range` CHECK forbids the column
-   and the identifier range from ever diverging. Re-running the transformation does not
-   duplicate anything: the partial unique index `activity_manual_file_uq` keys a manual
-   activity on its `fit_file_id`.
+- **Context** (sport, duration) comes from the file: FIT `session`, or TCX `Activity@Sport`.
+  Timezone comes from `core.athlete.home_timezone`.
+- **IDs** come from `core.manual_activity_id_seq`, starting at 1e15: above any Garmin id,
+  below 2^53 so JSON doesn't round it. `core.activity.source` records provenance; CHECK
+  `activity_synthetic_id_range` keeps both consistent. Unique index `activity_manual_file_uq`
+  on `fit_file_id` prevents duplicates.
 
-**The sport is never guessed.** A FIT `(sport, sub_sport)` pair or a TCX `Sport` value with
-no entry in the mapping tables raises `UnknownManualSportError`, naming the observed value,
-and the file lands with `parse_error` -- rather than folding to a default that would
-silently skew TSS. Two consequences worth knowing before uploading:
+**Sport is never guessed.** Unknown sport → `UnknownManualSportError` → `parse_error`.
 
-- TCX only expresses `Running` | `Biking` | `Other`. It cannot say indoor vs. outdoor, so a
-  home-trainer ride uploaded as TCX lands as `cycling`, not `virtual_cycling`. That is the
-  intended, honest outcome. `Other` is deliberately unmapped -- too coarse to trust.
-- A FIT sport absent from `SPORT_CODE_BY_FIT_SPORT` (`t0.transform.manual`) is
-  refused rather than approximated. Adding it means adding the pair there, the row in
-  `core.sport` if missing, and the row in `core.sport_fit_map`
-  (`migrations/015_core_sport_fit_map.sql`) -- a static test fails if the three drift apart.
+- TCX only knows `Running` | `Biking` | `Other`. Indoor rides land as `cycling`, not
+  `virtual_cycling`. `Other` is refused.
+- To add a FIT sport: `SPORT_CODE_BY_FIT_SPORT` (`t0.transform.manual`), `core.sport`, and
+  `core.sport_fit_map` (`migrations/015_core_sport_fit_map.sql`). A test checks all three agree.
 
 ---
 
 ## 12. Seeding the PMC
 
-`mart.pmc` **stays empty until `core.pmc_seed` holds a row.** The view is a recursive CTE:
-it walks the calendar forward from a seed, and with no seed there is no calendar to walk.
-Every fitness/fatigue panel in Grafana reads that view, so this step is not optional --
-it is simply invisible until someone opens the dashboard.
+**`mart.pmc` stays empty until `core.pmc_seed` has a row.** Every fitness/fatigue panel
+depends on it.
 
 ```bash
-python -m t0.ops seed-pmc --athlete-id 1 --dry-run
+python -m t0.ops seed-pmc --athlete-id 1 --dry-run   # inspect
+python -m t0.ops seed-pmc --athlete-id 1             # persist
 ```
-
-`--dry-run` computes the seed and prints it without writing. Run it first, look at the
-numbers, then re-run without the flag to persist.
 
 | Flag | Meaning |
 |---|---|
-| `--athlete-id` | Required. The `core.athlete.athlete_id` the seed is computed for. |
-| `--seed-date` | Start of the 42-day averaging window. Defaults to the first day carrying a known load, read from `mart.daily_load`. |
-| `--dry-run` | Compute and print, write nothing. |
+| `--athlete-id` | Required. `core.athlete.athlete_id` |
+| `--seed-date` | Start of the 42-day window. Default: first day with known load in `mart.daily_load` |
+| `--dry-run` | Print, don't write |
 
-**Why the default `--seed-date` is not simply the first activity.** Days with no computable
-TSS are not a history start -- an activity whose sport has no threshold in effect (see
-section 10 of `tools/validate_schema.sql`) contributes 0, and averaging those in would drag
-CTL down and make the athlete look detrained on day one. The default therefore reads the
-first day that actually carries load, not the first day that carries an activity.
+Default `--seed-date` skips days without computable TSS (no threshold in effect): averaging
+zeros would make the athlete look detrained on day one.
 
-### Re-seeding
+**Re-seeding** inserts a new row; `mart.pmc` uses the latest. Nothing to delete.
+`tools/validate_schema.sql` section 7 checks `pmc_rows` = days since the active seed.
 
-`core.pmc_seed` keeps its history: seeding again inserts a new row, it does not overwrite
-the previous one, and `mart.pmc` takes the most recent. That is the intended way to correct
-a seed computed too early -- nothing needs deleting. Section 7 of `tools/validate_schema.sql`
-checks the consequence: `pmc_rows` must equal the number of days since the seed in effect,
-never a multiple of it.
-
-### Reading the result
-
-CTL is a 42-day exponential average, so it needs 42 days of history before it means
-anything and 180 before it is trustworthy -- `mart.pmc.ctl_reliable` is exactly that flag,
-and it reads `false` for the whole warm-up. A PMC seeded yesterday will show `ctl_reliable
-= false` everywhere; that is correct, not a failure.
+`ctl_reliable = false` for the first 180 days after the seed. Expected, not a bug.
 
 ---
 
 ## 13. Multisport events (triathlon)
 
-Garmin does NOT publish the legs of a multisport event as separate activities:
-`get_activities_by_date` carries only the parent (`isParent: true`, VERIFIED on the
-2026-09-05 triathlon, payload identical for 24 h). The legs exist ONLY inside the single
-FIT file (one `session` per leg: swim, T1, bike, T2, run).
+Garmin only lists the parent (`isParent: true`). Legs exist only as `session` messages in
+the single FIT file (swim, T1, bike, T2, run).
 
-Since parser version `t0-transform/2` (migration 023), the transform splits that file:
-one `core.activity` leg per session (`source='leg'`, `parent_activity_id` set, own
-samples, own per-discipline TSS), parent stored unchanged. All load views already count
-legs and exclude the parent, so the marts needed no change. The event is then visible in
-PMC, daily load, the power curve (run leg) and the swim view (open-water leg).
+Since parser `t0-transform/2` (migration 023), transform splits it: one `core.activity` per
+leg (`source='leg'`, `parent_activity_id` set, own samples and TSS); parent kept as is.
+Load views count legs and exclude parents. Migration 025 adds `mart.triathlon_session`,
+used by dashboard `t0-session-tri`.
 
-Migration 025 adds `mart.triathlon_session` (one row per event, leg breakdown) consumed
-by the dashboard `Session detail -- Triathlon` (`t0-session-tri`); the weekly cockpit
-lists each event as a single "Triathlon" row linking to it. The leg rows remain visible
-in the per-sport lists and detail dashboards.
-
-### Replaying a multisport file parsed by version 1
-
-Files parsed before the split carry no legs. Find and requeue them:
+### Requeue files parsed by version 1
 
 ```sql
 SELECT fit_file_id, garmin_activity_id FROM raw.fit_file f
@@ -652,18 +466,12 @@ UPDATE raw.fit_file SET parsed_at = NULL, parser_version = NULL
 WHERE fit_file_id IN (/* ids above */);
 ```
 
-The next transform pass rebuilds the parent (idempotent upsert, metrics kept) and
-appends the legs. Refresh the `mart` views afterwards, as in section 5.
+Next transform rebuilds the parent and adds legs. Then refresh (section 5).
 
-### Regenerating legs after migration 024 (shrink of the synthetic id range)
+### After migration 024 (synthetic id range shrink)
 
-Migration 024 lowered the synthetic id range below the float64 exact-integer limit
-(2^53 ~ 9.007e15) so ids survive a JSON round-trip unrounded (MCP, Grafana, browser). It
-DELETEs the existing legs (ids at 9.2e18) as part of the migration, because a re-transform
-alone would NOT renumber them: `resolve_leg_activity_ids` reuses existing
-`(parent_activity_id, leg_order)` rows BEFORE the store deletes them, so it would re-emit
-the same 9.2e18 ids. After applying 024, requeue the parent files so the legs come back in
-the new range (2e15+):
+024 deletes legs with old ids (9.2e18) so they come back under 2^53. Re-transform alone
+would reuse the old ids. Requeue parents:
 
 ```sql
 UPDATE raw.fit_file SET parsed_at = NULL
@@ -672,15 +480,10 @@ WHERE fit_file_id IN (
 );
 ```
 
-`parser_version` is left as-is (the parser is already version 2): only `parsed_at` needs
-clearing to requeue. Run `ops transform`, then refresh the `mart` views (section 5).
-Between the migration and this pass the two triathlons show no legs -- acceptable for a
-single-athlete homelab.
+Then `python -m t0.transform` and refresh (section 5). Legs are missing until then.
 
 ### Failure modes
 
-- An unrecognized session `(sport, sub_sport)` pair fails the WHOLE file
-  (`parse_error`): a triathlon stored minus one leg would corrupt every load average
-  silently. Fix the mapping (`SPORT_CODE_BY_FIT_SPORT`), then `--retry-failed`.
-- If Garmin starts publishing the legs someday, the store refuses the split (`garmin`
-  children already exist for the parent): the real legs win, no double count.
+- Unknown `(sport, sub_sport)` in any session fails the whole file: a triathlon missing a
+  leg would skew load silently. Fix `SPORT_CODE_BY_FIT_SPORT`, then `--retry-failed`.
+- If Garmin ever publishes legs, the split is refused for that parent: real legs win.

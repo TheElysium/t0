@@ -5,12 +5,24 @@ Built for triathlon training load tracking. Python 3.12, deployed with Helm.
 
 ## Data flow
 
+```mermaid
+flowchart LR
+    G[Garmin Connect] -->|"scheduler<br/>:00"| R[(raw)]
+    G -->|".FIT / .TCX"| P[/PVC/]
+    U[POST /uploads] --> R & P
+    R -->|"transform<br/>:15"| C[(core)]
+    P --> C
+    C -->|"ops-refresh<br/>:30"| M[(mart)]
+    M --> GR[Grafana]
+    M --> MCP[t0-mcp]
+```
+
 1. `scheduler` polls Garmin Connect, archives raw payloads and `.FIT`/`.TCX` to a PVC.
 2. `transform` parses raw → `core` (normalized).
 3. `ops-refresh` refreshes the `mart.*` materialized views (TSS, PMC, power curve, wellness...).
 4. Grafana reads `mart.*`. `t0-mcp` exposes them read-only to an LLM.
 
-Schemas: `raw` (immutable), `core` (normalized), `mart` (views).
+Runs at 10h, 15h, 22h. Schemas: `raw` (immutable), `core` (normalized), `mart` (views).
 
 ## Layout
 
