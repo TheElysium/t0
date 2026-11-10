@@ -1,7 +1,7 @@
 # ARCHITECTURE — t0 in diagrams
 
-Mermaid diagrams of the running system: components, ingestion flow, MCP server,
-data model. Operational procedures live in `RUNBOOK.md`; MCP details in `HANDOFF-MCP.md`.
+Components, ingestion flow, MCP server, data model.
+Operations: `RUNBOOK.md`. MCP details: `HANDOFF-MCP.md`.
 
 ## Contents
 
@@ -14,177 +14,180 @@ data model. Operational procedures live in `RUNBOOK.md`; MCP details in `HANDOFF
 
 ## 1. Overview
 
-Five components: `t0-ingest` (this repo), PostgreSQL, Grafana, the optional `t0-mcp`
-server, and the Helm chart that deploys them.
-
 ```mermaid
 flowchart LR
     GC[Garmin Connect]
     ATH[Athlete]
-    LLM[Claude Code<br/>MCP client]
+    LLM[MCP client]
 
-    subgraph K8s["Kubernetes cluster (Helm chart)"]
+    subgraph K8s["Kubernetes (Helm chart)"]
         direction LR
-        SCH["CronJob: python -m t0.scheduler<br/>polls Garmin + archives original files<br/>3x daily"]
-        API["t0-ingest API :8080<br/>manual upload + RPE<br/>local access only, no auth"]
-        TRF["CronJob: python -m t0.transform<br/>parses raw files + wellness<br/>into normalized rows, +15 min"]
-        OPS["CronJob: python -m t0.ops refresh<br/>refreshes mart views, +30 min"]
-        MCP["t0-mcp :8080<br/>FastMCP, read-only"]
-        GRAF[Grafana dashboards]
+        SCH["CronJob scheduler<br/>10h, 15h, 22h"]
+        TRF["CronJob transform<br/>+15 min"]
+        OPS["CronJob ops-refresh<br/>+30 min"]
+        API["ingest API :8080<br/>upload + RPE, no auth"]
+        MCP["t0-mcp :8080<br/>read-only"]
+        GRAF[Grafana]
         MIG[migrate Job<br/>Helm hook]
-
-        PG[(PostgreSQL 16<br/>raw / core / mart)]
-
-        PVC[(PVC<br/>.FIT/.TCX files)]
+        PG[(PostgreSQL<br/>raw / core / mart)]
+        PVC[(PVC<br/>.FIT/.TCX)]
     end
 
     GC -- "poll, 1.5 s rate limit" --> SCH
-    SCH -- "payloads (raw-first)<br/>→ schema raw" --> PG
-    SCH -- "ORIGINAL ZIPs" --> PVC
-    ATH -- "port-forward:<br/>/uploads, /rpe" --> API
-    API --> PVC
-    PVC -- "unparsed files" --> TRF
-    TRF -- "bundles → schema core" --> PG
-    OPS -- "refresh → schema mart" --> PG
+    SCH -- "payloads → raw" --> PG
+    SCH -- "original ZIPs" --> PVC
+    ATH -- "port-forward" --> API
+    API --> PVC & PG
+    PVC --> TRF
+    TRF -- "→ core" --> PG
+    OPS -- "refresh mart" --> PG
     GRAF -- "reads mart" --> PG
-    MCP -- "role t0_mcp_ro,<br/>reads mart + core" --> PG
+    MCP -- "role t0_mcp_ro" --> PG
     LLM -- "HTTP + Bearer" --> MCP
     MIG -.-> PG
 ```
 
-Not shown for readability: the API also writes `raw.fit_file` rows, the MCP
-server also reads `core.threshold` and `core.activity`, and the scheduler never
-retries Garmin authentication.
-
-Design rule: no agent or CI calls Garmin Connect and no agent or CI deploys to the
-cluster — the athlete does.
+- Scheduler never retries Garmin authentication.
+- No agent or CI calls Garmin or deploys. The operator does.
 
 ## 2. Ingestion flow (raw-first ELT)
 
-Every payload is written to `raw` before any processing. FIT files are fsynced to the
-PVC before their DB row exists. Poll windows follow a state machine
-`in_progress → done | failed`; a failed window never stops the run.
+- Every payload lands in `raw` before processing.
+- Files are fsynced to the PVC before their DB row exists.
+- A failed window never stops the run.
 
 ```mermaid
 sequenceDiagram
-    participant SCH as scheduler CronJob
+    participant SCH as scheduler
     participant GC as Garmin Connect
-    participant RAW as raw.api_response
-    participant PVC as PVC (FIT)
-    participant TRF as transform CronJob
+    participant RAW as raw.*
+    participant PVC as PVC
+    participant TRF as transform
     participant CORE as core.*
 
-    SCH->>GC: login() (tokenstore, zero auth retries)
-    loop due windows [endpoint, day] (max 60/endpoint)
-        SCH->>RAW: begin_window → in_progress
-        SCH->>GC: client.fetch(endpoint) (rate limit + retry 429/5xx)
+    SCH->>GC: login (tokenstore, no auth retry)
+    loop due windows [endpoint, day], max 60/endpoint
+        SCH->>RAW: poll_window → in_progress
+        SCH->>GC: fetch (rate limit, retry 429/5xx)
         GC-->>SCH: payload
-        SCH->>RAW: INSERT payload + sha256 (raw-first, deduped)
-        SCH->>RAW: complete_window → done
+        SCH->>RAW: INSERT api_response + sha256 (deduped)
+        SCH->>RAW: poll_window → done | failed
     end
-    SCH->>PVC: archive ZIP .FIT/.TCX (fsync before DB row)
-    SCH->>RAW: INSERT raw.fit_file
+    SCH->>PVC: archive .FIT/.TCX ZIP, fsync
+    SCH->>RAW: INSERT fit_file
     Note over TRF: +15 min
-    TRF->>RAW: queue of unparsed fit_file rows (batch 200)
+    TRF->>RAW: unparsed fit_file rows (batch 200)
     TRF->>PVC: read file
-    TRF->>TRF: parse FIT/TCX + compute (NP, GAP, TSS, PMC…)
-    TRF->>CORE: store idempotent bundle, then set parsed_at
-    TRF->>CORE: wellness: merge per local day (source_sha256)
+    TRF->>TRF: parse + compute (NP, GAP, TSS…)
+    TRF->>CORE: idempotent bundle, then parsed_at
+    TRF->>CORE: wellness merged per local day
 ```
 
-Manual path: `POST /uploads` archives the file and inserts `raw.fit_file` with
-`garmin_activity_id = NULL`; the transform pass picks it up identically.
-`POST /activities/{id}/rpe` writes a canonical `tss` row with `method_code = 'rpe'`.
+Manual paths:
+- `POST /uploads`: archives the file, inserts `raw.fit_file` with `garmin_activity_id = NULL`.
+  Transform handles it like any other.
+- `POST /activities/{id}/rpe`: writes a `tss` metric with `method_code = 'rpe'`.
 
 ## 3. MCP server
 
-Read-only FastMCP server exposing exactly nine curated tools — no raw-SQL escape
-hatch. Requires `T0_MCP_BEARER_TOKEN` and `T0_MCP_POSTGRES_DSN`; refuses to start
-without them.
+Nine curated tools, no raw SQL. Won't start without `T0_MCP_BEARER_TOKEN` and
+`T0_MCP_POSTGRES_DSN`.
 
 ```mermaid
 flowchart LR
-    CC[Claude Code CLI<br/>MCP client]
+    CC[MCP client]
 
     subgraph MCP["Deployment t0-mcp"]
-        GW["Gateway API HTTPRoute<br/>(hostname mandatory)"]
+        GW["HTTPRoute<br/>(hostname required)"]
         SVC[ClusterIP Service]
-        BEAR[BearerTokenMiddleware<br/>compare_digest]
-        APP[FastMCP /mcp<br/>stateless HTTP, JSON]
-        subgraph Tools["9 curated tools"]
+        BEAR[Bearer check<br/>compare_digest]
+        APP[FastMCP /mcp<br/>stateless HTTP]
+        subgraph Tools["9 tools"]
             T1[get_pmc]
-            T2[list_activities / get_activity]
-            T8[get_laps]
-            T3[get_power_curve]
-            T4[get_wellness]
-            T5[get_coach_flags]
-            T6[get_ramp_risk]
-            T7[get_thresholds]
+            T2[list_activities<br/>get_activity]
+            T3[get_laps]
+            T4[get_power_curve]
+            T5[get_wellness]
+            T6[get_coach_flags]
+            T7[get_ramp_risk]
+            T8[get_thresholds]
         end
-        HAND[handlers<br/>asyncio.to_thread]
-        POOL[Reader<br/>ConnectionPool 1-4]
-        MET[Metrics :9090<br/>Prometheus]
-        H[("/healthz /readyz<br/>(no Bearer)")]
+        POOL[pool 1-4<br/>asyncio.to_thread]
+        MET[metrics :9090]
+        H["/healthz /readyz<br/>(no Bearer)"]
     end
 
-    PG[("PostgreSQL<br/>mart.* + core.threshold<br/>role t0_mcp_ro<br/>read_only=on, statement_timeout")]
+    PG[("PostgreSQL<br/>role t0_mcp_ro<br/>read_only, statement_timeout")]
 
-    CC -- "Authorization: Bearer" --> GW --> SVC --> BEAR
-    BEAR -- "401 on bad token" --> APP --> HAND --> POOL --> PG
+    CC -- "Bearer" --> GW --> SVC --> BEAR
+    BEAR -- "401 if bad" --> APP --> Tools --> POOL --> PG
     APP --> H
     MET -.-> APP
 ```
 
-Safety layers: static Bearer token (`hmac.compare_digest`), read-only DB role,
-`statement_timeout` baked into connections, hard `LIMIT` (default 500) injected into
-every query, `{"rows": [...], "truncated": bool}` envelope.
+Safety layers:
+- Static Bearer token, constant-time compare.
+- Read-only role, `statement_timeout` on every connection.
+- Hard `LIMIT` (default 500) on every query.
+- Envelope `{"rows": [...], "truncated": bool}`.
 
 ## 4. Data model and consumers
 
-Three schemas: `raw` (immutable API responses and files), `core` (normalized),
-`mart` (materialized training-load views). Grafana and MCP read the same marts.
+`raw` (immutable), `core` (normalized), `mart` (materialized views).
+Grafana and MCP read the same marts.
 
 ```mermaid
 flowchart LR
-    subgraph Sources["Sources"]
+    subgraph SRC["Sources"]
         G[Garmin API]
         U[Manual upload]
         R[Manual RPE]
     end
 
-    subgraph RAW["raw (immutable)"]
+    subgraph RAW["raw"]
         api[api_response]
         fit[fit_file]
         pw[poll_window]
-        ir[ingest_run]
     end
 
-    subgraph CORE["core (normalized)"]
-        act[activity, samples, laps]
+    subgraph CORE["core"]
+        act[activity + legs<br/>sample, activity_lap]
         am[activity_metric<br/>TSS + method]
-        dw[daily_wellness, sleep_session]
-        th[threshold]
+        hist[activity_hr_histogram<br/>activity_power_curve]
+        dw[daily_wellness<br/>sleep_session]
+        ref[athlete, threshold<br/>pmc_seed]
     end
 
-    subgraph MART["mart (materialized views)"]
-        pmc[pmc CTL/ATL/TSB]
+    subgraph MART["mart"]
+        al[activity_load]
         aw[activity_wide]
-        pcurve[power_curve_best]
-        wb[wellness_baseline]
+        dl[daily_load]
+        pmc[pmc<br/>CTL/ATL/TSB]
         rr[ramp_risk]
+        wb[wellness_baseline]
         cf[coach_flags]
+        pc[power_curve_best]
+        z[hr_zone_time<br/>power_pace_zone_time]
+        tri[triathlon_session]
     end
 
-    G --> api & fit & pw & ir
+    G --> api & fit & pw
     U --> fit
     R --> am
-    fit --> act
+    fit --> act & hist
     api --> dw
     act --> am
-    am & th --> pmc
-    act --> aw & pcurve
-    dw --> wb & rr & cf
+    act & am --> aw & dl & tri
+    act & hist & ref --> al & z
+    hist --> pc
+    dl & ref --> pmc
+    dl & pmc --> rr
+    dw --> wb
+    pmc & rr & wb & dw --> cf
 
-    pmc & aw & pcurve & wb & rr & cf --> GRAF[Grafana]
-    pmc & aw & pcurve & wb & rr & cf & th --> MCP[t0-mcp<br/>read-only]
+    MART --> GRAF[Grafana]
+    MART & ref --> MCPS[t0-mcp]
 ```
+
+Refresh order matters only along `daily_load → pmc → ramp_risk → coach_flags`
+and `wellness_baseline → coach_flags`. `ops refresh` handles it.
