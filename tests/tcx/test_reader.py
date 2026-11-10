@@ -132,9 +132,9 @@ _TCX_WITH_DUPLICATE_TS = (
 
 def test_decode_tcx_drops_trackpoint_with_duplicate_elapsed_s() -> None:
     # Trackpoints at t=0.0s and t=0.4s both round to elapsed_s=0 (map_trackpoint
-    # rounds to whole seconds; real Garmin TCX files carry sub-second precision,
-    # cf. activity 24313351581). Downstream regularization treats a duplicate as
-    # caller error, not a gap: the second trackpoint must be dropped, not raise.
+    # rounds to whole seconds; real Garmin TCX files carry sub-second precision).
+    # Downstream regularization treats a duplicate as caller error, not a gap:
+    # the second trackpoint must be dropped, not raise.
     result = decode_tcx(_TCX_WITH_DUPLICATE_TS, activity_id=1)
 
     assert [s.elapsed_s for s in result.samples] == [0, 1]

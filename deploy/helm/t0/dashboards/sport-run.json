@@ -120,7 +120,7 @@
     {
       "id": 3,
       "title": "Pace per session",
-      "description": "Average pace of every run in the period, against the threshold pace in effect on the session date -- core.threshold is historized and joined per session via validity @> local_date, so a threshold change shows as a step in the reference line instead of rewriting the whole history. Values are seconds per kilometre so the series stays a number the chart can scale, formatted as hh:mm:ss for reading -- 00:03:58 is 3:58 /km. Careful with the direction: a lower point is a FASTER run, so a dip is a good session and the curve moves opposite to the effort. Sessions without distance are excluded.",
+      "description": "Average pace of every run in the period, against the threshold pace in effect on the session date -- core.threshold is historized and joined per session via validity @> local_date, so a threshold change shows as a step in the reference line instead of rewriting the whole history. Values are seconds per kilometre so the series stays a number the chart can scale, formatted as hh:mm:ss for reading -- 00:04:30 is 4:30 /km. Careful with the direction: a lower point is a FASTER run, so a dip is a good session and the curve moves opposite to the effort. Sessions without distance are excluded.",
       "type": "timeseries",
       "datasource": "PostgreSQL",
       "gridPos": {
