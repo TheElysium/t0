@@ -1,117 +1,84 @@
 # t0
 
-Self-hosted Garmin Connect data ingestion and visualization pipeline for triathlon training
-tracking.
+Self-hosted pipeline: Garmin Connect → PostgreSQL → Grafana (+ optional MCP server).
+Built for triathlon training load tracking. Python 3.12, deployed with Helm.
 
-## Components
+## Data flow
 
-- **`t0-ingest`** (this repository) : Garmin Connect API polling, `.FIT` file parsing,
-  immutable calculations at ingestion, scheduler, manual `.FIT` upload endpoint.
-- **PostgreSQL** : three-schema storage -- `raw` (API responses and raw files, never modified),
-  `core` (normalized data), `mart` (materialized training load views).
-- **Grafana** : dashboards (PMC, power-duration curve, swimming, wellness, sleep).
-- **`t0-mcp`** (optional) : read-only MCP server giving an LLM access to the training marts
-  through 9 curated tools (PMC, activities, laps, power curve, wellness, coach signals, thresholds).
-- **Helm Chart** : deployment on a personal Kubernetes cluster (see security note below).
+1. `scheduler` polls Garmin Connect, archives raw payloads and `.FIT`/`.TCX` to a PVC.
+2. `transform` parses raw → `core` (normalized).
+3. `ops-refresh` refreshes the `mart.*` materialized views (TSS, PMC, power curve, wellness...).
+4. Grafana reads `mart.*`. `t0-mcp` exposes them read-only to an LLM.
 
-The repository produces code and manifests. **No agent or CI calls Garmin Connect and no agent
-or CI deploys to the cluster** : the athlete deploys.
+Schemas: `raw` (immutable), `core` (normalized), `mart` (views).
 
-## Package structure
+## Layout
 
-```
-src/t0/
-|-- db/          # migrations and PostgreSQL access
-|-- garmin/      # Garmin Connect client (persistent session, backoff, rate limiting)
-|-- fit/         # .FIT file parsing (garmin-fit-sdk)
-|-- compute/     # immutable calculations (NP, GAP, power-duration curve, ...) and load (TSS, PMC)
-|-- scheduler/   # scheduling (daily polling, backfill, view refresh)
-\-- api/         # manual .FIT file upload endpoint
-```
+| Path | Role |
+| --- | --- |
+| `src/t0/garmin` | Garmin Connect client (session reuse, backoff) |
+| `src/t0/scheduler` | Poller, raw-first |
+| `src/t0/fit`, `src/t0/tcx` | File parsers |
+| `src/t0/transform` | raw → core |
+| `src/t0/compute`, `src/t0/load` | NP, GAP, TSS, PMC, power curve |
+| `src/t0/ops` | CLI: refresh, reconcile, backfill-status, health, seed-pmc |
+| `src/t0/api` | Manual `.FIT` upload + RPE (FastAPI) |
+| `src/t0/mcp` | Read-only MCP server over `mart.*` |
+| `src/t0/db` | Forward-only migration runner |
+| `migrations/` | Numbered SQL, never edit an applied one |
+| `deploy/helm/t0` | Helm chart |
+| `docs/RUNBOOK.md` | Operations |
+| `docs/ARCHITECTURE.md` | Design |
 
-## What runs on the cluster
+## Cluster workloads
 
-The chart deploys, in addition to PostgreSQL and Grafana, five periodic workloads :
-
-| Object | Values | Role |
+| Object | Default schedule | Role |
 | --- | --- | --- |
-| CronJob `scheduler` | `scheduler.*` -- default `0 10,15,22 * * *` | **Garmin polling.** Also catches up history, pass by pass. Archives .FIT/.TCX activity files on PVC (can be disabled via `scheduler.activityFiles: false`, which passes `--no-activity-files`). |
-| CronJob `ops-refresh` | `opsRefresh.*` -- default `30 10,15,22 * * *` | Refreshes the six materialized views `mart.*`. |
-| CronJob `ops-backfill-status` | `opsBackfill.*` -- default `0 6 * * *`, enabled | Read-only report on backfill progress. Does not poll anything. |
-| CronJob `ops-reconcile` | `opsReconcile.*` -- default `0 7 * * *`, enabled | Compares `raw.fit_file` inventory to actual PVC content. Read-only both sides, no deletions. Only fails on rows without files (orphaned files are harmless). |
-| CronJob `postgresql-backup` | `backup.*` | `pg_dump --format=custom` to PVC. |
-| Deployment `ingest` | `ingest.*` | Serves the manual `.FIT` upload endpoint. Does not poll Garmin. |
+| CronJob `scheduler` | `0 10,15,22 * * *` | Polls Garmin, backfills history |
+| CronJob `transform` | `15 10,15,22 * * *` | raw → core |
+| CronJob `ops-refresh` | `30 10,15,22 * * *` | Refreshes `mart.*` |
+| CronJob `ops-backfill-status` | `0 6 * * *` | Backfill progress report (read-only) |
+| CronJob `ops-reconcile` | `0 7 * * *` | Checks DB inventory vs PVC files (read-only) |
+| CronJob `postgresql-backup` | `0 3 * * 0` | `pg_dump` to PVC |
+| Job `migrate` | Helm hook | Applies migrations |
+| Deployment `ingest` | — | Manual upload endpoint |
+| Deployment `mcp` | — | MCP server (optional) |
 
-Operations procedures detail : [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+Schedules and toggles: `deploy/helm/t0/values.yaml`.
 
-## Development
-
-Prerequisites : Python 3.12 (exact version, see `requires-python`).
+## Develop
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # ou .venv\Scripts\activate sous Windows
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-```
 
-Checks, in the order CI executes them :
-
-```bash
+# CI checks, in order
 ruff check .
 ruff format --check .
 mypy src tests
 pytest
 ```
 
-## Configuration
+## Configure
 
-Settings are read from environment via `t0.settings.Settings` (pydantic-settings).
-See `.env.example` for the list of expected variables -- this file does not and must never
-contain real values.
+- Env vars, read by `t0.settings.get_settings()`. List: `.env.example` (no real values, ever).
+- No defaults for required fields: missing config fails at startup.
+- Secrets are `SecretStr`; validation errors only name the variables, never the values.
+- The Garmin credentials Secret is created on the cluster by hand. Never commit it.
 
-No required field has a default value : the service refuses to start rather than fall back on
-unintended implicit behavior.
+**`GARMINTOKENS` must point to a persistent volume.** The image sets `/data/garmin-tokens`.
+Without persistence, every restart does a full Garmin SSO login: that's how accounts get locked.
 
-Sensitive values (Garmin credentials **and** PostgreSQL DSN, which carries the database password)
-are `SecretStr` : their `repr`, their `str`, and their JSON serialization are masked.
-`get_settings()` is the only supported entry point -- it converts pydantic validation errors to
-`SettingsError` which cites only *names* of variables. Without this conversion, pydantic copies
-the entire input dictionary, Garmin password in plain text, into the exception message, hence
-into container logs on first failed startup. Two tests lock down this property (`tests/test_settings.py`).
-
-### `GARMINTOKENS` : must be set, risk of account lockout otherwise
-
-`garminconnect` 0.3.2 reads the **`GARMINTOKENS`** variable as-is (`os.getenv("GARMINTOKENS")`,
-without the `T0_` prefix) and **has no default path**. If it is not set, or if it points
-to anything other than a **persistent volume**, the session is never reused : each container
-restart performs a full SSO authentication against Garmin. Repeated, this sequence is the known
-path to account lockout.
-
-The Docker image sets it to `/data/garmin-tokens` -- this path **must** be mounted on a
-persistent volume (PVC), otherwise persistence is illusory. On the code side, the corresponding
-field is `Settings.garmin_tokens_path`, declared with `validation_alias="GARMINTOKENS"` precisely
-to share the name expected by the library.
-
-## Security -- Garmin Secret
-
-> **The Kubernetes Secret containing Garmin Connect credentials is never committed to this
-> repository.** It is created directly on the cluster, by the athlete, outside any versioned
-> manifest (the Helm chart only *references* it by name). Treat it with the same care as a
-> root password.
-
-## Docker image
-
-Multi-stage `Dockerfile` : wheel build in an image with build tools, execution in a final image
-without compiler, under a non-root user, with `HEALTHCHECK`.
-
-The `.dockerignore` restricts the build context : personal data (`Activities.csv`,
-`metrics&wellness_1year/`, `*.fit`), `.env` and caches never enter it. This guarantees that no
-personal data can end up in an image published to GHCR, even if an overly broad `COPY` is
-introduced later.
+## Build
 
 ```bash
 docker build -t t0-ingest .
 ```
 
-The image is published to GHCR by the `.github/workflows/publish-image.yml` workflow, triggered on
-push of a tag `vX.Y.Z`.
+Pushing a `vX.Y.Z` tag publishes the image to GHCR (`.github/workflows/publish-image.yml`).
+`.dockerignore` keeps personal data and `.env` out of the image.
+
+## Rules
+
+Nothing in this repo or CI calls Garmin or deploys. The operator deploys.
+Contributor rules: `AGENTS.md`.
